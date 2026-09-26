@@ -1,0 +1,4 @@
+# MSRV-aware dependency resolution so the SBF toolchain (older rustc) can
+# build the same lockfile. Checklist #30: pinned, reproducible.
+[resolver]
+incompatible-rust-versions = "fallback"

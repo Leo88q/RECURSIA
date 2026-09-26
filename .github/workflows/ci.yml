@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hygiene:
+    name: Supply-chain & unicode hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Invisible unicode scan (checklist #76)
+        run: node scripts/check-unicode.mjs
+      - name: npm ci (lockfile, no install scripts — checklist #50/#66)
+        run: npm ci --ignore-scripts
+      - name: npm audit (high+ fails)
+        run: npm audit --audit-level=high
+
+  rust:
+    name: Program unit tests + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Resolve lockfile (MSRV-aware)
+        run: cargo generate-lockfile && cp Cargo.lock /tmp/Cargo.lock
+      - name: fmt
+        run: cargo fmt --all -- --check
+        continue-on-error: true
+      - name: clippy
+        run: cargo clippy -p recursia --all-targets -- -D warnings -A clippy::result_large_err -A unexpected_cfgs
+      - name: unit tests (engine, math, cross-impl vectors)
+        run: cargo test -p recursia -- --nocapture
+      - uses: actions/upload-artifact@v4
+        with: { name: cargo-lock, path: /tmp/Cargo.lock }
+
+  anchor:
+    name: Anchor build (SBF) + IDL
+    runs-on: ubuntu-latest
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with: { toolchain: 1.86.0 }
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Solana (Agave) CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v2.1.21/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+      - name: Install Anchor CLI 0.31.1
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor --tag v0.31.1 anchor-cli --locked --force
+      - name: anchor build
+        run: |
+          solana-keygen new --no-bip39-passphrase -s -o ~/.config/solana/id.json
+          anchor build
+          ls -la target/deploy target/idl
+      - name: IDL ↔ SDK account-order check
+        run: |
+          npm ci --ignore-scripts
+          npx -w packages/sdk tsx scripts/check-idl.ts ../../target/idl/recursia.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recursia-build
+          path: |
+            target/idl/recursia.json
+            target/types/recursia.ts
+            target/deploy/recursia.so
+
+  typescript:
+    name: SDK, keeper, client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --ignore-scripts
+      - name: SDK typecheck + tests (incl. model invariants & AI agents)
+        run: npm -w packages/sdk run build && npm -w packages/sdk test
+      - name: Economic simulation (checklist #54/#58)
+        run: npm run econ -- --quick
+      - name: Keeper tests
+        run: npm -w keeper test
+      - name: Client build
+        run: npm -w app run build

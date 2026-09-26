@@ -1,0 +1,13 @@
+target/
+node_modules/
+dist/
+.anchor/
+test-ledger/
+*.log
+.env
+.env.*
+!.env.example
+# never commit keys (checklist #43/#65)
+keys/
+*-keypair.json
+id.json
