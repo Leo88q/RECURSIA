@@ -75,7 +75,7 @@ export class RecursiaIx {
       ix: this.ix("create_root_world", [
         S(architect, true), W(p.config()), W(this.mint), W(module), W(world), W(p.worldVault(world)),
         W(ata(architect, this.mint)), W(p.treasury()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
-      ], (w) => w.u16(feeBps).bytes(encodeName(name)).u64(initialEnergy)),
+      ], (w) => w.u8(hostTerritory).u16(feeBps).bytes(encodeName(name)).u64(initialEnergy)),
     };
   }
 
@@ -87,7 +87,7 @@ export class RecursiaIx {
       ix: this.ix("create_child_world", [
         S(architect, true), W(p.config()), W(this.mint), W(module), W(hostWorld), W(p.territory(hostWorld, hostTerritory)),
         W(world), W(p.worldVault(world)), W(ata(architect, this.mint)), W(p.treasury()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
-      ], (w) => w.u16(feeBps).bytes(encodeName(name)).u64(initialEnergy)),
+      ], (w) => w.u8(hostTerritory).u16(feeBps).bytes(encodeName(name)).u64(initialEnergy)),
     };
   }
 

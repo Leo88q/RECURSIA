@@ -179,6 +179,7 @@ fn pay_creation_fee<'info>(
 /// that lives *inside* their 8x8 block. It can only tick while that block has
 /// living cells, and pays a host tax that flows up to the block's holder.
 #[derive(Accounts)]
+#[instruction(host_index: u8)]
 pub struct CreateChildWorld<'info> {
     #[account(mut)]
     pub architect: Signer<'info>,
@@ -192,14 +193,14 @@ pub struct CreateChildWorld<'info> {
     pub host_world: Box<Account<'info, World>>,
     #[account(
         mut,
-        seeds = [SEED_TERRITORY, host_world.key().as_ref(), &[host_territory.index]], bump = host_territory.bump,
+        seeds = [SEED_TERRITORY, host_world.key().as_ref(), &[host_index]], bump = host_territory.bump,
         constraint = host_territory.holder == architect.key() @ RecursiaError::NotHolder,
         constraint = host_territory.child_world == Pubkey::default() @ RecursiaError::AlreadyHeld,
     )]
     pub host_territory: Box<Account<'info, Territory>>,
     #[account(
         init, payer = architect, space = 8 + World::INIT_SPACE,
-        seeds = [SEED_WORLD, host_world.key().as_ref(), &(host_territory.index as u64).to_le_bytes()], bump
+        seeds = [SEED_WORLD, host_world.key().as_ref(), &(host_index as u64).to_le_bytes()], bump
     )]
     pub world: Box<Account<'info, World>>,
     #[account(
@@ -217,6 +218,7 @@ pub struct CreateChildWorld<'info> {
 
 pub fn create_child_world(
     ctx: Context<CreateChildWorld>,
+    host_index: u8,
     architect_fee_bps: u16,
     name: [u8; 32],
     initial_energy: u64,
@@ -235,6 +237,7 @@ pub fn create_child_world(
         let hw = &mut ctx.accounts.host_world;
         let ht = &mut ctx.accounts.host_territory;
         require_keys_eq!(ht.world, hw.key(), RecursiaError::Mismatch);
+        require!(ht.index == host_index, RecursiaError::Mismatch);
         if let TaxOutcome::Foreclose = accrue_tax(hw, ht, &p, slot)? {
             return err!(RecursiaError::DepositTooSmall);
         }

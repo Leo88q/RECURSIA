@@ -76,11 +76,12 @@ pub mod recursia {
     }
     pub fn create_child_world(
         ctx: Context<CreateChildWorld>,
+        host_index: u8,
         architect_fee_bps: u16,
         name: [u8; 32],
         initial_energy: u64,
     ) -> Result<()> {
-        world::create_child_world(ctx, architect_fee_bps, name, initial_energy)
+        world::create_child_world(ctx, host_index, architect_fee_bps, name, initial_energy)
     }
     pub fn fund_world(ctx: Context<FundWorld>, amount: u64) -> Result<()> {
         world::fund_world(ctx, amount)
