@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { GLIDER, bigbang, emptyGrid, getCell, population, step, stepN, territoryCounts, writeBlock, orBlock } from "../src/sim.js";
+import { GLIDER, bigbang, emptyGrid, getCell, population, step, stepN, stepNQ, territoryCounts, writeBlock, orBlock } from "../src/sim.js";
 import { PHYSICS_PRESETS } from "../src/constants.js";
 import { Rng } from "../src/agents.js";
 
@@ -51,7 +51,9 @@ describe("sim engine", () => {
     const v = JSON.parse(readFileSync(new URL("../../../tests/vectors/sim.json", import.meta.url), "utf8"));
     for (const c of v.cases) {
       const input = BigUint64Array.from(c.input.map((h: string) => BigInt("0x" + h)));
-      const out = stepN(input, c.birth, c.survive, c.gens);
+      const out = c.amp
+        ? stepNQ(input, c.birth, c.survive, { qBirth: c.qBirth, qSurvive: c.qSurvive, amp: c.amp, seed: c.seed.map((h: string) => BigInt("0x" + h)) }, BigInt(c.gen0), c.gens)
+        : stepN(input, c.birth, c.survive, c.gens);
       expect(Array.from(out, (x) => x.toString(16))).toEqual(c.output);
     }
   });

@@ -3,7 +3,7 @@
 // On-chain they act only through bounded AgentPermits (#75).
 import { ONE, TERRITORIES } from "./constants.js";
 import { epochTax } from "./economy.js";
-import { GameModel, type MWorld } from "./model.js";
+import { GameModel, isQuantum, type MWorld } from "./model.js";
 import { blockPattern, PATTERNS, scoreBlockPattern } from "./sim.js";
 
 export type Personality = "gardener" | "expansionist" | "speculator" | "demiurge";
@@ -20,6 +20,7 @@ export class Rng {
   next() { let x = this.s; x ^= x << 13; x ^= x >>> 17; x ^= x << 5; this.s = x >>> 0; return this.s / 0x100000000; }
   int(n: number) { return Math.floor(this.next() * n); }
   pick<T>(a: readonly T[]) { return a[this.int(a.length)]; }
+  u32() { this.next(); return this.s; }
   big64() { return (BigInt(Math.floor(this.next() * 2 ** 32)) << 32n) | BigInt(Math.floor(this.next() * 2 ** 32)); }
 }
 
@@ -28,14 +29,29 @@ export function mutatePattern(p: bigint, rng: Rng, flips = 3): bigint {
   return p;
 }
 
-/** Score a pattern: live cells inside territory `idx` after `gens` generations. */
-export function evaluatePattern(world: MWorld, idx: number, pattern: bigint, gens = 8): number {
-  return scoreBlockPattern(world.grid, world.birth, world.survive, idx, pattern, gens, 2);
+/**
+ * Score a pattern: live cells inside territory `idx` after `gens` generations.
+ * Quantum worlds cannot be simulated exactly before the entropy exists, so the
+ * score is a Monte-Carlo mean over `samples` hypothetical futures — AI agents
+ * face the same uncertainty as humans.
+ */
+export function evaluatePattern(world: MWorld, idx: number, pattern: bigint, gens = 8, rng?: Rng, samples = 3): number {
+  if (!isQuantum(world)) return scoreBlockPattern(world.grid, world.birth, world.survive, idx, pattern, gens, 2);
+  const r = rng ?? new Rng(0x5eed);
+  let total = 0;
+  const q = { qBirth: world.qBirth, qSurvive: world.qSurvive, amp: world.qAmp, seed: [0n, 0n, 0n, 0n] };
+  const sampler = () => r.u32();
+  for (let k = 0; k < samples; k++) total += scoreBlockPattern(world.grid, world.birth, world.survive, idx, pattern, gens, 2, q, 0n, sampler);
+  return total / samples;
 }
+
+interface QuantumSecret { world: string; index: number; a: bigint; b: bigint; weight: number; salt: Uint8Array }
 
 export class AIAgent {
   genome: AgentGenome;
   readonly rng: Rng;
+  /** Preimages of this agent's open superpositions (off-chain memory). */
+  readonly secrets = new Map<string, QuantumSecret>();
   /**
    * @param owner when set, the agent acts through an AgentPermit on behalf of
    *   `owner`: it spends only the permit vault, territories go to the owner.
@@ -119,10 +135,22 @@ export class AIAgent {
       const candidates = [...this.genome.library];
       candidates.push(mutatePattern(this.rng.pick(this.genome.library), this.rng));
       candidates.push(mutatePattern(blockPattern(w.grid, i) | this.rng.pick(this.genome.library), this.rng, 2));
-      let bestP = candidates[0], bestS = -1;
-      for (const c of candidates) {
-        const s = evaluatePattern(w, i, c, 8);
-        if (s > bestS) { bestS = s; bestP = c; }
+      const scored = candidates.map((c) => ({ c, s: evaluatePattern(w, i, c, 8, this.rng) })).sort((x, y) => y.s - x.s);
+      const bestP = scored[0].c, bestS = scored[0].s;
+      // 3b) quantum hedge: in quantum worlds, commit a superposition of the two
+      //     best candidates instead of a plain plant (own-wallet agents only).
+      if (me && isQuantum(w) && scored.length > 1 && bestS > w.alive[i] * 4 && this.rng.next() < this.quantumAppetite()
+        && m.canQuantumCommit(this.id, w.id, i) === null) {
+        const a = bestP, b = scored[1].c;
+        const weight = Math.max(500, Math.min(9_500, Math.round((10_000 * scored[0].s) / (scored[0].s + scored[1].s + 1e-9))));
+        const salt = new Uint8Array(32);
+        for (let k = 0; k < 32; k++) salt[k] = this.rng.int(256);
+        this.try(() => {
+          m.quantumCommit(this.id, w.id, i, m.commitFor(this.id, w.id, i, a, b, weight, salt));
+          this.secrets.set(`${w.id}:${i}`, { world: w.id, index: i, a, b, weight, salt });
+        }, log);
+        planted++;
+        continue;
       }
       if (bestS > w.alive[i] * 4) {
         this.try(() => m.plant(this.id, w.id, i, bestP, opts), log);
@@ -134,6 +162,10 @@ export class AIAgent {
         }
       }
     }
+
+    // 3c) quantum settlement: reveal own measured states; act as an observer
+    //     (bounty) for anybody's superposition that is ready to be measured.
+    if (me) this.settleQuantum(m, log);
 
     // 4) demiurge spawns universes in thriving territories
     if (me && this.personality === "demiurge" && me.wallet > m.params.worldCreateFee * 3n) {
@@ -153,6 +185,25 @@ export class AIAgent {
       if (m.canExecuteRebellion(w)) this.try(() => m.executeRebellion(w.id), log);
     }
     return log;
+  }
+
+  private quantumAppetite() {
+    return this.personality === "speculator" ? 0.6 : this.personality === "demiurge" ? 0.45 : this.personality === "expansionist" ? 0.3 : 0.2;
+  }
+
+  private settleQuantum(m: GameModel, log: string[]) {
+    for (const [key, sp] of m.superpositions) {
+      if (m.canObserve(sp.world, sp.index) === null && this.rng.next() < 0.5) this.try(() => m.quantumObserve(this.id, sp.world, sp.index), log);
+      const mine = this.secrets.get(key);
+      if (mine && sp.owner === this.id && sp.observed) {
+        // Rational: the stake refund dominates any single-block outcome, so reveal.
+        this.try(() => m.quantumCollapse(this.id, sp.world, sp.index, mine.a, mine.b, mine.weight, mine.salt), log);
+        this.secrets.delete(key);
+      } else if (m.canDecohere(sp.world, sp.index) === null) {
+        this.try(() => m.quantumDecohere(this.id, sp.world, sp.index), log);
+      }
+    }
+    for (const k of [...this.secrets.keys()]) if (!m.superpositions.has(k)) this.secrets.delete(k);
   }
 
   private try(f: () => unknown, log: string[]) {

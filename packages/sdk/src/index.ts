@@ -6,3 +6,4 @@ export * from "./layout.js";
 export * from "./instructions.js";
 export * from "./model.js";
 export * from "./agents.js";
+export * from "./quantum.js";

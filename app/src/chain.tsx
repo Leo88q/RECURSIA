@@ -7,8 +7,9 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { ComputeBudgetProgram, PublicKey, Transaction, type TransactionInstruction } from "@solana/web3.js";
 import bs58 from "bs58";
 import {
-  PROGRAM_ID, RecursiaIx, TERRITORIES, accountDiscriminator, ata, decodeConfig, decodeTerritory, decodeWorld,
-  epochTax, fmt, ruleString, type ConfigAccount, type MWorld, type TerritoryAccount, type WorldAccount,
+  PATTERNS, PROGRAM_ID, RecursiaIx, TERRITORIES, accountDiscriminator, ata, collapse, commitment, decodeConfig, decodeSuperposition,
+  decodeTerritory, decodeWorld, epochTax, fmt, randomSalt, ruleString,
+  type ConfigAccount, type MWorld, type SuperpositionAccount, type TerritoryAccount, type WorldAccount,
 } from "@recursia/sdk";
 import { WorldCanvas } from "./WorldCanvas";
 
@@ -36,7 +37,33 @@ function toModel(key: PublicKey, w: WorldAccount, terr: Map<number, TerritoryAcc
     scoresPrev: w.scoresPrev, prevClaimed: w.prevClaimed, resonance: w.resonance, children: [], rebellionId: w.rebellionId,
     rebellionVotes: w.rebellionVotes, rebellionDeadline: Number(w.rebellionDeadline), lastRebellionSlot: Number(w.lastRebellionSlot),
     liberated: w.liberated, totalBurned: w.totalBurned, history: [],
+    key: key.toBytes(), qBirth: w.qBirth, qSurvive: w.qSurvive, qAmp: w.qAmp,
+    entropy: w.entropy.some((b) => b !== 0) ? w.entropy : null, quantumEscrow: w.quantumEscrow, superpositions: w.superpositions,
   };
+}
+
+// ---- superposition secrets (preimage never leaves the browser) -----------
+// Stored in localStorage BEFORE the commit is signed, so a crash between
+// signing and saving cannot lose it. Losing it = the stake decoheres (burned).
+interface StoredSecret { a: string; b: string; w: number; salt: string }
+const secretKey = (world: PublicKey, idx: number, owner: PublicKey) => `recursia:psi:${world.toBase58()}:${idx}:${owner.toBase58()}`;
+const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+const fromHex = (h: string) => Uint8Array.from(h.match(/../g) ?? [], (x) => parseInt(x, 16));
+function loadSecret(world: PublicKey, idx: number, owner: PublicKey): { a: bigint; b: bigint; w: number; salt: Uint8Array } | null {
+  try {
+    const s = JSON.parse(localStorage.getItem(secretKey(world, idx, owner)) ?? "null") as StoredSecret | null;
+    return s ? { a: BigInt(s.a), b: BigInt(s.b), w: s.w, salt: fromHex(s.salt) } : null;
+  } catch { return null; }
+}
+function saveSecret(world: PublicKey, idx: number, owner: PublicKey, a: bigint, b: bigint, w: number, salt: Uint8Array) {
+  const v: StoredSecret = { a: a.toString(), b: b.toString(), w, salt: toHex(salt) };
+  localStorage.setItem(secretKey(world, idx, owner), JSON.stringify(v));
+}
+function exportSecret(world: PublicKey, idx: number, owner: PublicKey) {
+  const raw = localStorage.getItem(secretKey(world, idx, owner));
+  if (!raw) return;
+  const url = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
+  const a = document.createElement("a"); a.href = url; a.download = `recursia-psi-${idx}.json`; a.click(); URL.revokeObjectURL(url);
 }
 
 interface Preview { title: string; lines: string[]; ixs: TransactionInstruction[]; logs?: string[]; err?: string; units?: number }
@@ -52,6 +79,7 @@ export function ChainView() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [status, setStatus] = useState<string>("");
   const [frame, setFrame] = useState(0);
+  const [sp, setSp] = useState<SuperpositionAccount | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -80,6 +108,13 @@ export function ChainView() {
   useEffect(() => { load(); const i = setInterval(load, 8000); return () => clearInterval(i); }, [load]);
   useEffect(() => { if (current) loadTerritories(current); }, [current, loadTerritories, worlds]);
   useEffect(() => { const i = setInterval(() => setFrame((f) => f + 1), 120); return () => clearInterval(i); }, []);
+  useEffect(() => {
+    setSp(null);
+    if (!current || selected === null) return;
+    connection.getAccountInfo(rx.pda.superposition(current, selected)).then((info) => {
+      if (info && info.owner.equals(programId)) { try { setSp(decodeSuperposition(info.data)); } catch { /* layout mismatch */ } }
+    }).catch(() => { /* */ });
+  }, [connection, current, selected, worlds]);
 
   const cur = worlds.find((w) => current && w.key.equals(current));
   const model = useMemo(() => (cur ? toModel(cur.key, cur.acc, territories) : null), [cur, territories]);
@@ -128,7 +163,7 @@ export function ChainView() {
         <ul className="tree">{worlds.map((w) => (
           <li key={w.key.toBase58()} style={{ paddingLeft: w.acc.depth * 12 }}>
             <button className={`tree-node ${current && w.key.equals(current) ? "active" : ""}`} onClick={() => { setCurrent(w.key); setSelected(null); }}>
-              <span className="tree-name">{w.acc.depth ? "⧉" : "◈"} {w.acc.name}</span><span className="tree-pop">{w.acc.territoryAlive.reduce((a, b) => a + b, 0)}</span>
+              <span className="tree-name">{w.acc.depth ? "⧉" : "◈"} {w.acc.name}{w.acc.qAmp > 0 ? " ⚛" : ""}</span><span className="tree-pop">{w.acc.territoryAlive.reduce((a, b) => a + b, 0)}</span>
             </button>
           </li>))}
         </ul>
@@ -139,12 +174,12 @@ export function ChainView() {
         {config.pending.kind !== "None" && <div className="card danger-card small">Ожидает таймлока: {config.pending.kind} · ETA {new Date(Number(config.pendingEta) * 1000).toLocaleString("ru-RU")}</div>}
       </aside>
       <main className="center">
-        {model ? <WorldCanvas world={model} selected={selected} onSelect={setSelected} onDescend={(id) => setCurrent(new PublicKey(id))} frame={frame} zoomFrom={null} /> : <div className="chain-empty">Миров пока нет</div>}
+        {model ? <WorldCanvas world={model} selected={selected} onSelect={setSelected} onDescend={(id) => setCurrent(new PublicKey(id))} frame={frame} zoomFrom={null} superposed={sp && selected !== null ? [selected] : []} /> : <div className="chain-empty">Миров пока нет</div>}
         {cur && (
           <div className="row-wrap">
             <button className="btn" onClick={() => propose("Тик мира", [`Мир: ${cur.acc.name}`, `Стоимость ${fmt(p.tickCost)} RCR из энергии мира`, `Ваша награда кранкера: ${p.crankerBps / 100}%`],
               [rx.createAtaIdempotent(me!, me!), rx.tick(me!, cur.key, cur.acc.module, cur.acc.parent.equals(PublicKey.default) ? null : cur.acc.parent)])} disabled={!me}>Тикнуть мир (+награда)</button>
-            <span className="muted small">{ruleString(cur.acc.birth, cur.acc.survive)} · поколение {cur.acc.generation.toString()} · энергия {fmt(cur.acc.energy)} RCR</span>
+            <span className="muted small">{ruleString(cur.acc.birth, cur.acc.survive, cur.acc.qBirth, cur.acc.qSurvive, cur.acc.qAmp)} · поколение {cur.acc.generation.toString()} · энергия {fmt(cur.acc.energy)} RCR</span>
           </div>
         )}
         {status && <div className="toast-inline">{status}</div>}
@@ -174,6 +209,34 @@ export function ChainView() {
                 <button className="btn" onClick={() => propose("Сбор наград", [`${fmt(model.pending[selected])} RCR → ваш баланс к выводу`], [rx.collect(me, cur.key, selected)])}>Собрать</button>
               </>
             )}
+            {me && t.holder === me.toBase58() && !sp && (
+              <button className="btn portal" onClick={() => {
+                const a = PATTERNS.glider, b = PATTERNS.acorn, w = 5_000, salt = randomSalt();
+                saveSecret(cur.key, selected, me, a, b, w, salt);
+                const c = commitment(a, b, w, salt, me.toBytes(), cur.key.toBytes(), selected);
+                propose("Квантовая суперпозиция", [`Клетка #${selected}: |ψ⟩ = √½·|глайдер⟩ + √½·|жёлудь⟩`, `Сжигается ${fmt(p.plantCost)} RCR, залог ${fmt(p.plantCost * 4n)} RCR (вернётся при раскрытии)`,
+                  "Секрет сохранён в этом браузере — не очищайте хранилище до коллапса"], [rx.quantumCommit(me, cur.key, selected, c)]);
+              }}>⚛ Суперпозиция</button>
+            )}
+            {sp && (() => {
+              const secret = me && sp.owner.equals(me) ? loadSecret(cur.key, selected, me) : null;
+              const pv = sp.observed && secret ? collapse(sp.entropy, sp.commitment, secret.w) : null;
+              return (
+                <div className="card quantum-card">
+                  <div className="card-title">ψ Суперпозиция</div>
+                  <div className="small">{sp.observed ? `Наблюдали в слоте ${sp.observedSlot}; раскрыть до ${sp.revealDeadline}` : `Ждёт энтропии слота ${sp.targetSlot}`} · залог {fmt(sp.stake)} RCR</div>
+                  {pv && <div className="small">Исход: ветвь <b>{pv.branchA ? "A" : "B"}</b>{pv.tunnel ? " + туннелирование" : ""}</div>}
+                  {me && !sp.observed && <button className="btn" onClick={() => propose("Наблюдение", ["Фиксирует энтропию слота для этой суперпозиции", `Награда наблюдателя: ${fmt(sp.stake / 20n)} RCR`],
+                    [rx.createAtaIdempotent(me, me), rx.quantumObserve(me, cur.key, selected)])}>👁 Наблюдать</button>}
+                  {me && secret && sp.observed && <button className="btn portal" onClick={() => propose("Коллапс волновой функции", [`Раскрытие коммита клетки #${selected}`, `Возврат залога ${fmt(sp.stake)} RCR`],
+                    [rx.quantumCollapse(me, cur.key, selected, secret.a, secret.b, secret.w, secret.salt, sp.world2.equals(PublicKey.default) ? null : { world: sp.world2, index: sp.index2 })])}>⚛ Коллапс</button>}
+                  {me && secret && <button className="btn" onClick={() => exportSecret(cur.key, selected, me)}>Скачать секрет</button>}
+                  {me && sp.owner.equals(me) && !secret && <div className="small danger-text">Секрет не найден в этом браузере — импортируйте файл секрета, иначе залог сгорит.</div>}
+                  {me && <button className="btn" onClick={() => propose("Декогеренция", ["Доступно только после окна раскрытия", `Награда: ${fmt(sp.stake / 20n)} RCR, остальное сжигается`],
+                    [rx.createAtaIdempotent(me, me), rx.quantumDecohere(me, cur.key, selected, sp.owner)])}>Декогеренция</button>}
+                </div>
+              );
+            })()}
             {me && <button className="btn" onClick={() => propose("Создание RCR-аккаунта", ["Идемпотентное создание вашего токен-аккаунта RCR", `ATA: ${ata(me, rx.pda.mint()).toBase58().slice(0, 8)}…`], [rx.createAtaIdempotent(me, me)])}>Создать RCR-аккаунт</button>}
           </div>
         )}

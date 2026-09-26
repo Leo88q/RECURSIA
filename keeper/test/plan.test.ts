@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { DEFAULT_PARAMS, PROGRAM_ID, RecursiaIx, TERRITORIES, type ConfigAccount, type TerritoryAccount, type WorldAccount } from "@recursia/sdk";
+import { DEFAULT_PARAMS, PROGRAM_ID, RecursiaIx, TERRITORIES, type ConfigAccount, type SuperpositionAccount, type TerritoryAccount, type WorldAccount } from "@recursia/sdk";
 import { claimable, plan, type Snapshot } from "../src/plan.js";
 import { toInstruction } from "../src/ix.js";
 
@@ -19,7 +19,8 @@ const world = (o: Partial<WorldAccount> = {}): WorldAccount => ({
   architectAccrued: 0n, territoryAlive: new Array(TERRITORIES).fill(1), territoryPending: new Array(TERRITORIES).fill(0n),
   ownedMask: 0n, epochId: 5n, burnCur: 0n, scoresCur: new Array(TERRITORIES).fill(0), prevEpochId: 4n, burnPrev: 0n,
   scoresPrev: new Array(TERRITORIES).fill(0), prevClaimed: true, resonance: 0, childCount: 0, rebellionId: 0,
-  rebellionVotes: 0, rebellionDeadline: 0n, lastRebellionSlot: 0n, liberated: false, totalBurned: 0n, ...o,
+  rebellionVotes: 0, rebellionDeadline: 0n, lastRebellionSlot: 0n, liberated: false, totalBurned: 0n,
+  qBirth: 0, qSurvive: 0, qAmp: 0, entropy: new Uint8Array(32), quantumEscrow: 0n, superpositions: 0, ...o,
 });
 const terr = (w: PublicKey, o: Partial<TerritoryAccount> = {}): TerritoryAccount => ({
   world: w, index: 3, holder: key(), price: 100n * 1_000_000n, deposit: 10n * 1_000_000n, lastTaxSlot: 1_000_000n,
@@ -68,7 +69,7 @@ describe("keeper planner", () => {
     const child = { key: key(), acc: world({ depth: 1, parent: host.key, parentTerritory: 8, lastTickSlot: 100n }) };
     const broke = { key: key(), acc: world({ energy: 1n, lastTickSlot: 2n }) };
     const early = { key: key(), acc: world({ lastTickSlot: 1_000_050n }) };
-    const acts = plan(snap({ worlds: [host, dormant, child, broke, early] }), { maxTicks: 2, maxSettles: 5, minTicksOfEnergy: 1n });
+    const acts = plan(snap({ worlds: [host, dormant, child, broke, early] }), { maxTicks: 2, maxSettles: 5, minTicksOfEnergy: 1n, maxQuantum: 16 });
     expect(acts.map((a) => a.kind === "tick" && a.world)).toEqual([child.key, host.key]);
     expect(acts[0]).toMatchObject({ host: host.key });
     expect(acts[1]).toMatchObject({ host: null });
@@ -92,5 +93,29 @@ describe("keeper planner", () => {
       const signers = ix.keys.filter((k) => k.isSigner).map((k) => k.pubkey.toBase58());
       expect(signers).toEqual(a.kind === "tick" ? [me.toBase58()] : []);
     }
+  });
+  it("observes ready superpositions, decoheres expired ones, observes even while paused", () => {
+    const w = key();
+    const sp = (o: Partial<SuperpositionAccount>): { key: PublicKey; acc: SuperpositionAccount } => ({
+      key: key(),
+      acc: {
+        owner: key(), world: w, index: 1, world2: PublicKey.default, index2: 0, commitment: new Uint8Array(32).fill(1),
+        commitSlot: 0n, targetSlot: 1_000_000n, observed: false, observedSlot: 0n, entropy: new Uint8Array(32),
+        revealDeadline: 0n, stake: 20_000_000n, rearms: 0, ...o,
+      },
+    });
+    const sps = [
+      sp({ index: 1, targetSlot: 1_000_050n }), // ready
+      sp({ index: 2, targetSlot: 1_000_200n }), // not yet
+      sp({ index: 3, observed: true, revealDeadline: 1_000_000n }), // reveal window over
+      sp({ index: 4, observed: true, revealDeadline: 1_100_000n }), // owner may still reveal
+      sp({ index: 5, targetSlot: 1_000_060n, stake: 10n }), // dust stake: no bounty
+    ];
+    const q = plan(snap({ superpositions: sps })).filter((a) => a.kind.startsWith("quantum"));
+    expect(q.map((a) => `${a.kind}:${"index" in a ? a.index : ""}`)).toEqual(["quantum_decohere:3", "quantum_observe:1"]);
+    const paused = plan(snap({ config: cfg({ paused: true }), superpositions: sps }));
+    expect(paused.map((a) => a.kind)).toEqual(["quantum_observe"]);
+    const rx = new RecursiaIx(PROGRAM_ID);
+    for (const a of q) expect(toInstruction(rx, key(), a).keys.filter((k) => k.isSigner)).toHaveLength(1);
   });
 });

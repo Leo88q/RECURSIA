@@ -16,7 +16,11 @@ describe("layout & instructions", () => {
     const ix = new RecursiaIx();
     const k = Keypair.generate().publicKey;
     expect(ix.initialize(k, k, DEFAULT_PARAMS).keys).toHaveLength(11);
-    expect(ix.tick(k, k, k).keys).toHaveLength(12);
+    expect(ix.tick(k, k, k).keys).toHaveLength(13);
+    expect(ix.quantumCommit(k, k, 1, new Uint8Array(32).fill(1)).keys).toHaveLength(12);
+    expect(ix.quantumObserve(k, k, 1).keys).toHaveLength(9);
+    expect(ix.quantumCollapse(k, k, 1, 1n, 2n, 5000, new Uint8Array(32)).keys).toHaveLength(11);
+    expect(ix.quantumDecohere(k, k, 1, k).keys).toHaveLength(9);
     expect(ix.acquire(k, k, 1, null, 1n, 1n, 1n).keys).toHaveLength(12);
     // None optional account encoded as program id
     expect(ix.tick(k, k, k).keys[9].pubkey.equals(ix.programId)).toBe(true);

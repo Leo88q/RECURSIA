@@ -31,16 +31,21 @@ pub struct RegisterModule<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn register_module(
     ctx: Context<RegisterModule>,
     birth: u16,
     survive: u16,
     royalty_bps: u16,
     name: [u8; 32],
+    q_birth: u16,
+    q_survive: u16,
+    q_amp: u8,
 ) -> Result<()> {
     require_top_level()?;
     require_active(&ctx.accounts.config)?;
     validate_rule(birth, survive)?;
+    validate_quantum_rule(birth, survive, q_birth, q_survive, q_amp)?;
     validate_name(&name)?;
     require!(royalty_bps <= MAX_ROYALTY_BPS, RecursiaError::InvalidParams);
 
@@ -65,6 +70,9 @@ pub fn register_module(
     m.survive = survive;
     m.royalty_bps = royalty_bps;
     m.name = name;
+    m.q_birth = q_birth;
+    m.q_survive = q_survive;
+    m.q_amp = q_amp;
     c.modules = c.modules.checked_add(1).ok_or(RecursiaError::MathOverflow)?;
     Ok(())
 }

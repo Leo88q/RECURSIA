@@ -92,3 +92,53 @@ pub struct GovernanceExecuted {
 pub struct PauseChanged {
     pub paused: bool,
 }
+
+// ---------------------------------------------------------------- quantum layer
+
+#[event]
+pub struct Superposed {
+    pub world: Pubkey,
+    pub index: u8,
+    pub owner: Pubkey,
+    pub world2: Pubkey,
+    pub index2: u8,
+    pub target_slot: u64,
+    pub stake: u64,
+}
+
+#[event]
+pub struct Observed {
+    pub world: Pubkey,
+    pub index: u8,
+    pub observer: Pubkey,
+    pub measured_slot: u64,
+    pub entropy: [u8; 32],
+    pub bounty: u64,
+}
+
+#[event]
+pub struct Rearmed {
+    pub world: Pubkey,
+    pub index: u8,
+    pub new_target_slot: u64,
+    pub burned: u64,
+}
+
+#[event]
+pub struct Collapsed {
+    pub world: Pubkey,
+    pub index: u8,
+    pub branch_a: bool,
+    pub pattern: u64,
+    pub tunnel_to: Option<u8>,
+    pub entangled_world: Pubkey,
+    pub entangled_pattern: u64,
+}
+
+#[event]
+pub struct Decohered {
+    pub world: Pubkey,
+    pub index: u8,
+    pub burned: u64,
+    pub bounty: u64,
+}

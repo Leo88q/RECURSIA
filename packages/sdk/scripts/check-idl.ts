@@ -42,7 +42,20 @@ const built: Record<string, TransactionInstruction> = {
   revoke_permit: x.revokePermit(a, b),
   agent_plant: x.agentPlant(a, b, c, 1, 1n),
   agent_acquire: x.agentAcquire(a, b, c, 1, k(), 1n, 1n, 1n),
+  quantum_commit: x.quantumCommit(a, b, 1, new Uint8Array(32).fill(1), { world: c, index: 2 }),
+  quantum_observe: x.quantumObserve(a, b, 1),
+  quantum_collapse: x.quantumCollapse(a, b, 1, 1n, 2n, 5_000, new Uint8Array(32), { world: c, index: 2 }),
+  quantum_decohere: x.quantumDecohere(a, b, 1, c),
 };
+
+/** Byte size of an IDL type when it is fixed-size (null = variable / unknown). */
+function fixedSize(t: unknown): number | null {
+  const prim: Record<string, number> = { u8: 1, i8: 1, bool: 1, u16: 2, i16: 2, u32: 4, i32: 4, u64: 8, i64: 8, u128: 16, i128: 16, pubkey: 32 };
+  if (typeof t === "string") return prim[t] ?? null;
+  const o = t as { array?: [unknown, number] };
+  if (o && Array.isArray(o.array)) { const e = fixedSize(o.array[0]); return e === null ? null : e * o.array[1]; }
+  return null;
+}
 
 let errors = 0;
 const fail = (m: string) => { errors++; console.error("✗", m); };
@@ -51,6 +64,11 @@ for (const ix of idl.instructions) {
   if (!mine) { fail(`SDK missing instruction ${ix.name}`); continue; }
   const disc = Buffer.from(mine.data.subarray(0, 8)).toString("hex");
   if (disc !== Buffer.from(ix.discriminator).toString("hex")) fail(`${ix.name}: discriminator mismatch`);
+  const sizes = (ix.args ?? []).map((x: { type: unknown }) => fixedSize(x.type));
+  if (sizes.every((v: number | null) => v !== null)) {
+    const want = sizes.reduce((acc: number, v: number) => acc + v, 0);
+    if (mine.data.length - 8 !== want) fail(`${ix.name}: args are ${mine.data.length - 8} bytes, IDL expects ${want}`);
+  }
   if (ix.accounts.length !== mine.keys.length) { fail(`${ix.name}: ${mine.keys.length} accounts, IDL has ${ix.accounts.length}`); continue; }
   ix.accounts.forEach((acc: { name: string; writable?: boolean; signer?: boolean; optional?: boolean }, i: number) => {
     const m = mine.keys[i];

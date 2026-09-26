@@ -114,6 +114,7 @@ export interface WorldAccount {
   epochId: bigint; burnCur: bigint; scoresCur: number[]; prevEpochId: bigint; burnPrev: bigint; scoresPrev: number[];
   prevClaimed: boolean; resonance: number; childCount: number; rebellionId: number; rebellionVotes: number;
   rebellionDeadline: bigint; lastRebellionSlot: bigint; liberated: boolean; totalBurned: bigint;
+  qBirth: number; qSurvive: number; qAmp: number; entropy: Uint8Array; quantumEscrow: bigint; superpositions: number;
 }
 
 export const decodeName = (b: Uint8Array) => new TextDecoder().decode(b.slice(0, b.indexOf(0) === -1 ? 32 : b.indexOf(0)));
@@ -144,6 +145,7 @@ export function decodeWorld(data: Uint8Array): WorldAccount {
   w.prevClaimed = r.bool(); w.resonance = r.u16(); w.childCount = r.u16();
   w.rebellionId = r.u32(); w.rebellionVotes = r.u8(); w.rebellionDeadline = r.u64(); w.lastRebellionSlot = r.u64();
   w.liberated = r.bool(); w.totalBurned = r.u64();
+  w.qBirth = r.u16(); w.qSurvive = r.u16(); w.qAmp = r.u8(); w.entropy = r.bytes(32); w.quantumEscrow = r.u64(); w.superpositions = r.u16();
   return w as WorldAccount;
 }
 
@@ -170,11 +172,11 @@ export function decodePlayer(data: Uint8Array): PlayerAccount {
   return { owner: r.pubkey(), claimable: r.u64(), totalEarned: r.u64(), territories: r.u32() };
 }
 
-export interface ModuleAccount { id: bigint; author: PublicKey; birth: number; survive: number; royaltyBps: number; name: string; accrued: bigint; totalEarned: bigint; worldsUsing: number }
+export interface ModuleAccount { id: bigint; author: PublicKey; birth: number; survive: number; royaltyBps: number; name: string; accrued: bigint; totalEarned: bigint; worldsUsing: number; qBirth: number; qSurvive: number; qAmp: number }
 export function decodeModule(data: Uint8Array): ModuleAccount {
   const r = checkDisc(data, "PhysicsModule");
   r.u8(); r.u8();
-  return { id: r.u64(), author: r.pubkey(), birth: r.u16(), survive: r.u16(), royaltyBps: r.u16(), name: decodeName(r.bytes(32)), accrued: r.u64(), totalEarned: r.u64(), worldsUsing: r.u32() };
+  return { id: r.u64(), author: r.pubkey(), birth: r.u16(), survive: r.u16(), royaltyBps: r.u16(), name: decodeName(r.bytes(32)), accrued: r.u64(), totalEarned: r.u64(), worldsUsing: r.u32(), qBirth: r.u16(), qSurvive: r.u16(), qAmp: r.u8() };
 }
 
 export interface PermitAccount { owner: PublicKey; agent: PublicKey; scope: number; allowedWorld: PublicKey; maxSpendPerEpoch: bigint; maxPrice: bigint; spent: bigint; spendEpoch: bigint; expirySlot: bigint; createdSlot: bigint }
@@ -186,3 +188,18 @@ export function decodePermit(data: Uint8Array): PermitAccount {
 
 /** Byte size of World per InitSpace (used by tests to catch layout drift). */
 export const WORLD_SPACE = 8 + 4 + 32 + 1 + 8 + 32 + 2 + 32 + 2 + 2 + 32 + GRID * 8 + 8 * 4 + 8 * 4 + TERRITORIES * 2 + TERRITORIES * 8 + 8 + 8 + 8 + TERRITORIES * 4 + 8 + 8 + TERRITORIES * 4 + 1 + 2 + 2 + 4 + 1 + 8 + 8 + 1 + 8;
+
+export interface SuperpositionAccount {
+  owner: PublicKey; world: PublicKey; index: number; world2: PublicKey; index2: number; commitment: Uint8Array;
+  commitSlot: bigint; targetSlot: bigint; observed: boolean; observedSlot: bigint; entropy: Uint8Array;
+  revealDeadline: bigint; stake: bigint; rearms: number;
+}
+export function decodeSuperposition(data: Uint8Array): SuperpositionAccount {
+  const r = checkDisc(data, "Superposition");
+  r.u8(); r.u8();
+  return {
+    owner: r.pubkey(), world: r.pubkey(), index: r.u8(), world2: r.pubkey(), index2: r.u8(), commitment: r.bytes(32),
+    commitSlot: r.u64(), targetSlot: r.u64(), observed: r.bool(), observedSlot: r.u64(), entropy: r.bytes(32),
+    revealDeadline: r.u64(), stake: r.u64(), rearms: r.u8(),
+  };
+}

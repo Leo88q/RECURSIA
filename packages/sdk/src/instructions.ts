@@ -4,7 +4,7 @@ import { Buffer } from "buffer";
 import { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, TransactionInstruction, type AccountMeta } from "@solana/web3.js";
 import { type Params } from "./constants.js";
 import { ixDiscriminator, Writer, writeParams, writePending, type PendingAction, encodeName } from "./layout.js";
-import { ASSOCIATED_TOKEN_PROGRAM_ID, ata, Pdas, PROGRAM_ID, TOKEN_PROGRAM_ID } from "./pda.js";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, ata, Pdas, PROGRAM_ID, SYSVAR_SLOT_HASHES, TOKEN_PROGRAM_ID } from "./pda.js";
 
 const W = (pubkey: PublicKey): AccountMeta => ({ pubkey, isSigner: false, isWritable: true });
 const R = (pubkey: PublicKey): AccountMeta => ({ pubkey, isSigner: false, isWritable: false });
@@ -55,12 +55,12 @@ export class RecursiaIx {
   advanceEpoch() { return this.ix("advance_epoch", [W(this.pda.config()), R(this.pda.rewardPool())]); }
 
   // ------------------------------------------------------------ modules
-  registerModule(author: PublicKey, moduleId: bigint, birth: number, survive: number, royaltyBps: number, name: string) {
+  registerModule(author: PublicKey, moduleId: bigint, birth: number, survive: number, royaltyBps: number, name: string, q: { qBirth: number; qSurvive: number; qAmp: number } = { qBirth: 0, qSurvive: 0, qAmp: 0 }) {
     const p = this.pda;
     return this.ix("register_module", [
       S(author, true), W(p.config()), W(this.mint), W(p.module(moduleId)), W(ata(author, this.mint)), W(p.treasury()),
       R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
-    ], (w) => w.u16(birth).u16(survive).u16(royaltyBps).bytes(encodeName(name)));
+    ], (w) => w.u16(birth).u16(survive).u16(royaltyBps).bytes(encodeName(name)).u16(q.qBirth).u16(q.qSurvive).u8(q.qAmp));
   }
   claimModuleRoyalties(author: PublicKey, module: PublicKey) {
     return this.ix("claim_module_royalties", [S(author, true), W(module), W(this.pda.player(author)), R(SystemProgram.programId)]);
@@ -75,7 +75,7 @@ export class RecursiaIx {
       ix: this.ix("create_root_world", [
         S(architect, true), W(p.config()), W(this.mint), W(module), W(world), W(p.worldVault(world)),
         W(ata(architect, this.mint)), W(p.treasury()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
-      ], (w) => w.u8(hostTerritory).u16(feeBps).bytes(encodeName(name)).u64(initialEnergy)),
+      ], (w) => w.u16(feeBps).bytes(encodeName(name)).u64(initialEnergy)),
     };
   }
 
@@ -101,6 +101,48 @@ export class RecursiaIx {
     return this.ix("tick", [
       S(cranker), W(p.config()), W(this.mint), W(world), W(p.worldVault(world)), W(module), W(p.treasury()), W(p.claims()),
       W(ata(cranker, this.mint)), this.opt(hostWorld), this.opt(hostWorld ? p.worldVault(hostWorld) : null), R(TOKEN_PROGRAM_ID),
+      R(SYSVAR_SLOT_HASHES),
+    ]);
+  }
+
+  // ------------------------------------------------------------ quantum layer
+  /** Commit a superposition. `entangle` = partner territory in ANOTHER world held by `holder`. */
+  quantumCommit(holder: PublicKey, world: PublicKey, index: number, commitment: Uint8Array, entangle?: { world: PublicKey; index: number } | null) {
+    const p = this.pda;
+    if (commitment.length !== 32) throw new Error("commitment must be 32 bytes");
+    return this.ix("quantum_commit", [
+      S(holder, true), W(p.config()), W(this.mint), W(world), W(p.worldVault(world)), W(p.territory(world, index)),
+      W(p.superposition(world, index)), W(ata(holder, this.mint)),
+      this.opt(entangle?.world), this.opt(entangle ? p.territory(entangle.world, entangle.index) : null),
+      R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
+    ], (w) => w.u8(index).bytes(commitment));
+  }
+
+  /** Permissionless measurement (keeper earns stake/20). */
+  quantumObserve(observer: PublicKey, world: PublicKey, index: number) {
+    const p = this.pda;
+    return this.ix("quantum_observe", [
+      S(observer), W(p.config()), W(this.mint), W(world), W(p.worldVault(world)), W(p.superposition(world, index)),
+      W(ata(observer, this.mint)), R(SYSVAR_SLOT_HASHES), R(TOKEN_PROGRAM_ID),
+    ]);
+  }
+
+  quantumCollapse(owner: PublicKey, world: PublicKey, index: number, a: bigint, b: bigint, weightBps: number, salt: Uint8Array, entangled?: { world: PublicKey; index: number } | null) {
+    const p = this.pda;
+    return this.ix("quantum_collapse", [
+      S(owner, true), R(p.config()), R(this.mint), W(world), W(p.worldVault(world)), R(p.territory(world, index)),
+      W(p.superposition(world, index)), W(ata(owner, this.mint)),
+      this.opt(entangled?.world), this.opt(entangled ? p.territory(entangled.world, entangled.index) : null, false),
+      R(TOKEN_PROGRAM_ID),
+    ], (w) => w.u64(a).u64(b).u16(weightBps).bytes(salt));
+  }
+
+  /** Permissionless after the reveal window: stake burned, caller gets stake/20. */
+  quantumDecohere(caller: PublicKey, world: PublicKey, index: number, owner: PublicKey) {
+    const p = this.pda;
+    return this.ix("quantum_decohere", [
+      S(caller), W(p.config()), W(this.mint), W(world), W(p.worldVault(world)), W(p.superposition(world, index)),
+      W(owner), W(ata(caller, this.mint)), R(TOKEN_PROGRAM_ID),
     ]);
   }
 

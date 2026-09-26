@@ -175,9 +175,21 @@ pub struct World {
     pub last_rebellion_slot: u64,
     pub liberated: bool,
     pub total_burned: u64,
+    // --- quantum layer (copied from the module at creation) ---
+    pub q_birth: u16,
+    pub q_survive: u16,
+    pub q_amp: u8,
+    /// Seed material of the last quantum tick (public, for replay/verification).
+    pub entropy: [u8; 32],
+    /// Superposition stakes held in the world vault (part of the solvency ledger).
+    pub quantum_escrow: u64,
+    pub superpositions: u16,
 }
 
 impl World {
+    pub fn is_quantum(&self) -> bool {
+        self.q_amp > 0 && (self.q_birth | self.q_survive) != 0
+    }
     pub fn has_architect(&self) -> bool {
         self.architect != Pubkey::default()
     }
@@ -243,6 +255,10 @@ pub struct PhysicsModule {
     pub accrued: u64,
     pub total_earned: u64,
     pub worlds_using: u32,
+    /// Quantum extension: counts that fire with probability 2^-q_amp.
+    pub q_birth: u16,
+    pub q_survive: u16,
+    pub q_amp: u8,
 }
 
 #[account]
@@ -264,4 +280,36 @@ pub struct AgentPermit {
     pub spend_epoch: u64,
     pub expiry_slot: u64,
     pub created_slot: u64,
+}
+
+/// A territory planted "in superposition": a hidden commitment to two
+/// patterns that collapses into one after an unbiasable measurement.
+#[account]
+#[derive(InitSpace)]
+pub struct Superposition {
+    pub version: u8,
+    pub bump: u8,
+    pub owner: Pubkey,
+    pub world: Pubkey,
+    pub index: u8,
+    /// Entangled partner (different world) or Pubkey::default().
+    pub world2: Pubkey,
+    pub index2: u8,
+    pub commitment: [u8; 32],
+    pub commit_slot: u64,
+    /// Slot whose hash will be the measurement entropy (fixed at commit / re-arm).
+    pub target_slot: u64,
+    pub observed: bool,
+    pub observed_slot: u64,
+    pub entropy: [u8; 32],
+    pub reveal_deadline: u64,
+    /// Remaining stake in the world vault (also counted in world.quantum_escrow).
+    pub stake: u64,
+    pub rearms: u8,
+}
+
+impl Superposition {
+    pub fn is_entangled(&self) -> bool {
+        self.world2 != Pubkey::default()
+    }
 }

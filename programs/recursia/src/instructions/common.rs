@@ -130,7 +130,7 @@ pub fn user_burn<'info>(
 pub fn world_ledger_total(world: &World) -> Result<u64> {
     let a = math::add(world.energy, world.rewards_reserved)?;
     let b = math::add(world.deposits, world.architect_accrued)?;
-    math::add(a, b)
+    math::add(math::add(a, b)?, world.quantum_escrow)
 }
 
 pub fn assert_world_solvent(world: &World, vault_amount: u64) -> Result<()> {
@@ -259,6 +259,17 @@ pub fn owned_array(mask: u64) -> [bool; TERRITORIES] {
         *v = (mask >> i) & 1 == 1;
     }
     o
+}
+
+/// Quantum extension must not overlap the classical rule, may not allow B0
+/// (whole-torus strobing), and amp=0 ⇔ no quantum masks.
+pub fn validate_quantum_rule(birth: u16, survive: u16, q_birth: u16, q_survive: u16, q_amp: u8) -> Result<()> {
+    require!(q_birth & !sim::RULE_MASK == 0 && q_survive & !sim::RULE_MASK == 0, RecursiaError::InvalidRule);
+    require!(q_birth & 1 == 0, RecursiaError::InvalidRule);
+    require!(q_birth & birth == 0 && q_survive & survive == 0, RecursiaError::InvalidRule);
+    require!(q_amp <= MAX_Q_AMP, RecursiaError::InvalidRule);
+    require!((q_amp == 0) == (q_birth | q_survive == 0), RecursiaError::InvalidRule);
+    Ok(())
 }
 
 pub fn validate_rule(birth: u16, survive: u16) -> Result<()> {

@@ -160,3 +160,10 @@ code, .mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-size:
   .layout, .chain { grid-template-columns: 1fr; }
   .left { max-height: 240px; }
 }
+
+/* quantum layer */
+.quantum-card { border-color: rgba(110, 220, 255, 0.35); background: linear-gradient(135deg, rgba(110, 220, 255, 0.06), rgba(185, 140, 255, 0.05)); }
+.quantum-card .card-title { color: #9fe8ff; }
+.tag.quantum { color: #9fe8ff; background: rgba(110, 220, 255, 0.14); animation: qflicker 2.4s infinite; }
+.danger-text { color: var(--rose); }
+@keyframes qflicker { 0%, 100% { opacity: 1; } 45% { opacity: 0.55; } 50% { opacity: 0.9; } 55% { opacity: 0.4; } }

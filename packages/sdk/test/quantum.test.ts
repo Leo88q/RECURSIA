@@ -1,0 +1,223 @@
+import { describe, expect, it } from "vitest";
+import { GameModel, idBytes } from "../src/model.js";
+import { DEFAULT_PARAMS, ONE, PHYSICS_PRESETS, TOTAL_SUPPLY } from "../src/constants.js";
+import { epochTax } from "../src/economy.js";
+import { bigbang, getCell, quantumMask, step, stepNQ, type Grid, type Quantum } from "../src/sim.js";
+import { collapse, commitment, neighbour, quantumRuleError, slotHashLookup, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS } from "../src/quantum.js";
+import { Rng } from "../src/agents.js";
+
+// ---------------------------------------------------------------- engine
+function naiveStepQ(g: Grid, b: number, s: number, q: Quantum, gen: bigint): Grid {
+  const out = new BigUint64Array(64);
+  for (let y = 0; y < 64; y++) {
+    const m = quantumMask(q, gen, y);
+    for (let x = 0; x < 64; x++) {
+      let n = 0;
+      for (const dy of [63, 0, 1]) for (const dx of [63, 0, 1]) if ((dx || dy) && getCell(g, (x + dx) % 64, (y + dy) % 64)) n++;
+      const alive = getCell(g, x, y);
+      const cls = alive ? (s >> n) & 1 : (b >> n) & 1;
+      const qf = alive ? !((s >> n) & 1) && (q.qSurvive >> n) & 1 : !((b >> n) & 1) && (q.qBirth >> n) & 1;
+      if (cls || (qf && (m >> BigInt(x)) & 1n)) out[y] |= 1n << BigInt(x);
+    }
+  }
+  return out;
+}
+
+describe("quantum engine", () => {
+  it("fast quantum step == naive per-cell reference", () => {
+    const r = new Rng(7);
+    for (const amp of [1, 2, 3]) {
+      const g = bigbang(new Uint8Array(32).fill(amp));
+      const q: Quantum = { qBirth: 1 << 6, qSurvive: (1 << 1) | (1 << 4), amp, seed: [r.big64(), r.big64(), r.big64(), r.big64()] };
+      expect(stepNQ(g, 8, 12, q, 99n, 1)).toEqual(naiveStepQ(g, 8, 12, q, 100n));
+    }
+  });
+  it("amp 0 reduces to the classical rule", () => {
+    const g = bigbang(new Uint8Array(32).fill(9));
+    expect(stepNQ(g, 8, 12, { qBirth: 0, qSurvive: 0, amp: 0, seed: [1n, 2n, 3n, 4n] }, 0n, 1)).toEqual(step(g, 8, 12));
+  });
+  it("different entropy → different futures (cannot be precomputed)", () => {
+    const g = bigbang(new Uint8Array(32).fill(3));
+    const q = (s: bigint): Quantum => ({ qBirth: 1 << 6, qSurvive: 1 << 4, amp: 2, seed: [s, 2n, 3n, 4n] });
+    expect(stepNQ(g, 8, 12, q(1n), 0n, 8)).not.toEqual(stepNQ(g, 8, 12, q(2n), 0n, 8));
+    expect(stepNQ(g, 8, 12, q(1n), 0n, 8)).toEqual(stepNQ(g, 8, 12, q(1n), 0n, 8));
+  });
+  it("rule validator mirrors the program", () => {
+    expect(quantumRuleError(8, 12, 1 << 6, 1 << 4, 2)).toBeNull();
+    expect(quantumRuleError(8, 12, 1, 0, 1)).toMatch(/B0/);
+    expect(quantumRuleError(8, 12, 8, 0, 1)).toMatch(/overlap/);
+    expect(quantumRuleError(8, 12, 1 << 6, 0, 4)).toMatch(/amp/);
+    expect(quantumRuleError(8, 12, 1 << 6, 0, 0)).toMatch(/amp=0/);
+  });
+});
+
+describe("quantum primitives", () => {
+  it("slot hash lookup handles skipped slots and expiry", () => {
+    const mk = (slots: number[]) => {
+      const d = new Uint8Array(8 + slots.length * 40); const dv = new DataView(d.buffer);
+      dv.setBigUint64(0, BigInt(slots.length), true);
+      slots.forEach((s, i) => { dv.setBigUint64(8 + i * 40, BigInt(s), true); d[16 + i * 40] = s & 0xff; });
+      return d;
+    };
+    const d = mk([100, 99, 98, 96, 94, 93]);
+    expect(slotHashLookup(d, 97)).toMatchObject({ kind: "found", slot: 98n });
+    expect(slotHashLookup(d, 95)).toMatchObject({ kind: "found", slot: 96n });
+    expect(slotHashLookup(d, 101)?.kind).toBe("notYet");
+    const full = mk(Array.from({ length: 512 }, (_, i) => 1000 - i));
+    expect(slotHashLookup(full, 100)?.kind).toBe("expired");
+    expect(slotHashLookup(full, 489)).toMatchObject({ kind: "found", slot: 489n });
+  });
+  it("collapse frequency follows the committed amplitude", () => {
+    let a = 0; const N = 4000;
+    const c = commitment(1n, 2n, 3000, new Uint8Array(32), new Uint8Array(32), new Uint8Array(32), 0);
+    for (let i = 0; i < N; i++) { const e = new Uint8Array(32); new DataView(e.buffer).setUint32(0, i); if (collapse(e, c, 3000).branchA) a++; }
+    expect(a / N).toBeGreaterThan(0.27); expect(a / N).toBeLessThan(0.33);
+  });
+  it("torus neighbours", () => {
+    expect(neighbour(0, 0)).toBe(56); expect(neighbour(0, 3)).toBe(7); expect(neighbour(63, 1)).toBe(56); expect(neighbour(63, 2)).toBe(7);
+  });
+});
+
+// ---------------------------------------------------------------- model
+function setup() {
+  const m = new GameModel();
+  m.addPlayer("dev", 1_000_000n * ONE);
+  const foam = PHYSICS_PRESETS.find((p) => p.name === "Quantum Foam")!;
+  m.registerModule("dev", foam.name, foam.birth, foam.survive, foam.royaltyBps, foam);
+  m.registerModule("dev", "Life", 8, 12, 100);
+  m.addPlayer("alice", 100_000n * ONE);
+  m.addPlayer("bob", 100_000n * ONE);
+  m.addPlayer("keeper", 0n);
+  const w = m.createRootWorld("alice", "Foam", 0, 1_000, 5_000n * ONE);
+  const w2 = m.createRootWorld("alice", "Other", 1, 1_000, 5_000n * ONE);
+  const dep = epochTax(100n * ONE, DEFAULT_PARAMS.harbergerBps) * 5n;
+  m.acquire("bob", w.id, 5, 10n * ONE, 100n * ONE, dep);
+  m.acquire("bob", w2.id, 9, 10n * ONE, 100n * ONE, dep);
+  return { m, w, w2 };
+}
+const salt = new Uint8Array(32).fill(42);
+const A = 0x0000_0000_0007_0402n, B = 0x0000_0018_1800_0000n;
+
+describe("quantum game model", () => {
+  it("quantum worlds tick with slot-hash entropy and stay reproducible", () => {
+    const { m, w } = setup();
+    m.advanceSlots(200); m.tick("keeper", w.id);
+    expect(w.entropy).not.toBeNull();
+    const m2 = setup().m; m2.advanceSlots(200); m2.tick("keeper", w.id);
+    expect(m2.world(w.id).grid).toEqual(w.grid);
+  });
+
+  it("commit → observe → collapse (entangled), stake refunded, supply conserved", () => {
+    const { m, w, w2 } = setup();
+    const c = m.commitFor("bob", w.id, 5, A, B, 6_000, salt);
+    const before = m.players.get("bob")!.wallet;
+    m.quantumCommit("bob", w.id, 5, c, { world: w2.id, index: 9 });
+    const stake = m.quantumStake(true);
+    expect(before - m.players.get("bob")!.wallet).toBe(stake + 2n * DEFAULT_PARAMS.plantCost);
+    expect(() => m.quantumObserve("keeper", w.id, 5)).toThrow(/not measurable/);
+    m.advanceSlots(QUANTUM_DELAY_SLOTS + 1);
+    expect(m.quantumObserve("keeper", w.id, 5)).toBe("observed");
+    expect(m.players.get("keeper")!.wallet).toBe(stake / 20n);
+    const pv = m.previewCollapse(w.id, 5, 6_000)!;
+    const res = m.quantumCollapse("bob", w.id, 5, A, B, 6_000, salt);
+    expect(res.branchA).toBe(pv.branchA);
+    expect(m.superposition(w.id, 5)).toBeUndefined();
+    expect(w.quantumEscrow).toBe(0n);
+    expect(m.circulating() + m.totalBurned).toBe(TOTAL_SUPPLY);
+  });
+
+  it("wrong preimage / other owner / copied commitment are rejected", () => {
+    const { m, w } = setup();
+    const c = m.commitFor("bob", w.id, 5, A, B, 5_000, salt);
+    m.quantumCommit("bob", w.id, 5, c);
+    m.advanceSlots(QUANTUM_DELAY_SLOTS + 1);
+    m.quantumObserve("keeper", w.id, 5);
+    expect(() => m.quantumCollapse("bob", w.id, 5, A, B, 5_001, salt)).toThrow(/mismatch/);
+    expect(() => m.quantumCollapse("bob", w.id, 5, B, A, 5_000, salt)).toThrow(/mismatch/);
+    expect(() => m.quantumCollapse("alice", w.id, 5, A, B, 5_000, salt)).toThrow(/not owner/);
+    // commitment is bound to owner: the same inputs for alice hash differently
+    expect(commitment(A, B, 5_000, salt, idBytes("alice"), w.key, 5)).not.toEqual(c);
+  });
+
+  it("no double superposition / respects plant cooldown (dup guard)", () => {
+    const { m, w } = setup();
+    m.quantumCommit("bob", w.id, 5, m.commitFor("bob", w.id, 5, A, B, 5_000, salt));
+    expect(m.canQuantumCommit("bob", w.id, 5)).toMatch(/already|cooldown/);
+    expect(() => m.plant("bob", w.id, 5, A)).toThrow(/cooldown/);
+  });
+
+  it("withholding a bad outcome costs the stake (decoherence)", () => {
+    const { m, w } = setup();
+    m.quantumCommit("bob", w.id, 5, m.commitFor("bob", w.id, 5, A, B, 5_000, salt));
+    m.advanceSlots(QUANTUM_DELAY_SLOTS + 1);
+    m.quantumObserve("keeper", w.id, 5);
+    expect(m.canDecohere(w.id, 5)).toMatch(/coherent/);
+    m.advanceSlots(QUANTUM_REVEAL_SLOTS + 1);
+    const burned0 = m.totalBurned;
+    m.quantumDecohere("keeper", w.id, 5);
+    expect(m.totalBurned).toBeGreaterThan(burned0);
+    expect(m.superposition(w.id, 5)).toBeUndefined();
+    expect(() => m.quantumCollapse("bob", w.id, 5, A, B, 5_000, salt)).toThrow(/no superposition/);
+  });
+
+  it("late observation re-arms and burns 25% (no stale-hash grinding)", () => {
+    const { m, w } = setup();
+    m.quantumCommit("bob", w.id, 5, m.commitFor("bob", w.id, 5, A, B, 5_000, salt));
+    const s0 = m.superposition(w.id, 5)!.stake;
+    m.advanceSlots(QUANTUM_DELAY_SLOTS + 600);
+    expect(m.quantumObserve("keeper", w.id, 5)).toBe("rearmed");
+    expect(m.superposition(w.id, 5)!.stake).toBe(s0 - s0 / 4n);
+    m.advanceSlots(QUANTUM_DELAY_SLOTS + 1);
+    expect(m.quantumObserve("keeper", w.id, 5)).toBe("observed");
+  });
+
+  it("territory sold mid-superposition: grid untouched, owner still refunded", () => {
+    const { m, w } = setup();
+    m.quantumCommit("bob", w.id, 5, m.commitFor("bob", w.id, 5, A, B, 5_000, salt));
+    m.acquire("alice", w.id, 5, 100n * ONE, 120n * ONE, epochTax(120n * ONE, DEFAULT_PARAMS.harbergerBps) * 3n);
+    m.advanceSlots(QUANTUM_DELAY_SLOTS + 1);
+    m.quantumObserve("keeper", w.id, 5);
+    const grid = w.grid.slice();
+    const wallet = m.players.get("bob")!.wallet;
+    m.quantumCollapse("bob", w.id, 5, A, B, 5_000, salt);
+    expect(w.grid).toEqual(grid);
+    expect(m.players.get("bob")!.wallet).toBeGreaterThan(wallet);
+  });
+
+  it("settlement works while paused, new commits do not", () => {
+    const { m, w } = setup();
+    m.quantumCommit("bob", w.id, 5, m.commitFor("bob", w.id, 5, A, B, 5_000, salt));
+    m.paused = true;
+    expect(m.canQuantumCommit("bob", w.id, 5)).toBe("paused");
+    m.advanceSlots(QUANTUM_DELAY_SLOTS + 1);
+    m.quantumObserve("keeper", w.id, 5);
+    m.quantumCollapse("bob", w.id, 5, A, B, 5_000, salt);
+  });
+});
+
+describe("AI agents in a quantum world", () => {
+  it("superpose, observe, collapse; invariants hold; no superposition leaks", async () => {
+    const { AIAgent } = await import("../src/agents.js");
+    const m = new GameModel();
+    m.addPlayer("dev", 1_000_000n * ONE);
+    for (const p of PHYSICS_PRESETS) m.registerModule("dev", p.name, p.birth, p.survive, p.royaltyBps, p);
+    const qi = PHYSICS_PRESETS.findIndex((p) => p.name === "Quantum Foam");
+    m.addPlayer("arch", 100_000n * ONE);
+    m.createRootWorld("arch", "Foam", qi, 1_000, 20_000n * ONE);
+    const agents = (["speculator", "demiurge", "gardener", "expansionist"] as const).flatMap((k, i) =>
+      [0, 1].map((j) => { const id = `q-${k}-${j}`; m.addPlayer(id, 20_000n * ONE, true); return new AIAgent(id, k, 77 + i * 10 + j); }));
+    let commits = 0, collapses = 0;
+    for (let r = 0; r < 100; r++) {
+      m.advanceSlots(160);
+      for (const id of m.worlds.keys()) if (!m.canTick(id)) m.tick("dev", id);
+      for (const a of agents) a.act(m);
+      if (m.canAdvanceEpoch()) m.advanceEpoch();
+      m.check();
+    }
+    for (const e of m.events) { if (/суперпозицию/.test(e.text)) commits++; if (/Коллапс/.test(e.text)) collapses++; }
+    expect(commits).toBeGreaterThan(3);
+    expect(collapses).toBeGreaterThan(0);
+    expect(m.superpositions.size).toBeLessThanOrEqual(agents.length * 2);
+    expect(m.circulating() + m.totalBurned).toBe(TOTAL_SUPPLY);
+  });
+});

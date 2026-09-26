@@ -7,6 +7,7 @@ use crate::errors::RecursiaError;
 use crate::events::*;
 use crate::instructions::common::*;
 use crate::math;
+use crate::quantum;
 use crate::sim;
 use crate::state::*;
 
@@ -50,6 +51,9 @@ fn init_world(
     w.module = module_key;
     w.birth = module.birth;
     w.survive = module.survive;
+    w.q_birth = module.q_birth;
+    w.q_survive = module.q_survive;
+    w.q_amp = module.q_amp;
     w.name = name;
     w.grid = bigbang(&key);
     w.territory_alive = sim::territory_counts(&w.grid);
@@ -360,6 +364,10 @@ pub struct Tick<'info> {
     #[account(mut)]
     pub host_vault: Option<Box<Account<'info, TokenAccount>>>,
     pub token_program: Program<'info, Token>,
+    /// CHECK: address-pinned to the SlotHashes sysvar; parsed read-only by
+    /// `quantum::slot_hash_lookup` (bounds-checked). Only used by quantum worlds.
+    #[account(address = anchor_lang::solana_program::sysvar::slot_hashes::ID @ RecursiaError::SlotHashes)]
+    pub slot_hashes: UncheckedAccount<'info>,
 }
 
 pub fn tick(ctx: Context<Tick>) -> Result<()> {
@@ -407,7 +415,24 @@ pub fn tick(ctx: Context<Tick>) -> Result<()> {
         let w = &mut ctx.accounts.world;
         roll_world_epoch(w, &config_ro);
         w.energy = math::sub(w.energy, p.tick_cost)?;
-        let g = sim::step_n(&w.grid, w.birth, w.survive, p.gens_per_tick);
+        let g = if w.is_quantum() {
+            // Entropy of the slot the schedule fixed in advance: last tick +
+            // interval − 1 (always ≤ current slot − 1, so it exists or is skipped).
+            let target = w.last_tick_slot.saturating_add(p.tick_interval_slots).saturating_sub(1);
+            let data = ctx.accounts.slot_hashes.try_borrow_data()?;
+            let hash = match quantum::slot_hash_lookup(&data, target).ok_or(RecursiaError::SlotHashes)? {
+                quantum::SlotHashLookup::Found { hash, .. } => hash,
+                // neglected world (>512 slots late) / skipped tail: best effort
+                quantum::SlotHashLookup::Expired { oldest } => oldest,
+                quantum::SlotHashLookup::NotYet { newest } => newest,
+            };
+            let seed = quantum::quantum_seed(&hash, &world_key.to_bytes(), w.generation);
+            w.entropy = hash;
+            let q = quantum::make_quantum(w.q_birth, w.q_survive, w.q_amp, seed);
+            sim::step_n_q(&w.grid, w.birth, w.survive, &q, w.generation, p.gens_per_tick)
+        } else {
+            sim::step_n(&w.grid, w.birth, w.survive, p.gens_per_tick)
+        };
         w.grid = g;
         let counts = sim::territory_counts(&g);
         w.territory_alive = counts;

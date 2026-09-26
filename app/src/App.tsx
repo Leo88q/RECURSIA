@@ -98,7 +98,7 @@ export function App() {
               ))}
               <span className="gen">поколение {world.generation.toLocaleString("ru-RU")}</span>
             </div>
-            <WorldCanvas world={world} selected={selected} onSelect={(i) => { setSelected(i); setTab("cell"); }} onDescend={descend} frame={frame} zoomFrom={zoomFrom} />
+            <WorldCanvas world={world} selected={selected} onSelect={(i) => { setSelected(i); setTab("cell"); }} onDescend={descend} frame={frame} zoomFrom={zoomFrom} superposed={sb.superposedIn(world.id)} />
             <div className="controls">
               <span className="muted small">Время:</span>
               {[0, 1, 2, 5, 10].map((s) => <button key={s} className={speed === s ? "chip on" : "chip"} onClick={() => setSpeed(s)}>{s === 0 ? "⏸" : `×${s}`}</button>)}

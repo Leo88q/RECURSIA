@@ -33,10 +33,57 @@ fn add_bit(s: &mut [u64; 4], a: u64) {
     s[3] |= c2;
 }
 
-/// Advance the grid by one generation.
+/// Quantum extension of a rule: neighbour counts in `q_birth` / `q_survive`
+/// fire only where the per-cell random mask is 1 (probability 2^-amp).
+/// `seed` comes from a scheduled slot hash (see `quantum_seed`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Quantum {
+    pub q_birth: u16,
+    pub q_survive: u16,
+    pub amp: u8,
+    pub seed: [u64; 4],
+}
+
+impl Quantum {
+    pub fn is_active(&self) -> bool {
+        self.amp > 0 && (self.q_birth | self.q_survive) & RULE_MASK != 0
+    }
+}
+
+/// SplitMix64 — tiny, well-distributed, identical in the TS mirror.
+#[inline(always)]
+pub fn splitmix64(x: u64) -> u64 {
+    let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// Random mask for row `y` of absolute generation `gen`: AND of `amp` words,
+/// so each bit is 1 with probability 2^-amp.
+#[inline(always)]
+pub fn quantum_mask(q: &Quantum, gen: u64, y: usize) -> u64 {
+    let mut m = u64::MAX;
+    for k in 0..(q.amp.min(3) as usize) {
+        m &= splitmix64(q.seed[k] ^ (gen << 8) ^ (y as u64));
+    }
+    m
+}
+
+/// Advance the grid by one generation (classical rule).
 pub fn step(grid: &Grid, birth: u16, survive: u16) -> Grid {
+    step_core(grid, birth, survive, None, 0)
+}
+
+/// Advance one generation with an optional quantum extension.
+/// `gen` is the absolute generation number being produced (for the mask).
+pub fn step_core(grid: &Grid, birth: u16, survive: u16, q: Option<&Quantum>, gen: u64) -> Grid {
     let birth = birth & RULE_MASK;
     let survive = survive & RULE_MASK;
+    let (qb, qs) = match q {
+        Some(q) if q.is_active() => (q.q_birth & RULE_MASK & !birth, q.q_survive & RULE_MASK & !survive),
+        _ => (0, 0),
+    };
     let mut out = [0u64; GRID];
     for y in 0..GRID {
         let up = grid[(y + GRID - 1) % GRID];
@@ -55,10 +102,14 @@ pub fn step(grid: &Grid, birth: u16, survive: u16) -> Grid {
 
         let mut born = 0u64;
         let mut keep = 0u64;
+        let mut qborn = 0u64;
+        let mut qkeep = 0u64;
         for n in 0..9u16 {
             let bn = (birth >> n) & 1 == 1;
             let sn = (survive >> n) & 1 == 1;
-            if !bn && !sn {
+            let qbn = (qb >> n) & 1 == 1;
+            let qsn = (qs >> n) & 1 == 1;
+            if !bn && !sn && !qbn && !qsn {
                 continue;
             }
             let eq = eq_count(&s, n);
@@ -67,6 +118,19 @@ pub fn step(grid: &Grid, birth: u16, survive: u16) -> Grid {
             }
             if sn {
                 keep |= eq;
+            }
+            if qbn {
+                qborn |= eq;
+            }
+            if qsn {
+                qkeep |= eq;
+            }
+        }
+        if qborn | qkeep != 0 {
+            if let Some(q) = q {
+                let m = quantum_mask(q, gen, y);
+                born |= qborn & m;
+                keep |= qkeep & m;
             }
         }
         out[y] = (mid & keep) | (!mid & born);
@@ -85,6 +149,15 @@ pub fn step_n(grid: &Grid, birth: u16, survive: u16, gens: u8) -> Grid {
     let mut g = *grid;
     for _ in 0..gens {
         g = step(&g, birth, survive);
+    }
+    g
+}
+
+/// Advance `gens` generations; generation numbers `gen0+1 ..= gen0+gens`.
+pub fn step_n_q(grid: &Grid, birth: u16, survive: u16, q: &Quantum, gen0: u64, gens: u8) -> Grid {
+    let mut g = *grid;
+    for i in 0..gens as u64 {
+        g = step_core(&g, birth, survive, Some(q), gen0 + i + 1);
     }
     g
 }
@@ -256,6 +329,78 @@ mod tests {
         }
     }
 
+    /// Naive per-cell quantum reference: same mask bits, scalar logic.
+    fn naive_step_q(g: &Grid, b: u16, s: u16, q: &Quantum, gen: u64) -> Grid {
+        let classical = naive_step(g, b, s);
+        let mut o = classical;
+        for y in 0..GRID {
+            let m = quantum_mask(q, gen, y);
+            for x in 0..GRID {
+                let mut n = 0u16;
+                for dy in [GRID - 1, 0, 1] {
+                    for dx in [GRID - 1, 0, 1] {
+                        if (dx != 0 || dy != 0) && get(g, x + dx, y + dy) {
+                            n += 1;
+                        }
+                    }
+                }
+                let alive = get(g, x, y);
+                let lucky = (m >> x) & 1 == 1;
+                let q_fire = if alive {
+                    (s >> n) & 1 == 0 && (q.q_survive >> n) & 1 == 1
+                } else {
+                    (b >> n) & 1 == 0 && (q.q_birth >> n) & 1 == 1
+                };
+                if q_fire && lucky {
+                    set(&mut o, x, y);
+                }
+            }
+        }
+        o
+    }
+
+    #[test]
+    fn quantum_matches_naive_and_reduces_to_classical() {
+        let mut seed = 0xDEAD_BEEF_1234_5678u64;
+        for amp in 0..=3u8 {
+            for _ in 0..6 {
+                let mut g = [0u64; GRID];
+                for r in g.iter_mut() {
+                    *r = xorshift(&mut seed) & xorshift(&mut seed);
+                }
+                let b = LIFE_B;
+                let s = LIFE_S;
+                let q = Quantum {
+                    q_birth: if amp == 0 { 0 } else { 1 << 6 },
+                    q_survive: if amp == 0 { 0 } else { (1 << 1) | (1 << 4) },
+                    amp,
+                    seed: [xorshift(&mut seed), xorshift(&mut seed), xorshift(&mut seed), xorshift(&mut seed)],
+                };
+                let gen = xorshift(&mut seed) % 1_000_000;
+                let fast = step_core(&g, b, s, Some(&q), gen);
+                assert_eq!(fast, naive_step_q(&g, b, s, &q, gen), "amp {amp}");
+                if amp == 0 {
+                    assert_eq!(fast, step(&g, b, s));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn quantum_mask_density_follows_amplitude() {
+        let q = |amp| Quantum { q_birth: 1 << 6, q_survive: 0, amp, seed: [1, 2, 3, 4] };
+        for (amp, expect) in [(1u8, 0.5f64), (2, 0.25), (3, 0.125)] {
+            let mut ones = 0u32;
+            for gen in 0..64u64 {
+                for y in 0..GRID {
+                    ones += quantum_mask(&q(amp), gen, y).count_ones();
+                }
+            }
+            let p = ones as f64 / (64.0 * 64.0 * 64.0);
+            assert!((p - expect).abs() < 0.01, "amp {amp}: {p}");
+        }
+    }
+
     #[test]
     fn counts_sum_to_population() {
         let mut seed = 42u64;
@@ -298,7 +443,23 @@ mod tests {
             let b = case["birth"].as_u64().unwrap() as u16;
             let s = case["survive"].as_u64().unwrap() as u16;
             let gens = case["gens"].as_u64().unwrap() as u8;
-            let out = step_n(&input, b, s, gens);
+            let out = if let Some(amp) = case.get("amp").and_then(|a| a.as_u64()) {
+                let seed: Vec<u64> = case["seed"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|x| u64::from_str_radix(x.as_str().unwrap(), 16).unwrap())
+                    .collect();
+                let q = Quantum {
+                    q_birth: case["qBirth"].as_u64().unwrap() as u16,
+                    q_survive: case["qSurvive"].as_u64().unwrap() as u16,
+                    amp: amp as u8,
+                    seed: [seed[0], seed[1], seed[2], seed[3]],
+                };
+                step_n_q(&input, b, s, &q, case["gen0"].as_u64().unwrap(), gens)
+            } else {
+                step_n(&input, b, s, gens)
+            };
             assert_eq!(out, expected, "case {}", case["name"]);
             let counts: Vec<u64> = case["counts"]
                 .as_array()

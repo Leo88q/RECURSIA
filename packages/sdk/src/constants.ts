@@ -61,17 +61,27 @@ export const DEFAULT_PARAMS: Params = {
   plantCost: 5n * ONE,
 };
 
-/** Built-in "laws of physics" shipped as the first modules. */
-export const PHYSICS_PRESETS = [
-  { name: "Conway Life", birth: 1 << 3, survive: (1 << 2) | (1 << 3), royaltyBps: 100 },
-  { name: "HighLife", birth: (1 << 3) | (1 << 6), survive: (1 << 2) | (1 << 3), royaltyBps: 150 },
-  { name: "Day & Night", birth: (1 << 3) | (1 << 6) | (1 << 7) | (1 << 8), survive: (1 << 3) | (1 << 4) | (1 << 6) | (1 << 7) | (1 << 8), royaltyBps: 200 },
-  { name: "Maze", birth: 1 << 3, survive: (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5), royaltyBps: 100 },
-  { name: "Seeds", birth: 1 << 2, survive: 0, royaltyBps: 300 },
-  { name: "Coral", birth: 1 << 3, survive: (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) | (1 << 8), royaltyBps: 250 },
-] as const;
+export interface PhysicsPreset { name: string; birth: number; survive: number; royaltyBps: number; qBirth: number; qSurvive: number; qAmp: number; blurb?: string }
+const Bm = (...n: number[]) => n.reduce((a, x) => a | (1 << x), 0);
 
-export function ruleString(birth: number, survive: number): string {
+/** Built-in "laws of physics" shipped as the first modules. */
+export const PHYSICS_PRESETS: readonly PhysicsPreset[] = [
+  { name: "Conway Life", birth: Bm(3), survive: Bm(2, 3), royaltyBps: 100, qBirth: 0, qSurvive: 0, qAmp: 0 },
+  { name: "HighLife", birth: Bm(3, 6), survive: Bm(2, 3), royaltyBps: 150, qBirth: 0, qSurvive: 0, qAmp: 0 },
+  { name: "Day & Night", birth: Bm(3, 6, 7, 8), survive: Bm(3, 4, 6, 7, 8), royaltyBps: 200, qBirth: 0, qSurvive: 0, qAmp: 0 },
+  { name: "Maze", birth: Bm(3), survive: Bm(1, 2, 3, 4, 5), royaltyBps: 100, qBirth: 0, qSurvive: 0, qAmp: 0 },
+  { name: "Seeds", birth: Bm(2), survive: 0, royaltyBps: 300, qBirth: 0, qSurvive: 0, qAmp: 0 },
+  { name: "Coral", birth: Bm(3), survive: Bm(4, 5, 6, 7, 8), royaltyBps: 250, qBirth: 0, qSurvive: 0, qAmp: 0 },
+  // --- quantum laws: counts in qBirth/qSurvive fire with p = 2^-qAmp (unpredictable offline)
+  { name: "Copenhagen", birth: Bm(3), survive: Bm(2, 3), royaltyBps: 200, qBirth: Bm(6), qSurvive: 0, qAmp: 1, blurb: "Жизнь Конвея + рождение при 6 соседях с вероятностью ½" },
+  { name: "Quantum Foam", birth: Bm(3), survive: Bm(2, 3), royaltyBps: 250, qBirth: Bm(6), qSurvive: Bm(4), qAmp: 2, blurb: "кипящая пена: B6 и S4 срабатывают с вероятностью ¼" },
+  { name: "Vacuum Fluctuations", birth: Bm(3), survive: Bm(2, 3), royaltyBps: 250, qBirth: Bm(2), qSurvive: 0, qAmp: 3, blurb: "из пустоты рождается жизнь: B2 с вероятностью ⅛" },
+  { name: "Tunnel Life", birth: Bm(3, 6), survive: Bm(2, 3), royaltyBps: 300, qBirth: 0, qSurvive: Bm(4), qAmp: 2, blurb: "HighLife + туннельное выживание S4 с вероятностью ¼" },
+];
+
+export function ruleString(birth: number, survive: number, qBirth = 0, qSurvive = 0, qAmp = 0): string {
   const d = (m: number) => [...Array(9).keys()].filter((n) => (m >> n) & 1).join("");
-  return `B${d(birth)}/S${d(survive)}`;
+  const base = `B${d(birth)}/S${d(survive)}`;
+  if (!qAmp || !(qBirth | qSurvive)) return base;
+  return `${base} ⚛${qBirth ? ` qB${d(qBirth)}` : ""}${qSurvive ? ` qS${d(qSurvive)}` : ""} p=1/${1 << qAmp}`;
 }

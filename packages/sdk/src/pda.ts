@@ -3,6 +3,7 @@ import { PublicKey } from "@solana/web3.js";
 export const PROGRAM_ID = new PublicKey("2GrrTSyT4AG58XkEjtsV18dV8RPm6AZgQSjSxguCwCik");
 export const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+export const SYSVAR_SLOT_HASHES = new PublicKey("SysvarS1otHashes111111111111111111111111111");
 export const BPF_UPGRADEABLE_LOADER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -24,6 +25,7 @@ export class Pdas {
   module(id: bigint | number) { return this.f([enc("module"), u64le(id)]); }
   permit(owner: PublicKey, agent: PublicKey) { return this.f([enc("permit"), owner.toBytes(), agent.toBytes()]); }
   permitVault(permit: PublicKey) { return this.f([enc("permit_vault"), permit.toBytes()]); }
+  superposition(world: PublicKey, idx: number) { return this.f([enc("superposition"), world.toBytes(), Uint8Array.of(idx)]); }
   programData() { return PublicKey.findProgramAddressSync([this.programId.toBytes()], BPF_UPGRADEABLE_LOADER)[0]; }
 }
 

@@ -9,13 +9,27 @@ import {
   REBELLION_THRESHOLD_BPS, REWARD_POOL_BPS, TERRITORIES, TOTAL_SUPPLY, TREASURY_BPS, type Params,
 } from "./constants.js";
 import { bpsFloor, distribute, epochTax, harbergerDue, splitTick, worldEmission } from "./economy.js";
-import { bigbang, GLIDER, orBlock, population, stepN, territoryCounts, writeBlock, type Grid } from "./sim.js";
+import { bigbang, GLIDER, orBlock, population, stepNQ, territoryCounts, writeBlock, type Grid } from "./sim.js";
+import { sha256 } from "@noble/hashes/sha256";
+import {
+  collapse as qCollapse, commitment as qCommitment, neighbour, quantumRuleError, quantumSeed,
+  QUANTUM_BOUNTY_DIV, QUANTUM_DELAY_SLOTS, QUANTUM_REARM_BURN_BPS, QUANTUM_REVEAL_SLOTS, QUANTUM_STAKE_MULT, SLOT_HASHES_MAX,
+} from "./quantum.js";
+
+/** Deterministic 32-byte identity for model actors / worlds (stands in for a pubkey). */
+export const idBytes = (id: string) => sha256(new TextEncoder().encode(`recursia:id:${id}`));
+const u64le = (v: number | bigint) => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(v), true); return b; };
 
 export class GameError extends Error {}
 function req(c: unknown, m: string): asserts c { if (!c) throw new GameError(m); }
 
 export interface MTerritory { holder: string | null; price: bigint; deposit: bigint; lastTaxSlot: number; lastPriceChange: number; nextPlantTick: number; acquiredSlot: number; votedRebellion: number; agent: boolean; childWorld: string | null }
-export interface MModule { id: number; author: string; name: string; birth: number; survive: number; royaltyBps: number; accrued: bigint; totalEarned: bigint; worldsUsing: number }
+export interface MModule { id: number; author: string; name: string; birth: number; survive: number; royaltyBps: number; accrued: bigint; totalEarned: bigint; worldsUsing: number; qBirth: number; qSurvive: number; qAmp: number }
+export interface MSuperposition {
+  owner: string; world: string; index: number; world2: string | null; index2: number; commitment: Uint8Array;
+  commitSlot: number; targetSlot: number; observed: boolean; observedSlot: number; entropy: Uint8Array | null;
+  revealDeadline: number; stake: bigint; rearms: number;
+}
 export interface MWorld {
   id: string; name: string; parent: string | null; parentTerritory: number; depth: number; architect: string | null; architectFeeBps: number;
   module: number; birth: number; survive: number; grid: Grid; generation: number; tickCount: number; lastTickSlot: number;
@@ -24,6 +38,8 @@ export interface MWorld {
   epochId: number; burnCur: bigint; scoresCur: number[]; prevEpochId: number; burnPrev: bigint; scoresPrev: number[]; prevClaimed: boolean;
   resonance: number; children: string[]; rebellionId: number; rebellionVotes: number; rebellionDeadline: number; lastRebellionSlot: number; liberated: boolean; totalBurned: bigint;
   history: number[];
+  // quantum layer
+  key: Uint8Array; qBirth: number; qSurvive: number; qAmp: number; entropy: Uint8Array | null; quantumEscrow: bigint; superpositions: number;
 }
 export interface MPlayer { id: string; wallet: bigint; claimable: bigint; totalEarned: bigint; isAgent: boolean; spentFees: bigint }
 export interface MPermit { owner: string; agent: string; vault: bigint; maxSpendPerEpoch: bigint; maxPrice: bigint; spent: bigint; spendEpoch: number; expirySlot: number; scope: number }
@@ -43,6 +59,9 @@ export class GameModel {
   curEpoch = 1; epochStart = 0; curTotalBurn = 0n; prevTotalBurn = 0n; prevEmission = 0n; prevClaimed = 0n;
   events: GameEvent[] = [];
   paused = false;
+  superpositions = new Map<string, MSuperposition>();
+  /** Salt of the simulated cluster's slot hashes (sandbox); fixed = reproducible runs. */
+  chainSalt: Uint8Array = new Uint8Array(32);
 
   constructor(params: Params = DEFAULT_PARAMS) {
     this.params = params;
@@ -76,8 +95,9 @@ export class GameModel {
   }
 
   // --------------------------------------------------------------- modules
-  registerModule(author: string, name: string, birth: number, survive: number, royaltyBps: number): number {
+  registerModule(author: string, name: string, birth: number, survive: number, royaltyBps: number, q: { qBirth: number; qSurvive: number; qAmp: number } = { qBirth: 0, qSurvive: 0, qAmp: 0 }): number {
     req((birth & 1) === 0 && birth !== 0 && birth <= 0x1ff && survive <= 0x1ff, "invalid rule");
+    const qErr = quantumRuleError(birth, survive, q.qBirth, q.qSurvive, q.qAmp); req(!qErr, qErr ?? "");
     req(royaltyBps <= 500, "royalty too high");
     const fee = this.params.moduleRegisterFee;
     req(this.pl(author).wallet >= fee, "insufficient funds");
@@ -86,8 +106,8 @@ export class GameModel {
     this.burn(burn); this.treasury += fee - burn;
     this.pl(author).spentFees += fee;
     const id = this.modules.length;
-    this.modules.push({ id, author, name, birth, survive, royaltyBps, accrued: 0n, totalEarned: 0n, worldsUsing: 0 });
-    this.log("module", `${author} опубликовал законы физики «${name}»`);
+    this.modules.push({ id, author, name, birth, survive, royaltyBps, accrued: 0n, totalEarned: 0n, worldsUsing: 0, ...q });
+    this.log("module", `${author} опубликовал законы физики «${name}»${q.qAmp ? " ⚛ (квантовые)" : ""}`);
     this.check();
     return id;
   }
@@ -99,7 +119,7 @@ export class GameModel {
   // --------------------------------------------------------------- worlds
   private newWorld(id: string, name: string, parent: MWorld | null, parentTerritory: number, architect: string, feeBps: number, moduleId: number): MWorld {
     const m = this.modules[moduleId]; req(m, "unknown module");
-    const keyBytes = new TextEncoder().encode(id.padEnd(32, "\0")).slice(0, 32);
+    const keyBytes = idBytes(id);
     const grid = bigbang(keyBytes);
     const w: MWorld = {
       id, name, parent: parent?.id ?? null, parentTerritory, depth: parent ? parent.depth + 1 : 0, architect, architectFeeBps: feeBps,
@@ -110,6 +130,7 @@ export class GameModel {
       epochId: this.curEpoch, burnCur: 0n, scoresCur: new Array(TERRITORIES).fill(0), prevEpochId: this.curEpoch - 1, burnPrev: 0n, scoresPrev: new Array(TERRITORIES).fill(0), prevClaimed: true,
       resonance: 0, children: [], rebellionId: 0, rebellionVotes: 0, rebellionDeadline: 0, lastRebellionSlot: 0, liberated: false, totalBurned: 0n,
       history: [population(grid)],
+      key: keyBytes, qBirth: m.qBirth, qSurvive: m.qSurvive, qAmp: m.qAmp, entropy: null, quantumEscrow: 0n, superpositions: 0,
     };
     m.worldsUsing++;
     this.worlds.set(id, w);
@@ -199,7 +220,15 @@ export class GameModel {
     const s = splitTick(p.tickCost, p.crankerBps, p.protocolBps, p.hostBps, m.royaltyBps, !!host);
     this.rollEpoch(w);
     w.energy -= p.tickCost; w.vault -= p.tickCost;
-    w.grid = stepN(w.grid, w.birth, w.survive, p.gensPerTick);
+    if (isQuantum(w)) {
+      // same schedule as the program: hash of slot (last tick + interval − 1)
+      const hash = this.slotHash(w.lastTickSlot + Number(p.tickIntervalSlots) - 1);
+      w.entropy = hash;
+      const q = { qBirth: w.qBirth, qSurvive: w.qSurvive, amp: w.qAmp, seed: quantumSeed(hash, w.key, BigInt(w.generation)) };
+      w.grid = stepNQ(w.grid, w.birth, w.survive, q, BigInt(w.generation), p.gensPerTick);
+    } else {
+      w.grid = stepNQ(w.grid, w.birth, w.survive, null, 0n, p.gensPerTick);
+    }
     w.alive = territoryCounts(w.grid);
     for (let i = 0; i < TERRITORIES; i++) w.scoresCur[i] += w.alive[i];
     w.generation += p.gensPerTick; w.tickCount++; w.lastTickSlot = this.slot;
@@ -496,6 +525,144 @@ export class GameModel {
   }
 
   // --------------------------------------------------------------- invariants
+  // --------------------------------------------------------------- quantum layer
+  /** Simulated SlotHashes entry (every slot produced in the model). */
+  slotHash(slot: number): Uint8Array {
+    return sha256(new Uint8Array([...new TextEncoder().encode("recursia:slot"), ...this.chainSalt, ...u64le(Math.max(0, slot))]));
+  }
+  superposition(worldId: string, idx: number) { return this.superpositions.get(`${worldId}:${idx}`); }
+  quantumStake(entangled: boolean) { return this.params.plantCost * QUANTUM_STAKE_MULT * (entangled ? 2n : 1n); }
+  /** Client helper: the commitment exactly as the program computes it. */
+  commitFor(owner: string, worldId: string, idx: number, a: bigint, b: bigint, weightBps: number, salt: Uint8Array) {
+    return qCommitment(a, b, weightBps, salt, idBytes(owner), this.world(worldId).key, idx);
+  }
+
+  canQuantumCommit(holder: string, worldId: string, idx: number, entangle?: { world: string; index: number } | null): string | null {
+    const w = this.world(worldId); const t = w.territories[idx];
+    if (this.paused) return "paused";
+    if (t.holder !== holder) return "not holder";
+    if (this.superposition(worldId, idx)) return "already superposed";
+    if (w.tickCount < t.nextPlantTick) return "cooldown";
+    if (this.wouldForeclose(w, idx)) return "deposit exhausted";
+    if (entangle) {
+      if (entangle.world === worldId) return "entangle across different worlds";
+      const w2 = this.world(entangle.world); const t2 = w2.territories[entangle.index];
+      if (t2.holder !== holder) return "not holder";
+      if (w2.tickCount < t2.nextPlantTick) return "cooldown";
+      if (this.wouldForeclose(w2, entangle.index)) return "deposit exhausted";
+    }
+    const cost = this.params.plantCost * (entangle ? 2n : 1n) + this.quantumStake(!!entangle);
+    if (this.pl(holder).wallet < cost) return "insufficient funds";
+    return null;
+  }
+
+  quantumCommit(holder: string, worldId: string, idx: number, commitment: Uint8Array, entangle?: { world: string; index: number } | null) {
+    const why = this.canQuantumCommit(holder, worldId, idx, entangle); req(!why, why ?? "");
+    req(commitment.length === 32 && commitment.some((b) => b !== 0), "commitment");
+    const w = this.world(worldId); const t = w.territories[idx];
+    const n = entangle ? 2n : 1n;
+    const burn = this.params.plantCost * n, stake = this.quantumStake(!!entangle);
+    // effects
+    this.accrueTax(w, idx); t.nextPlantTick = w.tickCount + PLANT_COOLDOWN_TICKS;
+    if (entangle) { const w2 = this.world(entangle.world); this.accrueTax(w2, entangle.index); w2.territories[entangle.index].nextPlantTick = w2.tickCount + PLANT_COOLDOWN_TICKS; }
+    this.spend(holder, burn + stake);
+    this.rollEpoch(w); this.recordBurn(w, burn);
+    w.quantumEscrow += stake; w.vault += stake; w.superpositions++;
+    this.superpositions.set(`${worldId}:${idx}`, {
+      owner: holder, world: worldId, index: idx, world2: entangle?.world ?? null, index2: entangle?.index ?? 0, commitment: commitment.slice(),
+      commitSlot: this.slot, targetSlot: this.slot + QUANTUM_DELAY_SLOTS, observed: false, observedSlot: 0, entropy: null,
+      revealDeadline: 0, stake, rearms: 0,
+    });
+    this.log("quantum", `${holder} посадил клетку #${idx} мира «${w.name}» в суперпозицию${entangle ? ` (запутана с «${this.world(entangle.world).name}» #${entangle.index})` : ""}`, worldId);
+    this.check();
+  }
+
+  canObserve(worldId: string, idx: number): string | null {
+    const sp = this.superposition(worldId, idx);
+    if (!sp) return "no superposition";
+    if (sp.observed) return "already observed";
+    if (this.slot <= sp.targetSlot) return "not measurable yet";
+    return null;
+  }
+
+  /** Returns "observed" | "rearmed". Works while paused (settlement). */
+  quantumObserve(observer: string, worldId: string, idx: number): "observed" | "rearmed" {
+    const why = this.canObserve(worldId, idx); req(!why, why ?? "");
+    const sp = this.superposition(worldId, idx)!; const w = this.world(worldId);
+    this.pl(observer);
+    if (this.slot - sp.targetSlot >= SLOT_HASHES_MAX) {
+      const burned = (sp.stake * QUANTUM_REARM_BURN_BPS) / 10_000n;
+      sp.stake -= burned; w.quantumEscrow -= burned; w.vault -= burned; this.burn(burned);
+      sp.targetSlot = this.slot + QUANTUM_DELAY_SLOTS; sp.rearms++;
+      this.log("quantum", `Измерение клетки #${idx} «${w.name}» просрочено — перевзведено, сожжено ${fmtT(burned)}`, worldId);
+      this.check();
+      return "rearmed";
+    }
+    const bounty = sp.stake / QUANTUM_BOUNTY_DIV;
+    sp.observed = true; sp.observedSlot = this.slot; sp.entropy = this.slotHash(sp.targetSlot);
+    sp.revealDeadline = this.slot + QUANTUM_REVEAL_SLOTS;
+    sp.stake -= bounty; w.quantumEscrow -= bounty; w.vault -= bounty; this.pl(observer).wallet += bounty;
+    this.log("quantum", `👁 ${observer} наблюдал клетку #${idx} «${w.name}»: волновая функция зафиксирована`, worldId);
+    this.check();
+    return "observed";
+  }
+
+  /** Predict the outcome for the owner (who knows the preimage) once observed. */
+  previewCollapse(worldId: string, idx: number, weightBps: number) {
+    const sp = this.superposition(worldId, idx);
+    if (!sp?.observed || !sp.entropy) return null;
+    return qCollapse(sp.entropy, sp.commitment, weightBps);
+  }
+
+  quantumCollapse(owner: string, worldId: string, idx: number, a: bigint, b: bigint, weightBps: number, salt: Uint8Array) {
+    const sp = this.superposition(worldId, idx); req(sp, "no superposition");
+    req(sp.owner === owner, "not owner");
+    req(sp.observed && sp.entropy, "not observed");
+    req(this.slot <= sp.revealDeadline, "reveal window closed");
+    req(weightBps >= 0 && weightBps <= 10_000, "weight");
+    const expect = qCommitment(a, b, weightBps, salt, idBytes(owner), this.world(worldId).key, idx);
+    req(expect.every((v, i) => v === sp.commitment[i]), "commitment mismatch");
+    const w = this.world(worldId);
+    const c = qCollapse(sp.entropy, sp.commitment, weightBps);
+    const [primary, partner] = c.branchA ? [a, b] : [b, a];
+    let tunnel: number | null = null;
+    if (w.territories[idx].holder === owner) {
+      writeBlock(w.grid, idx, primary);
+      if (c.tunnel) { tunnel = neighbour(idx, c.tunnelDir); orBlock(w.grid, tunnel, primary); }
+      w.alive = territoryCounts(w.grid);
+    }
+    if (sp.world2) {
+      const w2 = this.world(sp.world2);
+      if (w2.territories[sp.index2].holder === owner) { writeBlock(w2.grid, sp.index2, partner); w2.alive = territoryCounts(w2.grid); }
+    }
+    w.quantumEscrow -= sp.stake; w.vault -= sp.stake; w.superpositions--;
+    this.pl(owner).wallet += sp.stake;
+    this.superpositions.delete(`${worldId}:${idx}`);
+    this.log("quantum", `⚛ Коллапс клетки #${idx} «${w.name}» → ветвь ${c.branchA ? "A" : "B"}${tunnel !== null ? `, туннелирование в #${tunnel}` : ""}${sp.world2 ? `; запутанная пара в «${this.world(sp.world2).name}» получила противоположное состояние` : ""}`, worldId);
+    this.check();
+    return { ...c, tunnelTo: tunnel, pattern: primary };
+  }
+
+  canDecohere(worldId: string, idx: number): string | null {
+    const sp = this.superposition(worldId, idx);
+    if (!sp) return "no superposition";
+    if (this.paused) return "paused";
+    const expired = sp.observed ? this.slot > sp.revealDeadline : this.slot > sp.targetSlot + QUANTUM_REVEAL_SLOTS;
+    return expired ? null : "still coherent";
+  }
+
+  quantumDecohere(caller: string, worldId: string, idx: number) {
+    const why = this.canDecohere(worldId, idx); req(!why, why ?? "");
+    const sp = this.superposition(worldId, idx)!; const w = this.world(worldId);
+    this.pl(caller);
+    const bounty = sp.stake / QUANTUM_BOUNTY_DIV; const burned = sp.stake - bounty;
+    w.quantumEscrow -= sp.stake; w.vault -= sp.stake; w.superpositions--;
+    this.pl(caller).wallet += bounty; this.burn(burned);
+    this.superpositions.delete(`${worldId}:${idx}`);
+    this.log("quantum", `Декогеренция: клетка #${idx} «${w.name}» не раскрыта вовремя — сожжено ${fmtT(burned)}`, worldId);
+    this.check();
+  }
+
   circulating(): bigint {
     let v = this.rewardPool + this.treasury + this.claims + this.distribution;
     for (const p of this.players.values()) v += p.wallet;
@@ -509,7 +676,10 @@ export class GameModel {
     const sum = this.circulating() + this.totalBurned;
     if (sum !== TOTAL_SUPPLY) throw new Error(`supply invariant broken: ${sum} != ${TOTAL_SUPPLY}`);
     for (const w of this.worlds.values()) {
-      const need = w.energy + w.rewardsReserved + w.deposits + w.architectAccrued;
+      const need = w.energy + w.rewardsReserved + w.deposits + w.architectAccrued + w.quantumEscrow;
+      let esc = 0n; let n = 0;
+      for (const sp of this.superpositions.values()) if (sp.world === w.id) { esc += sp.stake; n++; }
+      if (esc !== w.quantumEscrow || n !== w.superpositions) throw new Error(`quantum escrow mismatch in ${w.id}`);
       if (w.vault < need) throw new Error(`vault insolvent in ${w.id}`);
       if (w.rewardsReserved !== w.pending.reduce((a, b) => a + b, 0n)) throw new Error(`pending mismatch in ${w.id}`);
       if (w.deposits !== w.territories.reduce((a, t) => a + t.deposit, 0n)) throw new Error(`deposit mismatch in ${w.id}`);
@@ -522,6 +692,8 @@ export class GameModel {
 
   advanceSlots(n: number) { this.slot += n; }
 }
+
+export const isQuantum = (w: { qAmp: number; qBirth: number; qSurvive: number }) => w.qAmp > 0 && (w.qBirth | w.qSurvive) !== 0;
 
 export const fmtT = (v: bigint) => {
   const whole = v / ONE; const frac = (v % ONE) / 10_000n;

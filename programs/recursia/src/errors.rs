@@ -78,4 +78,20 @@ pub enum RecursiaError {
     BadName,
     #[msg("Unsupported account version")]
     BadVersion,
+    #[msg("Measurement slot not reached yet")]
+    NotMeasurable,
+    #[msg("Superposition already observed")]
+    AlreadyObserved,
+    #[msg("Superposition not observed yet")]
+    NotObserved,
+    #[msg("Reveal window closed: the state decohered")]
+    RevealWindowClosed,
+    #[msg("Revealed state does not match the commitment")]
+    CommitmentMismatch,
+    #[msg("Superposition is still coherent")]
+    StillCoherent,
+    #[msg("Invalid amplitude / weight")]
+    InvalidWeight,
+    #[msg("SlotHashes sysvar unavailable or malformed")]
+    SlotHashes,
 }

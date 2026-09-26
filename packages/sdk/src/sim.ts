@@ -25,7 +25,7 @@ function fromHalves(h: Uint32Array): Grid {
   return g;
 }
 
-function stepHalves(src: Uint32Array, dst: Uint32Array, birth: number, survive: number): void {
+function stepHalves(src: Uint32Array, dst: Uint32Array, birth: number, survive: number, qb = 0, qs = 0, qmask?: Uint32Array): void {
   for (let y = 0; y < GRID; y++) {
     const yu = (y + GRID - 1) % GRID, yd = (y + 1) % GRID;
     for (let o = 0; o < 2; o++) {
@@ -46,13 +46,20 @@ function stepHalves(src: Uint32Array, dst: Uint32Array, birth: number, survive: 
       c0 = s0 & n5; s0 ^= n5; c1 = s1 & c0; s1 ^= c0; c2 = s2 & c1; s2 ^= c1; s3 |= c2;
       c0 = s0 & n6; s0 ^= n6; c1 = s1 & c0; s1 ^= c0; c2 = s2 & c1; s2 ^= c1; s3 |= c2;
       c0 = s0 & n7; s0 ^= n7; c1 = s1 & c0; s1 ^= c0; c2 = s2 & c1; s2 ^= c1; s3 |= c2;
-      let born = 0, keep = 0;
+      let born = 0, keep = 0, qborn = 0, qkeep = 0;
       for (let n = 0; n < 9; n++) {
-        const bn = (birth >> n) & 1, sn = (survive >> n) & 1;
-        if (!bn && !sn) continue;
+        const bn = (birth >> n) & 1, sn = (survive >> n) & 1, qbn = (qb >> n) & 1, qsn = (qs >> n) & 1;
+        if (!bn && !sn && !qbn && !qsn) continue;
         const eq = (n & 1 ? s0 : ~s0) & (n & 2 ? s1 : ~s1) & (n & 4 ? s2 : ~s2) & (n & 8 ? s3 : ~s3);
         if (bn) born |= eq;
         if (sn) keep |= eq;
+        if (qbn) qborn |= eq;
+        if (qsn) qkeep |= eq;
+      }
+      if ((qborn | qkeep) !== 0 && qmask) {
+        const m = qmask[2 * y + o];
+        born |= qborn & m;
+        keep |= qkeep & m;
       }
       dst[2 * y + o] = ((mL & keep) | (~mL & born)) >>> 0;
     }
@@ -68,6 +75,51 @@ export function stepN(grid: Grid, birth: number, survive: number, gens: number):
   survive &= RULE_MASK;
   let a = toHalves(grid), b = new Uint32Array(GRID * 2);
   for (let i = 0; i < gens; i++) { stepHalves(a, b, birth, survive); const t = a; a = b; b = t; }
+  return fromHalves(a);
+}
+
+// ------------------------------------------------------------------ quantum
+/** Quantum rule extension (mirror of `sim::Quantum`). */
+export interface Quantum { qBirth: number; qSurvive: number; amp: number; seed: bigint[] /* 4 × u64 */ }
+
+export const quantumActive = (q?: Quantum | null): q is Quantum => !!q && q.amp > 0 && ((q.qBirth | q.qSurvive) & RULE_MASK) !== 0;
+
+export function splitmix64(x: bigint): bigint {
+  let z = (x + 0x9e3779b97f4a7c15n) & M64;
+  z = ((z ^ (z >> 30n)) * 0xbf58476d1ce4e5b9n) & M64;
+  z = ((z ^ (z >> 27n)) * 0x94d049bb133111ebn) & M64;
+  return z ^ (z >> 31n);
+}
+
+/** Row mask for absolute generation `gen` (each bit = 1 with p = 2^-amp). */
+export function quantumMask(q: Quantum, gen: bigint, y: number): bigint {
+  let m = M64;
+  for (let k = 0; k < Math.min(q.amp, 3); k++) m &= splitmix64(q.seed[k] ^ ((gen << 8n) & M64) ^ BigInt(y));
+  return m;
+}
+
+function maskHalves(q: Quantum, gen: bigint): Uint32Array {
+  const h = new Uint32Array(GRID * 2);
+  for (let y = 0; y < GRID; y++) { const m = quantumMask(q, gen, y); h[2 * y] = Number(m & 0xffffffffn); h[2 * y + 1] = Number(m >> 32n); }
+  return h;
+}
+
+function sampledMask(amp: number, next: () => number): Uint32Array {
+  const h = new Uint32Array(GRID * 2);
+  for (let i = 0; i < h.length; i++) { let m = 0xffffffff; for (let k = 0; k < amp; k++) m &= next(); h[i] = m >>> 0; }
+  return h;
+}
+
+/** Quantum `step_n_q`: generations gen0+1 ..= gen0+gens. */
+export function stepNQ(grid: Grid, birth: number, survive: number, q: Quantum | null | undefined, gen0: bigint, gens: number): Grid {
+  if (!quantumActive(q)) return stepN(grid, birth, survive, gens);
+  birth &= RULE_MASK; survive &= RULE_MASK;
+  const qb = q.qBirth & RULE_MASK & ~birth, qs = q.qSurvive & RULE_MASK & ~survive;
+  let a = toHalves(grid), b = new Uint32Array(GRID * 2);
+  for (let i = 0; i < gens; i++) {
+    stepHalves(a, b, birth, survive, qb, qs, maskHalves(q, gen0 + BigInt(i) + 1n));
+    const t = a; a = b; b = t;
+  }
   return fromHalves(a);
 }
 
@@ -148,13 +200,21 @@ function blockCountHalves(h: Uint32Array, idx: number): number {
  * `gens` generations and return the sum of live cells in that block sampled
  * every `every` generations. Runs entirely in the fast uint32 domain.
  */
-export function scoreBlockPattern(grid: Grid, birth: number, survive: number, idx: number, pattern: bigint, gens = 8, every = 2): number {
+/**
+ * @param sampler when given (quantum worlds), masks are drawn from this uint32
+ *   source with the same density 2^-amp — statistically identical futures,
+ *   ~50× faster than the exact splitmix schedule (used by AI Monte-Carlo only).
+ */
+export function scoreBlockPattern(grid: Grid, birth: number, survive: number, idx: number, pattern: bigint, gens = 8, every = 2, q?: Quantum | null, gen0 = 0n, sampler?: () => number): number {
   const g = grid.slice();
   writeBlock(g, idx, pattern);
   let a = toHalves(g), b = new Uint32Array(GRID * 2);
   let score = 0;
+  const quantum = quantumActive(q);
+  const qb = quantum ? q.qBirth & RULE_MASK & ~birth : 0, qs = quantum ? q.qSurvive & RULE_MASK & ~survive : 0;
   for (let i = 1; i <= gens; i++) {
-    stepHalves(a, b, birth & RULE_MASK, survive & RULE_MASK);
+    if (quantum) stepHalves(a, b, birth & RULE_MASK, survive & RULE_MASK, qb, qs, sampler ? sampledMask(q.amp, sampler) : maskHalves(q, gen0 + BigInt(i)));
+    else stepHalves(a, b, birth & RULE_MASK, survive & RULE_MASK);
     const t = a; a = b; b = t;
     if (i % every === 0) score += blockCountHalves(a, idx);
   }

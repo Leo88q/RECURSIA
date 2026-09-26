@@ -1,8 +1,11 @@
 // Sandbox universe: the exact game rules (reference model mirrored from the
 // on-chain program) with AI inhabitants, running locally in the browser.
 import {
-  AIAgent, DEFAULT_PARAMS, GameModel, ONE, PHYSICS_PRESETS, epochTax, type MWorld, type Params, type Personality,
+  AIAgent, DEFAULT_PARAMS, GameModel, ONE, PHYSICS_PRESETS, epochTax, randomSalt, type MWorld, type Params, type Personality,
 } from "@recursia/sdk";
+
+/** Off-chain preimage of a superposition — only the player knows it. */
+export interface QuantumSecret { a: bigint; b: bigint; weight: number; salt: Uint8Array; entangle?: { world: string; index: number } }
 
 export const YOU = "Вы";
 export const KEEPER = "Хранитель";
@@ -24,16 +27,20 @@ export class Sandbox {
   mine: MyAgent[] = [];
   steps = 0;
   lastError: string | null = null;
+  /** Player's superposition secrets, keyed "world:index". Lose it → stake decoheres. */
+  secrets = new Map<string, QuantumSecret>();
 
   constructor(seed = 42) {
     const m = (this.m = new GameModel(SANDBOX_PARAMS));
+    m.chainSalt = randomSalt(); // every sandbox session gets its own "cluster" entropy
     m.addPlayer(DEV, 200_000n * ONE);
-    for (const p of PHYSICS_PRESETS) m.registerModule(DEV, p.name, p.birth, p.survive, p.royaltyBps);
+    for (const p of PHYSICS_PRESETS) m.registerModule(DEV, p.name, p.birth, p.survive, p.royaltyBps, p);
     m.addPlayer(KEEPER, 0n);
     m.addPlayer("Основатель", 60_000n * ONE);
     m.createRootWorld("Основатель", "Альфа", 0, 1_500, 8_000n * ONE);
     m.createRootWorld("Основатель", "Бета", 1, 2_500, 6_000n * ONE);
     m.createRootWorld("Основатель", "Коралл", 5, 1_000, 6_000n * ONE);
+    m.createRootWorld("Основатель", "Квантовая пена", PHYSICS_PRESETS.findIndex((p) => p.name === "Quantum Foam"), 1_500, 8_000n * ONE);
     let k = 0;
     for (const [pers, label] of PERSONAS) {
       for (let j = 1; j <= 3; j++) {
@@ -55,6 +62,12 @@ export class Sandbox {
     for (const id of m.worlds.keys()) if (!m.canTick(id)) { try { m.tick(KEEPER, id); } catch { /* raced */ } }
     for (const a of this.agents) if (a.rng.next() < 0.55) a.act(m);
     for (const { agent } of this.mine) agent.act(m);
+    // keeper: quantum measurements (bounty) — the "observer" of the multiverse
+    for (const sp of [...m.superpositions.values()]) {
+      if (m.canObserve(sp.world, sp.index) === null) { try { m.quantumObserve(KEEPER, sp.world, sp.index); } catch { /* */ } }
+      else if (m.canDecohere(sp.world, sp.index) === null) { try { m.quantumDecohere(KEEPER, sp.world, sp.index); } catch { /* */ } }
+    }
+    for (const k of [...this.secrets.keys()]) if (!m.superpositions.has(k)) this.secrets.delete(k);
     // keeper crank duties: foreclosures, breaches, epochs, emission claims
     for (const w of m.worlds.values()) {
       w.territories.forEach((t, i) => { if (t.holder && m.wouldForeclose(w, i)) { try { m.settle(w.id, i); } catch { /* */ } } });
@@ -80,6 +93,28 @@ export class Sandbox {
       this.mine.push({ agent, label, personality });
       this.m.events.push({ slot: this.m.slot, kind: "agent", text: `Вы наняли ИИ-жителя «${label}» с бюджетом ${fmtRcr(budget)} (лимит ${fmtRcr(perEpoch)}/эпоху)` });
     });
+  }
+
+  /** Commit |ψ⟩ = √w·|A⟩ + √(1−w)·|B⟩ for the player (salt generated locally). */
+  superpose(worldId: string, idx: number, a: bigint, b: bigint, weight: number, entangle?: { world: string; index: number }): string | null {
+    return this.act(() => {
+      const salt = randomSalt();
+      const c = this.m.commitFor(YOU, worldId, idx, a, b, weight, salt);
+      this.m.quantumCommit(YOU, worldId, idx, c, entangle);
+      this.secrets.set(`${worldId}:${idx}`, { a, b, weight, salt, entangle });
+    });
+  }
+
+  collapse(worldId: string, idx: number): string | null {
+    const s = this.secrets.get(`${worldId}:${idx}`);
+    if (!s) return "Секрет суперпозиции утерян — ставка сгорит при декогеренции";
+    return this.act(() => { this.m.quantumCollapse(YOU, worldId, idx, s.a, s.b, s.weight, s.salt); this.secrets.delete(`${worldId}:${idx}`); });
+  }
+
+  superposedIn(worldId: string): number[] {
+    const out: number[] = [];
+    for (const sp of this.m.superpositions.values()) if (sp.world === worldId) out.push(sp.index);
+    return out;
   }
 
   defaultDeposit(price: bigint) { return epochTax(price, this.m.params.harbergerBps) * 3n; }
@@ -112,5 +147,14 @@ const DICT: Record<string, string> = {
   "bought after start": "Клетка куплена после начала восстания",
   "architect can't rebel": "Архитектор не может восстать против себя",
   "too fresh": "Клетка куплена слишком недавно",
+  "already superposed": "Клетка уже в суперпозиции",
+  "not measurable yet": "Ещё рано: энтропия будущего слота не появилась",
+  "not observed": "Состояние ещё не наблюдали",
+  "reveal window closed": "Окно раскрытия закрыто — декогеренция",
+  "commitment mismatch": "Раскрытие не совпадает с коммитом",
+  "still coherent": "Суперпозиция ещё когерентна",
+  "entangle across different worlds": "Запутывать можно только клетки разных миров",
+  "no superposition": "Суперпозиции нет",
+  "paused": "Протокол на паузе",
 };
 export const translate = (m: string) => DICT[m] ?? m;

@@ -73,3 +73,24 @@ pub const SEED_PERMIT: &[u8] = b"permit";
 pub const SEED_PERMIT_VAULT: &[u8] = b"permit_vault";
 
 pub const ACCOUNT_VERSION: u8 = 1;
+
+// ---------------------------------------------------------------- quantum layer
+/// Seed for superposition accounts: [SEED_SUPERPOSITION, world, [index]].
+pub const SEED_SUPERPOSITION: &[u8] = b"superposition";
+/// Max quantum amplitude exponent: a quantum rule fires with p = 2^-amp.
+pub const MAX_Q_AMP: u8 = 3;
+/// Slots between commit and the scheduled "measurement" slot whose hash is used.
+pub const QUANTUM_DELAY_SLOTS: u64 = 32;
+/// After observation the owner has this long to reveal (≈ 2.4 h).
+pub const QUANTUM_REVEAL_SLOTS: u64 = 21_600;
+/// Stake locked per superposed territory = plant_cost × this.
+pub const QUANTUM_STAKE_MULT: u64 = 4;
+/// Observer / decoherence bounty = stake / this.
+pub const QUANTUM_BOUNTY_DIV: u64 = 20;
+/// Part of the stake burned when an expired measurement must be re-armed
+/// (punishes an owner who hopes nobody observes an unfavourable outcome).
+pub const QUANTUM_REARM_BURN_BPS: u64 = 2_500;
+/// Probability (x/256) that a collapsing pattern also tunnels into a neighbour block.
+pub const TUNNEL_CHANCE_256: u8 = 16;
+/// SlotHashes sysvar keeps at most this many recent entries.
+pub const SLOT_HASHES_MAX: usize = 512;

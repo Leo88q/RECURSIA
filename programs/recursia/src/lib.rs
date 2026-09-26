@@ -16,6 +16,7 @@ pub mod errors;
 pub mod events;
 pub mod instructions;
 pub mod math;
+pub mod quantum;
 pub mod sim;
 pub mod state;
 
@@ -52,14 +53,18 @@ pub mod recursia {
     }
 
     // ---- physics modules (developer marketplace)
+    #[allow(clippy::too_many_arguments)]
     pub fn register_module(
         ctx: Context<RegisterModule>,
         birth: u16,
         survive: u16,
         royalty_bps: u16,
         name: [u8; 32],
+        q_birth: u16,
+        q_survive: u16,
+        q_amp: u8,
     ) -> Result<()> {
-        module::register_module(ctx, birth, survive, royalty_bps, name)
+        module::register_module(ctx, birth, survive, royalty_bps, name, q_birth, q_survive, q_amp)
     }
     pub fn claim_module_royalties(ctx: Context<ClaimModuleRoyalties>) -> Result<()> {
         module::claim_module_royalties(ctx)
@@ -169,5 +174,25 @@ pub mod recursia {
         deposit: u64,
     ) -> Result<()> {
         territory::agent_acquire(ctx, index, max_price, new_price, deposit)
+    }
+
+    // ---- quantum layer
+    pub fn quantum_commit(ctx: Context<QuantumCommit>, index: u8, commitment: [u8; 32]) -> Result<()> {
+        instructions::quantum::quantum_commit(ctx, index, commitment)
+    }
+    pub fn quantum_observe(ctx: Context<QuantumObserve>) -> Result<()> {
+        instructions::quantum::quantum_observe(ctx)
+    }
+    pub fn quantum_collapse(
+        ctx: Context<QuantumCollapse>,
+        pattern_a: u64,
+        pattern_b: u64,
+        weight_bps: u16,
+        salt: [u8; 32],
+    ) -> Result<()> {
+        instructions::quantum::quantum_collapse(ctx, pattern_a, pattern_b, weight_bps, salt)
+    }
+    pub fn quantum_decohere(ctx: Context<QuantumDecohere>) -> Result<()> {
+        instructions::quantum::quantum_decohere(ctx)
     }
 }

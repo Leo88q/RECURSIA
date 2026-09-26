@@ -9,8 +9,8 @@
  */
 import type { PublicKey } from "@solana/web3.js";
 import {
-  BREACH_RESONANCE, harbergerDue,
-  type ConfigAccount, type TerritoryAccount, type WorldAccount,
+  BREACH_RESONANCE, harbergerDue, QUANTUM_BOUNTY_DIV, QUANTUM_REVEAL_SLOTS,
+  type ConfigAccount, type SuperpositionAccount, type TerritoryAccount, type WorldAccount,
 } from "@recursia/sdk";
 
 export interface Snapshot {
@@ -18,6 +18,7 @@ export interface Snapshot {
   config: ConfigAccount;
   worlds: { key: PublicKey; acc: WorldAccount }[];
   territories: { key: PublicKey; acc: TerritoryAccount }[];
+  superpositions?: { key: PublicKey; acc: SuperpositionAccount }[];
 }
 
 export type Action =
@@ -25,7 +26,9 @@ export type Action =
   | { kind: "claim_world_epoch"; world: PublicKey }
   | { kind: "settle"; world: PublicKey; index: number; holder: PublicKey }
   | { kind: "breach"; child: PublicKey; host: PublicKey }
-  | { kind: "tick"; world: PublicKey; module: PublicKey; host: PublicKey | null };
+  | { kind: "tick"; world: PublicKey; module: PublicKey; host: PublicKey | null }
+  | { kind: "quantum_observe"; world: PublicKey; index: number }
+  | { kind: "quantum_decohere"; world: PublicKey; index: number; owner: PublicKey };
 
 export interface PlanLimits {
   /** Max tick transactions per round (each costs a signature fee). */
@@ -34,8 +37,31 @@ export interface PlanLimits {
   maxSettles: number;
   /** Skip worlds whose energy covers fewer than this many ticks (dust worlds). */
   minTicksOfEnergy: bigint;
+  /** Max observe/decohere transactions per round. */
+  maxQuantum: number;
 }
-export const DEFAULT_LIMITS: PlanLimits = { maxTicks: 24, maxSettles: 16, minTicksOfEnergy: 1n };
+export const DEFAULT_LIMITS: PlanLimits = { maxTicks: 24, maxSettles: 16, minTicksOfEnergy: 1n, maxQuantum: 16 };
+
+/**
+ * Quantum measurements. `observe` is allowed even while paused (settlement,
+ * like withdrawals); `decohere` only when unpaused. Earliest target first.
+ */
+export function planQuantum(s: Snapshot, limits: PlanLimits = DEFAULT_LIMITS): Action[] {
+  const out: Action[] = [];
+  const sps = [...(s.superpositions ?? [])].sort((a, b) => (a.acc.targetSlot < b.acc.targetSlot ? -1 : 1));
+  for (const { acc } of sps) {
+    if (out.length >= limits.maxQuantum) break;
+    if (acc.stake / QUANTUM_BOUNTY_DIV === 0n) continue; // nothing to earn, let the owner do it
+    if (!acc.observed && s.slot > acc.targetSlot) {
+      if (s.slot > acc.targetSlot + BigInt(QUANTUM_REVEAL_SLOTS) && !s.config.paused) {
+        out.push({ kind: "quantum_decohere", world: acc.world, index: acc.index, owner: acc.owner });
+      } else out.push({ kind: "quantum_observe", world: acc.world, index: acc.index });
+    } else if (acc.observed && s.slot > acc.revealDeadline && !s.config.paused) {
+      out.push({ kind: "quantum_decohere", world: acc.world, index: acc.index, owner: acc.owner });
+    }
+  }
+  return out;
+}
 
 const isDefault = (k: PublicKey) => k.toBytes().every((b) => b === 0);
 
@@ -49,7 +75,8 @@ export function claimable(w: WorldAccount, curEpoch: bigint): boolean {
 export function plan(s: Snapshot, limits: PlanLimits = DEFAULT_LIMITS): Action[] {
   const out: Action[] = [];
   const c = s.config;
-  if (c.paused || !c.genesisDone) return out; // nothing is crankable while paused
+  if (!c.genesisDone) return out;
+  if (c.paused) return planQuantum(s, limits); // only settlement is crankable while paused
 
   const p = c.params;
   let curEpoch = c.curEpoch;
@@ -94,6 +121,8 @@ export function plan(s: Snapshot, limits: PlanLimits = DEFAULT_LIMITS): Action[]
     .slice(0, limits.maxTicks);
   for (const w of due) out.push({ kind: "tick", world: w.key, module: w.acc.module, host: w.acc.depth > 0 ? w.acc.parent : null });
 
+  // 5. quantum measurements (bounty = stake / 20)
+  out.push(...planQuantum(s, limits));
   return out;
 }
 

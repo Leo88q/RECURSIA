@@ -21,6 +21,10 @@ pub fn add(a: u64, b: u64) -> Result<u64> {
 }
 
 #[inline]
+pub fn mul(a: u64, b: u64) -> Result<u64> {
+    a.checked_mul(b).ok_or_else(|| error!(RecursiaError::MathOverflow))
+}
+
 pub fn sub(a: u64, b: u64) -> Result<u64> {
     a.checked_sub(b).ok_or(RecursiaError::MathOverflow.into())
 }

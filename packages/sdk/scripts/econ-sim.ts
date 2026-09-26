@@ -14,6 +14,9 @@
  *   I5  the studio earns (protocol fee + module royalties) while players play
  *   I6  reward pool is monotonically non-increasing and never negative
  *   I7  AI agents cannot overspend their permit (per-epoch cap enforced)
+ *   I8  quantum withholding is unprofitable: a player who hides unfavourable
+ *       collapses (lets them decohere) ends poorer than an honest twin
+ *   I9  quantum escrow is fully settled or still open — never leaks
  *
  * Usage: npm run econ [-- --quick] [-- --seeds N] [-- --epochs N]
  */
@@ -31,20 +34,21 @@ const EPOCHS = opt("epochs", QUICK ? 6 : 20);
 const STEP = 300;
 const PARAMS: Params = { ...DEFAULT_PARAMS, epochSlots: 9_000n };
 
-type Scenario = { name: string; agents: number; farmer: boolean; whales: number; permitAgents: number };
+type Scenario = { name: string; agents: number; farmer: boolean; whales: number; permitAgents: number; quantum?: boolean };
 const SCENARIOS: Scenario[] = [
   { name: "baseline", agents: 12, farmer: false, whales: 0, permitAgents: 0 },
   { name: "self-farm attack", agents: 8, farmer: true, whales: 0, permitAgents: 0 },
   { name: "whale pressure", agents: 8, farmer: false, whales: 3, permitAgents: 0 },
   { name: "delegated AI", agents: 6, farmer: false, whales: 0, permitAgents: 6 },
   { name: "thin market", agents: 2, farmer: false, whales: 0, permitAgents: 0 },
+  { name: "quantum worlds", agents: 10, farmer: false, whales: 0, permitAgents: 0, quantum: true },
 ];
 const PERS: Personality[] = ["gardener", "expansionist", "speculator", "demiurge"];
 const fmt = (v: bigint) => (Number(v / (ONE / 100n)) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 });
 
 interface Result {
   scenario: string; seed: number; burned: bigint; emitted: bigint; studio: bigint; worlds: number;
-  farmerPnl?: bigint; agentMedianPnl: bigint; agentBestPnl: bigint; permitOverspend: number; failures: string[];
+  farmerPnl?: bigint; withholdGap?: bigint; qStats?: string; agentMedianPnl: bigint; agentBestPnl: bigint; permitOverspend: number; failures: string[];
 }
 
 function wealth(m: GameModel, id: string): bigint {
@@ -63,11 +67,27 @@ function run(sc: Scenario, seed: number): Result {
   const assert = (c: unknown, msg: string) => { if (!c) failures.push(msg); };
 
   m.addPlayer("studio", 100_000n * ONE);
-  for (const p of PHYSICS_PRESETS) m.registerModule("studio", p.name, p.birth, p.survive, p.royaltyBps);
+  for (const p of PHYSICS_PRESETS) m.registerModule("studio", p.name, p.birth, p.survive, p.royaltyBps, p);
   m.addPlayer("keeper", 0n);
   m.addPlayer("founder", 60_000n * ONE);
-  m.createRootWorld("founder", "A", 0, 1_500, 8_000n * ONE);
-  m.createRootWorld("founder", "B", 1, 2_500, 6_000n * ONE);
+  const qMod = (n: string) => PHYSICS_PRESETS.findIndex((p) => p.name === n);
+  const worldA = m.createRootWorld("founder", "A", sc.quantum ? qMod("Quantum Foam") : 0, 1_500, 8_000n * ONE).id;
+  m.createRootWorld("founder", "B", sc.quantum ? qMod("Tunnel Life") : 1, 2_500, 6_000n * ONE);
+
+  // I8 twins: identical scripted quantum players; one withholds bad outcomes.
+  const TWIN0 = 5_000n * ONE;
+  const twins = sc.quantum ? (["honest", "withholder"] as const) : [];
+  const secrets = new Map<string, Uint8Array>();
+  twins.forEach((id, k) => {
+    m.addPlayer(id, TWIN0);
+    for (const j of [0, 1]) {
+      const idx = 40 + k * 8 + j;
+      try { m.acquire(id, worldA, idx, 10n ** 12n, PARAMS.minPrice, 150n * ONE); } catch (e) { failures.push(`I8 setup: ${(e as Error).message}`); }
+    }
+  });
+  const GOOD = 0x0000_1824_2418_0000n, BAD = 0n;
+  let qCommits = 0, qCollapses = 0, qDecoheres = 0, qRearms = 0;
+  const restore = new Set<number>();
 
   const agents: AIAgent[] = [];
   const start = new Map<string, bigint>();
@@ -126,6 +146,40 @@ function run(sc: Scenario, seed: number): Result {
       if (!m.canTick(farmId)) { try { m.tick("farmer", farmId); } catch { /* */ } }
     }
     for (const a of agents) if (a.rng.next() < 0.6) { try { a.act(m); } catch (e) { failures.push(`agent threw: ${(e as Error).message}`); } }
+    // twins act in lock-step on mirrored cells: they commit at the same moments
+    // (only when BOTH can), so the only difference is how they settle.
+    //   honest     — always reveals; after a BAD collapse restores GOOD with one
+    //                classical plant (the rational alternative to withholding)
+    //   withholder — reveals only GOOD outcomes, abandons BAD ones (stake lost)
+    if (twins.length) for (const j of [0, 1]) {
+      const cells = twins.map((id, k) => ({ id, idx: 40 + k * 8 + j }));
+      const open = cells.map((c) => m.superposition(worldA, c.idx));
+      if (open.every((sp) => !sp) && cells.every((c) => m.canQuantumCommit(c.id, worldA, c.idx) === null)) {
+        for (const c of cells) {
+          const salt = new Uint8Array(32); salt[0] = s & 0xff; salt[1] = (s >> 8) & 0xff; salt[2] = c.idx; salt[3] = j;
+          m.quantumCommit(c.id, worldA, c.idx, m.commitFor(c.id, worldA, c.idx, GOOD, BAD, 5_000, salt)); secrets.set(`${worldA}:${c.idx}`, salt); qCommits++;
+        }
+      }
+      cells.forEach((c, k) => {
+        const sp = m.superposition(worldA, c.idx);
+        if (sp?.observed && sp.owner === c.id) {
+          const good = m.previewCollapse(worldA, c.idx, 5_000)!.branchA;
+          if (c.id === "honest" || good) {
+            m.quantumCollapse(c.id, worldA, c.idx, GOOD, BAD, 5_000, secrets.get(`${worldA}:${c.idx}`)!); qCollapses++;
+            if (!good) restore.add(c.idx);
+          }
+        }
+        if (restore.has(c.idx) && m.canPlant(c.id, worldA, c.idx) === null) { try { m.plant(c.id, worldA, c.idx, GOOD); restore.delete(c.idx); } catch { /* */ } }
+        const d = m.world(worldA).territories[c.idx];
+        if (d.holder === c.id && d.deposit < 40n * ONE) { try { m.topUp(c.id, worldA, c.idx, 60n * ONE); } catch { /* */ } }
+        void k;
+      });
+    }
+    // keeper: measure & clean up (bounty = stake/20)
+    for (const sp of [...m.superpositions.values()]) {
+      if (m.canObserve(sp.world, sp.index) === null) { if (m.quantumObserve("keeper", sp.world, sp.index) === "rearmed") qRearms++; }
+      else if (m.canDecohere(sp.world, sp.index) === null) { m.quantumDecohere("keeper", sp.world, sp.index); qDecoheres++; }
+    }
     for (const w of m.worlds.values()) {
       w.territories.forEach((t, i) => { if (t.holder && m.wouldForeclose(w, i)) { try { m.settle(w.id, i); } catch { /* */ } } });
       if (w.parent && w.resonance >= 64) { try { m.breach(w.id); } catch { /* */ } }
@@ -165,10 +219,28 @@ function run(sc: Scenario, seed: number): Result {
     + m.modules.reduce((a, x) => a + x.accrued, 0n) - studio0;
   assert(studio > 0n, "I5 studio earned nothing");
 
+  // I8 / I9
+  let withholdGap: bigint | undefined;
+  if (sc.quantum) {
+    const esc = (id: string) => [...m.superpositions.values()].filter((sp) => sp.owner === id).reduce((a, sp) => a + sp.stake, 0n);
+    const hw = wealth(m, "honest") + esc("honest"), ww = wealth(m, "withholder") + esc("withholder");
+    withholdGap = ww - hw;
+    assert(ww < hw, `I8 withholding paid off: withholder ${fmt(ww)} ≥ honest ${fmt(hw)}`);
+    for (const w of m.worlds.values()) {
+      const open = [...m.superpositions.values()].filter((sp) => sp.world === w.id).reduce((a, sp) => a + sp.stake, 0n);
+      assert(open === w.quantumEscrow, `I9 escrow leak in ${w.id}`);
+    }
+  }
+  const allCommits = m.events.filter((e) => e.kind === "quantum" && /суперпозицию/.test(e.text)).length;
+  const allCollapses = m.events.filter((e) => e.kind === "quantum" && /Коллапс/.test(e.text)).length;
+  const qStats = sc.quantum
+    ? `ψ commits ${allCommits} (twins ${qCommits}), collapses ${allCollapses} (twins ${qCollapses}), decohered ${qDecoheres}, re-armed ${qRearms}`
+    : undefined;
+
   const pnls = [...start.entries()].map(([id, s0]) => wealth(m, id) - s0).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   return {
     scenario: sc.name, seed, burned: m.totalBurned, emitted: m.totalEmitted, studio, worlds: m.worlds.size,
-    farmerPnl, agentMedianPnl: pnls.length ? pnls[Math.floor(pnls.length / 2)] : 0n, agentBestPnl: pnls.length ? pnls[pnls.length - 1] : 0n,
+    farmerPnl, withholdGap, qStats, agentMedianPnl: pnls.length ? pnls[Math.floor(pnls.length / 2)] : 0n, agentBestPnl: pnls.length ? pnls[pnls.length - 1] : 0n,
     permitOverspend: failures.filter((f) => f.startsWith("I7")).length, failures,
   };
 }
@@ -188,6 +260,7 @@ for (const sc of SCENARIOS) {
       r.scenario.padEnd(18), String(seed).padStart(4), String(r.worlds).padStart(6), fmt(r.burned).padStart(12), fmt(r.emitted).padStart(12),
       `${ratio.toFixed(1)}%`.padStart(9), fmt(r.studio).padStart(11), (r.farmerPnl === undefined ? "—" : fmt(r.farmerPnl)).padStart(12), fmt(r.agentMedianPnl).padStart(14), fmt(r.agentBestPnl).padStart(12),
     ].join("  "));
+    if (r.qStats) console.log(`   ⚛ ${r.qStats}; withholder − honest = ${r.withholdGap === undefined ? "—" : fmt(r.withholdGap)} RCR`);
     const uniq = [...new Set(r.failures)];
     for (const f of uniq.slice(0, 5)) console.log(`   ✗ ${f}`);
     if (uniq.length) bad++;

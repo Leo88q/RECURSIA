@@ -10,5 +10,7 @@ export function toInstruction(rx: RecursiaIx, cranker: PublicKey, a: Action): Tr
     case "settle": return rx.settle(a.world, a.index, a.holder);
     case "breach": return rx.breach(a.child, a.host);
     case "tick": return rx.tick(cranker, a.world, a.module, a.host);
+    case "quantum_observe": return rx.quantumObserve(cranker, a.world, a.index);
+    case "quantum_decohere": return rx.quantumDecohere(cranker, a.world, a.index, a.owner);
   }
 }

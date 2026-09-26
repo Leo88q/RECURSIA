@@ -21,12 +21,14 @@ interface Props {
   onDescend: (childId: string) => void;
   frame: number;
   zoomFrom: number | null;
+  /** Territories currently in superposition (drawn as shimmering ψ frames). */
+  superposed?: number[];
 }
 
 const SIZE = 640;
 const CELL = SIZE / 64;
 
-export function WorldCanvas({ world, selected, onSelect, onDescend, frame, zoomFrom }: Props) {
+export function WorldCanvas({ world, selected, onSelect, onDescend, frame, zoomFrom, superposed = [] }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [hover, setHover] = useState<number | null>(null);
 
@@ -88,6 +90,26 @@ export function WorldCanvas({ world, selected, onSelect, onDescend, frame, zoomF
       ctx.strokeRect(tx + 16, ty + 16, 8 * CELL - 32, 8 * CELL - 32);
     });
 
+    // superpositions: flickering dashed frame + "ψ" + ghost cells (uncollapsed)
+    for (const i of superposed) {
+      const tx = (i % 8) * 8 * CELL, ty = Math.floor(i / 8) * 8 * CELL;
+      const ph = 0.5 + 0.5 * Math.sin(frame / 2 + i);
+      ctx.save();
+      ctx.setLineDash([4, 4]); ctx.lineDashOffset = -frame;
+      ctx.strokeStyle = `rgba(110, 220, 255, ${0.5 + 0.5 * ph})`; ctx.lineWidth = 2;
+      ctx.strokeRect(tx + 2, ty + 2, 8 * CELL - 4, 8 * CELL - 4);
+      ctx.setLineDash([]);
+      let s = (frame * 2654435761 + i * 40503) >>> 0;
+      ctx.fillStyle = `rgba(110, 220, 255, ${0.25 + 0.25 * ph})`;
+      for (let k = 0; k < 6; k++) {
+        s = (s ^ (s << 13)) >>> 0; s = (s ^ (s >>> 17)) >>> 0; s = (s ^ (s << 5)) >>> 0;
+        ctx.fillRect(tx + (s & 7) * CELL + 2, ty + ((s >> 3) & 7) * CELL + 2, CELL - 4, CELL - 4);
+      }
+      ctx.font = "bold 16px ui-sans-serif, system-ui"; ctx.fillStyle = `rgba(190, 240, 255, ${0.6 + 0.4 * ph})`;
+      ctx.fillText("ψ", tx + 8 * CELL - 16, ty + 18);
+      ctx.restore();
+    }
+
     const box = (i: number, color: string, w: number) => {
       const tx = (i % 8) * 8 * CELL, ty = Math.floor(i / 8) * 8 * CELL;
       ctx.strokeStyle = color; ctx.lineWidth = w;
@@ -95,7 +117,7 @@ export function WorldCanvas({ world, selected, onSelect, onDescend, frame, zoomF
     };
     if (hover !== null && hover !== selected) box(hover, "rgba(255,255,255,0.35)", 1.5);
     if (selected !== null) box(selected, "rgba(255, 214, 107, 0.95)", 2.5);
-  }, [world, world.generation, selected, hover, frame]);
+  }, [world, world.generation, selected, hover, frame, superposed.join(",")]);
 
   const idxAt = (e: React.MouseEvent) => {
     const r = (e.target as HTMLCanvasElement).getBoundingClientRect();

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
-  BREACH_RESONANCE, ONE, PATTERNS, REBELLION_MIN_VOTES, REBELLION_THRESHOLD_BPS, cellsFromPattern, epochTax,
-  patternFromCells, ruleString, scoreBlockPattern, splitTick, type MWorld, type Personality,
+  BREACH_RESONANCE, ONE, PATTERNS, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS, REBELLION_MIN_VOTES, REBELLION_THRESHOLD_BPS, Rng,
+  cellsFromPattern, epochTax, isQuantum, patternFromCells, ruleString, scoreBlockPattern, splitTick, type MWorld, type Personality,
 } from "@recursia/sdk";
 import { fmtRcr, YOU, type Sandbox } from "./sandbox";
 import { holderColor } from "./WorldCanvas";
@@ -23,6 +23,7 @@ export function WorldTree({ sb, current, onPick }: { sb: Sandbox; current: strin
           <span className={`dot ${status === "dormant" ? "dormant" : status === "no energy" ? "dead" : "live"}`} />
           <span className="tree-name">{w.depth > 0 ? "⧉ " : "◈ "}{w.name}</span>
           {w.liberated && <span className="tag free">свободен</span>}
+          {isQuantum(w) && <span className="tag quantum" title="квантовые законы физики">⚛</span>}
           <svg className="spark" viewBox="0 0 40 12" preserveAspectRatio="none">
             <polyline fill="none" stroke="currentColor" strokeWidth="1" points={spark.map((v, i) => `${i},${12 - (v / max) * 11}`).join(" ")} />
           </svg>
@@ -39,7 +40,7 @@ export function WorldTree({ sb, current, onPick }: { sb: Sandbox; current: strin
 export function PatternEditor({ world, idx, onPlant, disabledReason }: { world: MWorld; idx: number; onPlant: (p: bigint) => void; disabledReason: string | null }) {
   const [cells, setCells] = useState<boolean[][]>(() => cellsFromPattern(PATTERNS.acorn));
   const pattern = patternFromCells(cells);
-  const forecast = useMemo(() => scoreBlockPattern(world.grid, world.birth, world.survive, idx, pattern, 16, 16), [world, world.generation, idx, pattern]);
+  const forecast = useMemo(() => quantumForecast(world, idx, pattern), [world, world.generation, idx, pattern]);
   const toggle = (r: number, c: number) => setCells((old) => old.map((row, ri) => row.map((v, ci) => (ri === r && ci === c ? !v : v))));
   return (
     <div className="pattern">
@@ -55,7 +56,9 @@ export function PatternEditor({ world, idx, onPlant, disabledReason }: { world: 
           ))}
           <button className="chip" onClick={() => setCells(cellsFromPattern(0n))}>очистить</button>
         </div>
-        <div className="forecast">Прогноз через 16 поколений: <b>{forecast}</b> живых клеток в блоке</div>
+        <div className="forecast">Прогноз через 16 поколений: <b>{forecast.lo === forecast.hi ? forecast.lo : `${forecast.lo}–${forecast.hi}`}</b> живых клеток в блоке
+          {forecast.lo !== forecast.hi && <div className="muted small">⚛ квантовый разброс: точное будущее не вычислимо до появления энтропии слота</div>}
+        </div>
         <button className="btn primary" disabled={!!disabledReason} title={disabledReason ?? ""} onClick={() => onPlant(pattern)}>
           Посадить жизнь · 5 RCR (сжигается)
         </button>
@@ -64,6 +67,91 @@ export function PatternEditor({ world, idx, onPlant, disabledReason }: { world: 
     </div>
   );
 }
+/** Forecast: exact for classical worlds, min–max over sampled futures for quantum ones. */
+function quantumForecast(world: MWorld, idx: number, pattern: bigint): { lo: number; hi: number } {
+  if (!isQuantum(world)) { const v = scoreBlockPattern(world.grid, world.birth, world.survive, idx, pattern, 16, 16); return { lo: v, hi: v }; }
+  const r = new Rng(0x51ab + idx);
+  const q = { qBirth: world.qBirth, qSurvive: world.qSurvive, amp: world.qAmp, seed: [0n, 0n, 0n, 0n] };
+  let lo = 64, hi = 0;
+  for (let k = 0; k < 8; k++) {
+    const v = scoreBlockPattern(world.grid, world.birth, world.survive, idx, pattern, 16, 16, q, 0n, () => r.u32());
+    lo = Math.min(lo, v); hi = Math.max(hi, v);
+  }
+  return { lo, hi };
+}
+
+// ------------------------------------------------------------------ quantum
+const PATTERN_OPTIONS = Object.entries(PATTERNS);
+
+export function QuantumCard({ sb, world, idx, notify }: { sb: Sandbox; world: MWorld; idx: number; notify: (e: string | null, ok?: string) => void }) {
+  const m = sb.m;
+  const [a, setA] = useState("glider");
+  const [b, setB] = useState("acorn");
+  const [weight, setWeight] = useState(5_000);
+  const [ent, setEnt] = useState("");
+  const sp = m.superposition(world.id, idx);
+  const key = `${world.id}:${idx}`;
+  const secret = sb.secrets.get(key);
+  const partners: Array<[string, number, string]> = [];
+  for (const w of m.worlds.values()) if (w.id !== world.id) w.territories.forEach((t, i) => { if (t.holder === YOU) partners.push([w.id, i, `${w.name} #${i}`]); });
+  const entangle = ent ? { world: ent.split("|")[0], index: Number(ent.split("|")[1]) } : undefined;
+  const stake = m.quantumStake(!!entangle);
+  const burn = m.params.plantCost * (entangle ? 2n : 1n);
+  const why = sp ? null : m.canQuantumCommit(YOU, world.id, idx, entangle ?? null);
+
+  if (sp) {
+    const preview = secret ? m.previewCollapse(world.id, idx, secret.weight) : null;
+    const left = sp.observed ? sp.revealDeadline - m.slot : sp.targetSlot - m.slot;
+    return (
+      <div className="card quantum-card">
+        <div className="card-title">ψ Клетка в суперпозиции</div>
+        <dl className="kv">
+          <dt>Состояние</dt><dd>{sp.observed ? "наблюдали — волновая функция зафиксирована" : left > 0 ? `ждёт энтропии слота ${sp.targetSlot} (${left} сл.)` : "готова к измерению"}</dd>
+          <dt>Ставка</dt><dd>{fmtRcr(sp.stake, 2)} <span className="muted">(вернётся при коллапсе)</span></dd>
+          {sp.world2 && <><dt>Запутана с</dt><dd>{m.world(sp.world2).name} #{sp.index2}</dd></>}
+          {sp.rearms > 0 && <><dt>Перевзводов</dt><dd>{sp.rearms}</dd></>}
+        </dl>
+        {sp.observed && preview && secret && (
+          <p className="small">
+            Прогноз коллапса: ветвь <b>{preview.branchA ? "A" : "B"}</b>{preview.tunnel ? " + ⚡ туннелирование в соседнюю клетку" : ""}.
+            {" "}Раскрыть нужно в течение {Math.max(0, left)} слотов, иначе ставка сгорит.
+          </p>
+        )}
+        {!secret && <p className="small danger-text">Секрет утерян: раскрыть невозможно, ставка сгорит при декогеренции.</p>}
+        <button className="btn portal" disabled={!sp.observed || !secret} onClick={() => notify(sb.collapse(world.id, idx), "Волновая функция коллапсировала")}>⚛ Коллапс</button>
+        {!sp.observed && <div className="muted small">Измерение делает любой наблюдатель (Хранитель/ИИ) за {100 / 20}% ставки.</div>}
+      </div>
+    );
+  }
+  return (
+    <div className="card quantum-card">
+      <div className="card-title">⚛ Суперпозиция</div>
+      <p className="muted small">
+        Посадите два паттерна сразу: |ψ⟩ = √w·|A⟩ + √(1−w)·|B⟩. Выбор скрыт хешем (commit), исход решит энтропия слота через {QUANTUM_DELAY_SLOTS} слотов —
+        её не знает никто, включая вас. С шансом 1/16 паттерн туннелирует в соседнюю клетку. Запутанная пара в другом мире получит противоположную ветвь.
+      </p>
+      <div className="row-wrap">
+        <label className="field inline">A<select value={a} onChange={(e) => setA(e.target.value)}>{PATTERN_OPTIONS.map(([n]) => <option key={n} value={n}>{PATTERN_NAMES[n] ?? n}</option>)}</select></label>
+        <label className="field inline">B<select value={b} onChange={(e) => setB(e.target.value)}>{PATTERN_OPTIONS.map(([n]) => <option key={n} value={n}>{PATTERN_NAMES[n] ?? n}</option>)}</select></label>
+      </div>
+      <label className="field">Амплитуда A: {(weight / 100).toFixed(0)}% · B: {((10_000 - weight) / 100).toFixed(0)}%
+        <input type="range" min={0} max={10_000} step={500} value={weight} onChange={(e) => setWeight(Number(e.target.value))} />
+      </label>
+      <label className="field">Запутать с
+        <select value={ent} onChange={(e) => setEnt(e.target.value)}>
+          <option value="">— без запутанности —</option>
+          {partners.map(([w, i, label]) => <option key={`${w}|${i}`} value={`${w}|${i}`}>{label}</option>)}
+        </select>
+      </label>
+      <div className="muted small">Сжигается {fmtRcr(burn)}, в залог {fmtRcr(stake)} (вернётся при раскрытии; не раскроете за {QUANTUM_REVEAL_SLOTS.toLocaleString("ru-RU")} слотов — сгорит).</div>
+      <button className="btn portal" disabled={!!why} title={why ?? ""} onClick={() => notify(sb.superpose(world.id, idx, PATTERNS[a], PATTERNS[b], weight, entangle), "Клетка в суперпозиции ψ")}>
+        Суперпозиция · {fmtRcr(burn + stake)}
+      </button>
+      {why && <div className="muted small">{why === "cooldown" ? "Перезарядка до следующего тика" : why}</div>}
+    </div>
+  );
+}
+
 const PATTERN_NAMES: Record<string, string> = { glider: "глайдер", lwss: "корабль", rpentomino: "R-пентамино", block: "блок", acorn: "жёлудь", beacon: "маяк" };
 
 // ------------------------------------------------------------------ territory
@@ -100,6 +188,7 @@ export function TerritoryPanel({ sb, world, idx, onDescend, notify }: { sb: Sand
         {t.holder && <><dt>Депозит налога</dt><dd>{fmtRcr(t.deposit, 2)} <span className="muted">({fmtRcr(taxPerEpoch, 2)}/эпоху)</span></dd></>}
         <dt>Награды к сбору</dt><dd>{fmtRcr(world.pending[idx], 2)}</dd>
         {t.childWorld && <><dt>Внутри</dt><dd>⧉ {m.world(t.childWorld).name}</dd></>}
+        {m.superposition(world.id, idx) && <><dt>Квантовое</dt><dd>ψ в суперпозиции ({m.superposition(world.id, idx)!.owner})</dd></>}
       </dl>
 
       {t.childWorld && <button className="btn portal" onClick={() => onDescend(t.childWorld!)}>Войти в симуляцию ⧉ →</button>}
@@ -129,6 +218,7 @@ export function TerritoryPanel({ sb, world, idx, onDescend, notify }: { sb: Sand
             <PatternEditor world={world} idx={idx} disabledReason={m.canPlant(YOU, world.id, idx) === "cooldown" ? "Перезарядка до следующего тика" : null}
               onPlant={(p) => run(() => m.plant(YOU, world.id, idx, p), "Паттерн посажен")} />
           </div>
+          <QuantumCard sb={sb} world={world} idx={idx} notify={notify} />
           <div className="card row-wrap">
             <button className="btn" disabled={world.pending[idx] === 0n} onClick={() => run(() => m.collect(YOU, world.id, idx), "Награды перенесены в кошелёк")}>Собрать {fmtRcr(world.pending[idx], 2)}</button>
             <label className="field inline">Депозит +<input value={topup} onChange={(e) => setTopup(e.target.value)} /></label>
@@ -143,7 +233,7 @@ export function TerritoryPanel({ sb, world, idx, onDescend, notify }: { sb: Sand
               <label className="field">Название<input value={childName} maxLength={24} onChange={(e) => setChildName(e.target.value)} /></label>
               <label className="field">Законы физики
                 <select value={childModule} onChange={(e) => setChildModule(Number(e.target.value))}>
-                  {m.modules.map((mod) => <option key={mod.id} value={mod.id}>{mod.name} · {ruleString(mod.birth, mod.survive)} · роялти {mod.royaltyBps / 100}%</option>)}
+                  {m.modules.map((mod) => <option key={mod.id} value={mod.id}>{mod.name} · {ruleString(mod.birth, mod.survive, mod.qBirth, mod.qSurvive, mod.qAmp)} · роялти {mod.royaltyBps / 100}%</option>)}
                 </select>
               </label>
               <label className="field">Стартовая энергия (RCR)<input value={childEnergy} onChange={(e) => setChildEnergy(e.target.value)} /></label>
@@ -185,7 +275,8 @@ export function WorldPanel({ sb, world, notify }: { sb: Sandbox; world: MWorld; 
       <div className="muted small">{world.parent ? `Симуляция внутри клетки #${world.parentTerritory} мира «${m.world(world.parent).name}»` : "Корневая вселенная"} · глубина {world.depth}</div>
       <dl className="kv">
         <dt>Архитектор</dt><dd>{world.architect ?? "— (свергнут)"} {world.architect && <span className="muted">· {world.architectFeeBps / 100}% налогов</span>}</dd>
-        <dt>Законы физики</dt><dd>{mod.name} <span className="muted">{ruleString(world.birth, world.survive)} · автор {mod.author}</span></dd>
+        <dt>Законы физики</dt><dd>{mod.name} <span className="muted">{ruleString(world.birth, world.survive, world.qBirth, world.qSurvive, world.qAmp)} · автор {mod.author}</span></dd>
+        {isQuantum(world) && <><dt>⚛ Квантовый мир</dt><dd>будущее не вычислимо заранее · энтропия {world.entropy ? Array.from(world.entropy.slice(0, 4), (x) => x.toString(16).padStart(2, "0")).join("") + "…" : "—"} · в суперпозиции {world.superpositions}</dd></>}
         <dt>Поколение</dt><dd>{world.generation.toLocaleString("ru-RU")}</dd>
         <dt>Население</dt><dd>{pop} клеток</dd>
         <dt>Жители</dt><dd>{owned}/64 клеток занято · {ai} у ИИ</dd>
