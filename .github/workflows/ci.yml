@@ -37,14 +37,14 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Resolve lockfile (MSRV-aware)
-        run: cargo generate-lockfile && cp Cargo.lock /tmp/Cargo.lock
+        run: scripts/ci-run.sh lockfile cargo generate-lockfile && cp Cargo.lock /tmp/Cargo.lock
       - name: fmt
         run: cargo fmt --all -- --check
         continue-on-error: true
       - name: clippy
-        run: cargo clippy -p recursia --all-targets -- -D warnings -A clippy::result_large_err -A unexpected_cfgs
+        run: scripts/ci-run.sh clippy cargo clippy -p recursia --all-targets -- -D warnings -A clippy::result_large_err -A unexpected_cfgs
       - name: unit tests (engine, math, cross-impl vectors)
-        run: cargo test -p recursia -- --nocapture
+        run: scripts/ci-run.sh cargo-test cargo test -p recursia
       - uses: actions/upload-artifact@v4
         with: { name: cargo-lock, path: /tmp/Cargo.lock }
 
@@ -63,11 +63,11 @@ jobs:
           echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
       - name: Install Anchor CLI 0.31.1
         run: |
-          cargo install --git https://github.com/coral-xyz/anchor --tag v0.31.1 anchor-cli --locked --force
+          scripts/ci-run.sh anchor-install cargo install --git https://github.com/coral-xyz/anchor --tag v0.31.1 anchor-cli --locked --force
       - name: anchor build
         run: |
           solana-keygen new --no-bip39-passphrase -s -o ~/.config/solana/id.json
-          anchor build
+          $GITHUB_WORKSPACE/scripts/ci-run.sh anchor-build anchor build
           ls -la target/deploy target/idl
       - name: IDL ↔ SDK account-order check
         run: |
@@ -90,10 +90,10 @@ jobs:
         with: { node-version: 22 }
       - run: npm ci --ignore-scripts
       - name: SDK typecheck + tests (incl. model invariants & AI agents)
-        run: npm -w packages/sdk run build && npm -w packages/sdk test
+        run: scripts/ci-run.sh sdk-tsc npm -w packages/sdk run build && scripts/ci-run.sh sdk-test npm -w packages/sdk test
       - name: Economic simulation (checklist #54/#58)
-        run: npm run econ -- --quick
+        run: scripts/ci-run.sh econ npm run econ -- --quick
       - name: Keeper tests
-        run: npm -w keeper test
+        run: scripts/ci-run.sh keeper npm -w keeper test
       - name: Client build
-        run: npm -w app run build
+        run: scripts/ci-run.sh app-build npm -w app run build
