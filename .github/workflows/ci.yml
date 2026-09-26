@@ -42,8 +42,12 @@ jobs:
           toolchain: 1.86.0
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Resolve lockfile (MSRV-aware)
-        run: scripts/ci-run.sh lockfile cargo generate-lockfile && cp Cargo.lock /tmp/Cargo.lock
+      - name: Resolve lockfile buildable by platform-tools (rust 1.79)
+        run: |
+          scripts/ci-run.sh sbf-lock scripts/sbf-lock.sh
+          cp Cargo.lock /tmp/Cargo.lock
+          # export the lock (gzip+base64) as an annotation so it can be committed
+          echo "::notice title=cargo-lock-gz-b64::$(gzip -9c Cargo.lock | base64 -w0)"
       - name: fmt
         run: cargo fmt --all -- --check
         continue-on-error: true
@@ -74,8 +78,8 @@ jobs:
         # platform-tools ship an older cargo that can't parse edition-2024 manifests
         # nor honour `incompatible-rust-versions`; lock with 1.86 first, it reuses the lock.
         run: |
-          [ -f Cargo.lock ] || cargo generate-lockfile
-          for c in block-buffer digest sha2 crypto-common; do
+          scripts/ci-run.sh sbf-lock scripts/sbf-lock.sh
+          for c in block-buffer digest sha2 crypto-common blake3; do
             v=$(awk -v n="$c" '$0=="name = \""n"\"" {getline; print $3}' Cargo.lock | tr -d '"' | tr '\n' ' ')
             echo "::notice title=lock $c::$v"
           done
