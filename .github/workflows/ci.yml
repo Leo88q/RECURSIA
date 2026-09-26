@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: never
+  FORCE_COLOR: 0
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true

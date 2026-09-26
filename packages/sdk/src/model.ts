@@ -80,6 +80,7 @@ export class GameModel {
     req((birth & 1) === 0 && birth !== 0 && birth <= 0x1ff && survive <= 0x1ff, "invalid rule");
     req(royaltyBps <= 500, "royalty too high");
     const fee = this.params.moduleRegisterFee;
+    req(this.pl(author).wallet >= fee, "insufficient funds");
     this.spend(author, fee);
     const burn = bpsFloor(fee, this.params.feeBurnBps);
     this.burn(burn); this.treasury += fee - burn;
@@ -126,6 +127,8 @@ export class GameModel {
   createRootWorld(architect: string, name: string, moduleId: number, feeBps: number, initialEnergy: bigint): MWorld {
     req(!this.paused, "paused");
     req(feeBps <= MAX_ARCHITECT_FEE_BPS, "fee too high");
+    req(this.modules[moduleId], "unknown module");
+    req(this.pl(architect).wallet >= this.params.worldCreateFee + initialEnergy, "insufficient funds");
     this.payCreation(architect);
     this.spend(architect, initialEnergy);
     const w = this.newWorld(`root-${this.rootCount++}`, name, null, 0, architect, feeBps, moduleId);
@@ -143,7 +146,10 @@ export class GameModel {
     req(!t.childWorld, "already hosts a universe");
     req(host.depth + 1 <= MAX_DEPTH, "max depth");
     req(feeBps <= MAX_ARCHITECT_FEE_BPS, "fee too high");
-    req(this.accrueTax(host, idx) === "paid", "deposit exhausted");
+    req(!this.wouldForeclose(host, idx), "deposit exhausted");
+    req(this.modules[moduleId], "unknown module");
+    req(this.pl(architect).wallet >= this.params.worldCreateFee + initialEnergy, "insufficient funds");
+    this.accrueTax(host, idx);
     this.payCreation(architect);
     this.spend(architect, initialEnergy);
     const w = this.newWorld(`${hostId}/${idx}`, name, host, idx, architect, feeBps, moduleId);
@@ -240,6 +246,25 @@ export class GameModel {
   }
 
   // --------------------------------------------------------------- territories
+  /** Pure: would accruing tax now foreclose this territory? */
+  wouldForeclose(w: MWorld, idx: number): boolean {
+    const t = w.territories[idx];
+    if (!t.holder) return false;
+    const due = harbergerDue(t.price, this.params.harbergerBps, BigInt(Math.max(0, this.slot - t.lastTaxSlot)), this.params.epochSlots);
+    return due >= t.deposit;
+  }
+
+  private permitCheck(owner: string, agent: string, world: string, amount: bigint, scopeBit: number): MPermit {
+    const p = this.permits.get(`${owner}:${agent}`); req(p, "no permit");
+    req(this.slot < p.expirySlot, "permit expired");
+    req((p.scope & scopeBit) !== 0, "permit scope");
+    const spent = p.spendEpoch !== this.curEpoch ? 0n : p.spent;
+    req(spent + amount <= p.maxSpendPerEpoch, "permit limit");
+    req(p.vault >= amount, "permit vault empty");
+    void world;
+    return p;
+  }
+
   private accrueTax(w: MWorld, idx: number): "paid" | "foreclose" {
     const t = w.territories[idx];
     if (!t.holder) return "paid";
@@ -290,12 +315,22 @@ export class GameModel {
     const newHolder = opts.agentOwner ?? buyer;
     req(newPrice >= p.minPrice && newPrice <= MAX_PRICE, "bad price");
     req(deposit >= epochTax(newPrice, p.harbergerBps), "deposit too small");
+    // ---- checks first (the on-chain tx is atomic; the model must be too)
+    const foreclose = !!t.holder && this.wouldForeclose(w, idx);
+    const heldAfter = !!t.holder && !foreclose;
+    const expected = heldAfter ? t.price : p.minPrice;
+    req(expected <= maxPrice, "price slippage");
+    if (heldAfter) req(t.holder !== newHolder, "self-buy");
+    if (opts.agentOwner) {
+      const permit = this.permitCheck(opts.agentOwner, buyer, id, expected + deposit, 2);
+      req(maxPrice <= permit.maxPrice, "permit price limit");
+    } else req(this.pl(buyer).wallet >= expected + deposit, "insufficient funds");
     let paySource = (amount: bigint) => this.spend(buyer, amount);
     if (opts.agentOwner) {
-      const permit = this.permits.get(`${opts.agentOwner}:${buyer}`); req(permit, "no permit");
-      paySource = (amount: bigint) => { req(permit.vault >= amount, "permit vault empty"); permit.vault -= amount; };
-      req(maxPrice <= permit.maxPrice, "permit price limit");
+      const permit = this.permits.get(`${opts.agentOwner}:${buyer}`)!;
+      paySource = (amount: bigint) => { permit.vault -= amount; };
     }
+    // ---- effects
     if (t.holder && this.accrueTax(w, idx) === "foreclose") {
       this.log("foreclose", `${t.holder} потерял клетку #${idx} — налог не оплачен`, w.id);
       this.release(w, idx);
@@ -323,9 +358,10 @@ export class GameModel {
   setPrice(holder: string, id: string, idx: number, newPrice: bigint) {
     const w = this.world(id); const t = w.territories[idx];
     req(t.holder === holder, "not holder");
-    req(this.accrueTax(w, idx) === "paid", "deposit exhausted");
+    req(!this.wouldForeclose(w, idx), "deposit exhausted");
     req(this.slot >= t.lastPriceChange + PRICE_CHANGE_COOLDOWN_SLOTS, "cooldown");
     req(newPrice >= this.params.minPrice && newPrice <= MAX_PRICE, "bad price");
+    this.accrueTax(w, idx);
     req(t.deposit >= epochTax(newPrice, this.params.harbergerBps), "deposit too small");
     t.price = newPrice; t.lastPriceChange = this.slot;
     this.check();
@@ -334,7 +370,10 @@ export class GameModel {
   topUp(holder: string, id: string, idx: number, amount: bigint) {
     const w = this.world(id); const t = w.territories[idx];
     req(t.holder === holder, "not holder");
-    req(this.accrueTax(w, idx) === "paid", "deposit exhausted");
+    req(amount > 0n, "zero");
+    req(!this.wouldForeclose(w, idx), "deposit exhausted");
+    req(this.pl(holder).wallet >= amount, "insufficient funds");
+    this.accrueTax(w, idx);
     this.spend(holder, amount); t.deposit += amount; w.deposits += amount; w.vault += amount;
     this.check();
   }
@@ -342,8 +381,9 @@ export class GameModel {
   collect(holder: string, id: string, idx: number): bigint {
     const w = this.world(id); const t = w.territories[idx];
     req(t.holder === holder, "not holder");
-    req(this.accrueTax(w, idx) === "paid", "deposit exhausted");
+    req(!this.wouldForeclose(w, idx), "deposit exhausted");
     const amt = w.pending[idx]; req(amt > 0n, "nothing");
+    this.accrueTax(w, idx);
     w.pending[idx] = 0n; w.rewardsReserved -= amt; w.vault -= amt; this.claims += amt;
     const p = this.pl(holder); p.claimable += amt; p.totalEarned += amt;
     this.check();
@@ -362,13 +402,15 @@ export class GameModel {
     const w = this.world(id); const t = w.territories[idx];
     const holder = opts.agentOwner ?? actor;
     req(t.holder === holder, "not holder");
-    req(this.accrueTax(w, idx) === "paid", "deposit exhausted");
+    req(!this.wouldForeclose(w, idx), "deposit exhausted");
     req(w.tickCount >= t.nextPlantTick, "cooldown");
     const cost = this.params.plantCost;
+    if (opts.agentOwner) this.permitCheck(opts.agentOwner, actor, id, cost, 1);
+    else req(this.pl(actor).wallet >= cost, "insufficient funds");
+    this.accrueTax(w, idx);
     if (opts.agentOwner) {
-      const permit = this.permits.get(`${opts.agentOwner}:${actor}`); req(permit, "no permit");
       this.chargePermit(opts.agentOwner, actor, id, cost, 1);
-      req(permit.vault >= cost, "permit vault empty"); permit.vault -= cost;
+      this.permits.get(`${opts.agentOwner}:${actor}`)!.vault -= cost;
     } else this.spend(actor, cost);
     t.nextPlantTick = w.tickCount + PLANT_COOLDOWN_TICKS;
     this.rollEpoch(w);
