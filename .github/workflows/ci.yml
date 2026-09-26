@@ -68,6 +68,17 @@ jobs:
       - name: Install Anchor CLI 0.31.1
         run: |
           scripts/ci-run.sh anchor-install cargo install --git https://github.com/coral-xyz/anchor --tag v0.31.1 anchor-cli --locked --force
+      - name: Resolve Cargo.lock with modern cargo (MSRV-aware fallback)
+        # platform-tools ship an older cargo that can't parse edition-2024 manifests
+        # nor honour `incompatible-rust-versions`; lock with 1.86 first, it reuses the lock.
+        run: |
+          [ -f Cargo.lock ] || cargo generate-lockfile
+          for c in block-buffer digest sha2 crypto-common; do
+            v=$(awk -v n="$c" '$0=="name = \""n"\"" {getline; print $3}' Cargo.lock | tr -d '"' | tr '\n' ' ')
+            echo "::notice title=lock $c::$v"
+          done
+          T=$(cargo tree -i block-buffer@0.12.1 -e normal 2>/dev/null | head -30 | tr '\n' '|' || true)
+          [ -n "$T" ] && echo "::warning title=block-buffer 0.12 path::$T" || true
       - name: anchor build
         run: |
           solana-keygen new --no-bip39-passphrase -s -o ~/.config/solana/id.json

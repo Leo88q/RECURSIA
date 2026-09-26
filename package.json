@@ -10,7 +10,7 @@
   "scripts": {
     "test": "npm -w packages/sdk test && npm -w keeper test",
     "vectors": "npm -w packages/sdk run vectors",
-    "econ": "npm -w packages/sdk run econ",
+    "econ": "npm -w packages/sdk run econ --",
     "build": "npm -w packages/sdk run build && npm -w app run build",
     "dev": "npm -w app run dev",
     "lint:unicode": "node scripts/check-unicode.mjs",
