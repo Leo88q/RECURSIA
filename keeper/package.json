@@ -1,1 +1,22 @@
-{"name":"@recursia/keeper","private":true,"version":"1.0.0","scripts":{"test":"echo ok"}}
+{
+  "name": "@recursia/keeper",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@recursia/sdk": "1.0.0",
+    "@solana/web3.js": "1.99.0",
+    "bs58": "6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "tsx": "4.20.3",
+    "typescript": "5.8.3",
+    "vitest": "5.0.2"
+  }
+}
