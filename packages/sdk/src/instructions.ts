@@ -1,3 +1,4 @@
+import { Buffer } from "buffer";
 // Hand-written instruction builders (account order == Rust `#[derive(Accounts)]`
 // field order). Verified against the Anchor IDL in CI (idl-check test).
 import { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, TransactionInstruction, type AccountMeta } from "@solana/web3.js";

@@ -226,15 +226,15 @@ export class GameModel {
     const emission = this.curTotalBurn === 0n ? 0n : bpsFloor(this.rewardPool, this.params.emissionRateBps);
     this.prevTotalBurn = this.curTotalBurn; this.prevEmission = emission; this.prevClaimed = 0n;
     this.curTotalBurn = 0n; this.curEpoch++; this.epochStart = this.slot;
-    this.log("epoch", `Эпоха ${this.curEpoch - 1} закрыта: сожжено ${fmtT(this.prevTotalBurn)}, эмиссия ${fmtT(emission)}`);
+    this.log("epoch", `Эпоха ${this.curEpoch - 1} закрыта: сожжено ${fmtT(this.prevTotalBurn)}, потолок эмиссии ${fmtT(emission)} (мир получает ≤ ${this.params.rebateCapBps / 100}% своего сжигания)`);
   }
   claimWorldEpoch(id: string): bigint {
     const w = this.world(id);
     this.rollEpoch(w);
     req(!w.prevClaimed && w.prevEpochId + 1 === this.curEpoch, "claim window");
     const reward = worldEmission(this.prevEmission, this.prevTotalBurn, w.burnPrev, this.params.rebateCapBps, this.prevClaimed);
-    w.prevClaimed = true;
     req(reward > 0n, "nothing to claim");
+    w.prevClaimed = true;
     const owned = w.territories.map((t) => !!t.holder);
     const { shares, rest } = distribute(reward, w.scoresPrev, owned);
     shares.forEach((s, i) => { if (s > 0n) { w.pending[i] += s; w.rewardsReserved += s; } });

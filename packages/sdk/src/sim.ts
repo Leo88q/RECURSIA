@@ -1,3 +1,4 @@
+import { Buffer } from "buffer";
 // Bit-for-bit mirror of programs/recursia/src/sim.rs.
 import { sha256 } from "@noble/hashes/sha256";
 import { GRID, TERRITORIES } from "./constants.js";
