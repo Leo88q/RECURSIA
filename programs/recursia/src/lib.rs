@@ -5,6 +5,9 @@
 //! block; child universes live only while their host block lives, pay a
 //! host tax upward, and can "breach" back into the parent. See docs/.
 #![allow(unexpected_cfgs)]
+// Anchor 0.31 `#[program]` codegen calls AccountInfo::realloc (deprecated in
+// newer solana-program); the warning originates in macro output, not our code.
+#![allow(deprecated)]
 
 use anchor_lang::prelude::*;
 

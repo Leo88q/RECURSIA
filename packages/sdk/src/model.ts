@@ -12,7 +12,7 @@ import { bpsFloor, distribute, epochTax, harbergerDue, splitTick, worldEmission 
 import { bigbang, GLIDER, orBlock, population, stepN, territoryCounts, writeBlock, type Grid } from "./sim.js";
 
 export class GameError extends Error {}
-const req = (c: unknown, m: string): asserts c => { if (!c) throw new GameError(m); };
+function req(c: unknown, m: string): asserts c { if (!c) throw new GameError(m); }
 
 export interface MTerritory { holder: string | null; price: bigint; deposit: bigint; lastTaxSlot: number; lastPriceChange: number; nextPlantTick: number; acquiredSlot: number; votedRebellion: number; agent: boolean; childWorld: string | null }
 export interface MModule { id: number; author: string; name: string; birth: number; survive: number; royaltyBps: number; accrued: bigint; totalEarned: bigint; worldsUsing: number }

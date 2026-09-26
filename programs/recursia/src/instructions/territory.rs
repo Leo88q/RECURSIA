@@ -80,7 +80,9 @@ fn acquire_core<'info>(
     let mut seller = Pubkey::default();
     let mut seller_player = seller_player;
     if territory.is_held() {
-        let sp = seller_player.as_deref_mut().ok_or(RecursiaError::Mismatch)?;
+        let Some(sp) = seller_player.as_mut() else {
+            return err!(RecursiaError::Mismatch);
+        };
         if let TaxOutcome::Foreclose = accrue_tax(world, territory, &p, slot)? {
             let old = territory.holder;
             release_territory(world, territory, sp, tp, mint, world_vault, claims_vault, config_info, config.bump, slot)?;
@@ -91,7 +93,9 @@ fn acquire_core<'info>(
     let price_paid;
     if territory.is_held() {
         require_keys_neq!(territory.holder, new_holder, RecursiaError::DuplicateAccounts);
-        let sp = seller_player.as_deref_mut().ok_or(RecursiaError::Mismatch)?;
+        let Some(sp) = seller_player.as_mut() else {
+            return err!(RecursiaError::Mismatch);
+        };
         price_paid = territory.price;
         require!(price_paid <= args.max_price, RecursiaError::PriceSlippage);
         seller = territory.holder;

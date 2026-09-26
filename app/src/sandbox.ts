@@ -1,0 +1,116 @@
+// Sandbox universe: the exact game rules (reference model mirrored from the
+// on-chain program) with AI inhabitants, running locally in the browser.
+import {
+  AIAgent, DEFAULT_PARAMS, GameModel, ONE, PHYSICS_PRESETS, epochTax, type MWorld, type Params, type Personality,
+} from "@recursia/sdk";
+
+export const YOU = "Вы";
+export const KEEPER = "Хранитель";
+export const DEV = "Студия";
+
+// Accelerated time for the sandbox (min allowed epoch on-chain is ~1h).
+export const SANDBOX_PARAMS: Params = { ...DEFAULT_PARAMS, epochSlots: 9_000n, harbergerBps: 100 };
+export const STEP_SLOTS = 160;
+
+const PERSONAS: Array<[Personality, string]> = [
+  ["gardener", "Садовник"], ["expansionist", "Экспансионист"], ["speculator", "Спекулянт"], ["demiurge", "Демиург"],
+];
+
+export interface MyAgent { agent: AIAgent; label: string; personality: Personality }
+
+export class Sandbox {
+  m: GameModel;
+  agents: AIAgent[] = [];
+  mine: MyAgent[] = [];
+  steps = 0;
+  lastError: string | null = null;
+
+  constructor(seed = 42) {
+    const m = (this.m = new GameModel(SANDBOX_PARAMS));
+    m.addPlayer(DEV, 200_000n * ONE);
+    for (const p of PHYSICS_PRESETS) m.registerModule(DEV, p.name, p.birth, p.survive, p.royaltyBps);
+    m.addPlayer(KEEPER, 0n);
+    m.addPlayer("Основатель", 60_000n * ONE);
+    m.createRootWorld("Основатель", "Альфа", 0, 1_500, 8_000n * ONE);
+    m.createRootWorld("Основатель", "Бета", 1, 2_500, 6_000n * ONE);
+    m.createRootWorld("Основатель", "Коралл", 5, 1_000, 6_000n * ONE);
+    let k = 0;
+    for (const [pers, label] of PERSONAS) {
+      for (let j = 1; j <= 3; j++) {
+        const id = `ИИ·${label}-${j}`;
+        m.addPlayer(id, 12_000n * ONE, true);
+        this.agents.push(new AIAgent(id, pers, seed * 1000 + ++k));
+      }
+    }
+    m.addPlayer(YOU, 5_000n * ONE);
+    // warm-up so the multiverse is alive when the player arrives
+    for (let i = 0; i < 25; i++) this.step();
+    m.events.push({ slot: m.slot, kind: "welcome", text: "Вы материализовались в мультивселенной с 5 000 RCR. Займите клетку, посадите жизнь, запустите свою симуляцию." });
+  }
+
+  step() {
+    const m = this.m;
+    m.advanceSlots(STEP_SLOTS);
+    this.steps++;
+    for (const id of m.worlds.keys()) if (!m.canTick(id)) { try { m.tick(KEEPER, id); } catch { /* raced */ } }
+    for (const a of this.agents) if (a.rng.next() < 0.55) a.act(m);
+    for (const { agent } of this.mine) agent.act(m);
+    // keeper crank duties: foreclosures, breaches, epochs, emission claims
+    for (const w of m.worlds.values()) {
+      w.territories.forEach((t, i) => { if (t.holder && m.wouldForeclose(w, i)) { try { m.settle(w.id, i); } catch { /* */ } } });
+      if (w.parent && w.resonance >= 64) { try { m.breach(w.id); } catch { /* */ } }
+    }
+    if (m.canAdvanceEpoch()) {
+      m.advanceEpoch();
+      for (const w of m.worlds.values()) { try { m.claimWorldEpoch(w.id); } catch { /* nothing */ } }
+    }
+  }
+
+  /** Run a player action; returns error text (in Russian where known). */
+  act(f: () => unknown): string | null {
+    try { f(); this.lastError = null; return null; } catch (e) { return (this.lastError = translate((e as Error).message)); }
+  }
+
+  hireAgent(personality: Personality, budget: bigint, perEpoch: bigint, maxPrice: bigint): string | null {
+    const label = PERSONAS.find((p) => p[0] === personality)![1];
+    const agentId = `ваш-ИИ·${label}-${this.mine.length + 1}`;
+    return this.act(() => {
+      this.m.createPermit(YOU, agentId, budget, perEpoch, maxPrice, 9_000 * 30);
+      const agent = new AIAgent(agentId, personality, 777 + this.mine.length, YOU);
+      this.mine.push({ agent, label, personality });
+      this.m.events.push({ slot: this.m.slot, kind: "agent", text: `Вы наняли ИИ-жителя «${label}» с бюджетом ${fmtRcr(budget)} (лимит ${fmtRcr(perEpoch)}/эпоху)` });
+    });
+  }
+
+  defaultDeposit(price: bigint) { return epochTax(price, this.m.params.harbergerBps) * 3n; }
+  world(id: string): MWorld { return this.m.world(id); }
+}
+
+export const fmtRcr = (v: bigint, digits = 0) => {
+  const whole = v / ONE;
+  const frac = digits ? "," + ((v % ONE) * 10n ** BigInt(digits) / ONE).toString().padStart(digits, "0") : "";
+  return `${whole.toLocaleString("ru-RU")}${frac} RCR`;
+};
+
+const DICT: Record<string, string> = {
+  "insufficient funds": "Недостаточно RCR",
+  "price slippage": "Цена изменилась выше вашего лимита (защита от фронтраннинга)",
+  "self-buy": "Нельзя купить у самого себя",
+  "deposit too small": "Депозит меньше налога за эпоху",
+  "cooldown": "Перезарядка: дождитесь следующего тика мира",
+  "not holder": "Это не ваша клетка",
+  "already hosts a universe": "Здесь уже существует вселенная",
+  "max depth": "Достигнута максимальная глубина рекурсии (7)",
+  "bad price": "Недопустимая цена",
+  "deposit exhausted": "Депозит исчерпан — клетка будет изъята",
+  "permit limit": "ИИ превысил лимит расходов на эпоху",
+  "permit vault empty": "У ИИ закончился бюджет",
+  "nothing": "Нечего собирать",
+  "nothing to claim": "Нечего выводить",
+  "threshold not met": "Недостаточно голосов",
+  "already voted": "Вы уже голосовали",
+  "bought after start": "Клетка куплена после начала восстания",
+  "architect can't rebel": "Архитектор не может восстать против себя",
+  "too fresh": "Клетка куплена слишком недавно",
+};
+export const translate = (m: string) => DICT[m] ?? m;

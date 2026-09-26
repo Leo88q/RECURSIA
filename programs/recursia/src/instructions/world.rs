@@ -408,8 +408,8 @@ pub fn tick(ctx: Context<Tick>) -> Result<()> {
         w.grid = g;
         let counts = sim::territory_counts(&g);
         w.territory_alive = counts;
-        for i in 0..TERRITORIES {
-            w.scores_cur[i] = w.scores_cur[i].saturating_add(counts[i] as u32);
+        for (score, c) in w.scores_cur.iter_mut().zip(counts.iter()) {
+            *score = score.saturating_add(*c as u32);
         }
         w.generation = w.generation.saturating_add(p.gens_per_tick as u64);
         w.tick_count = w.tick_count.saturating_add(1);

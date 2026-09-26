@@ -8,10 +8,12 @@ use crate::state::*;
 
 /// AI inhabitants. A human owner delegates a *bounded* budget to an AI
 /// runner's hot key. Every limit lives on-chain (checklist #71–#75):
-///  * the agent key can only spend from its dedicated escrow vault,
-///  * only on whitelisted actions (scope bitmask) and optionally one world,
-///  * with a per-epoch spend cap and a max price per acquisition,
-///  * permits expire, and only the owner can withdraw or revoke.
+///
+/// * the agent key can only spend from its dedicated escrow vault,
+/// * only on whitelisted actions (scope bitmask) and optionally one world,
+/// * with a per-epoch spend cap and a max price per acquisition,
+/// * permits expire, and only the owner can withdraw or revoke.
+///
 /// A compromised or prompt-injected agent can at worst burn its own budget
 /// on legitimate game actions for the owner's benefit — never exfiltrate it.
 #[derive(Accounts)]

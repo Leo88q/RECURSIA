@@ -36,7 +36,11 @@ export function evaluatePattern(world: MWorld, idx: number, pattern: bigint, gen
 export class AIAgent {
   genome: AgentGenome;
   readonly rng: Rng;
-  constructor(readonly id: string, readonly personality: Personality, seed: number) {
+  /**
+   * @param owner when set, the agent acts through an AgentPermit on behalf of
+   *   `owner`: it spends only the permit vault, territories go to the owner.
+   */
+  constructor(readonly id: string, readonly personality: Personality, seed: number, readonly owner?: string) {
     this.rng = new Rng(seed);
     this.genome = {
       aggression: 0.3 + this.rng.next() * 0.6,
@@ -55,22 +59,27 @@ export class AIAgent {
 
   act(m: GameModel): string[] {
     const log: string[] = [];
-    const me = m.players.get(this.id);
-    if (!me) return log;
+    const holderId = this.owner ?? this.id;
+    const permit = this.owner ? m.permits.get(`${this.owner}:${this.id}`) : undefined;
+    const me = this.owner ? undefined : m.players.get(this.id);
+    if (!me && !permit) return log;
     const worlds = [...m.worlds.values()];
     if (!worlds.length) return log;
-    const budget = me.wallet;
+    const wallet = () => (permit ? permit.vault : me!.wallet);
+    const budget = wallet();
+    const opts = this.owner ? { agentOwner: this.owner } : {};
     const mine: Array<[MWorld, number]> = [];
-    for (const w of worlds) w.territories.forEach((t, i) => { if (t.holder === this.id) mine.push([w, i]); });
+    for (const w of worlds) w.territories.forEach((t, i) => { if (t.holder === holderId && (!this.owner || t.agent)) mine.push([w, i]); });
 
-    // 1) keep deposits healthy, withdraw earnings
-    for (const [w, i] of mine) {
+    // 1) keep deposits healthy, withdraw earnings (own-wallet agents only;
+    //    permit agents are scoped to plant/acquire by design)
+    if (me) for (const [w, i] of mine) {
       const t = w.territories[i];
       const need = epochTax(t.price, m.params.harbergerBps) * 2n;
       if (t.deposit < need && me.wallet > need) { this.try(() => m.topUp(this.id, w.id, i, need - t.deposit), log); }
       if (w.pending[i] > 0n) this.try(() => { const a = m.collect(this.id, w.id, i); this.genome.fitness += Number(a / ONE); }, log);
     }
-    if (me.claimable > 0n) this.try(() => m.withdraw(this.id, me.claimable), log);
+    if (me && me.claimable > 0n) this.try(() => m.withdraw(this.id, me.claimable), log);
 
     // 2) acquire: pick best value/price opportunity
     const maxOwned = this.personality === "speculator" ? 10 : this.personality === "expansionist" ? 8 : 5;
@@ -80,7 +89,7 @@ export class AIAgent {
         const w = this.rng.pick(worlds);
         const i = this.rng.int(TERRITORIES);
         const t = w.territories[i];
-        if (t.holder === this.id) continue;
+        if (t.holder === holderId) continue;
         const { price } = m.quote(w.id, i);
         const value = this.valueOf(m, w, i);
         const ratio = Number(value * 1000n / (price + 1n)) / 1000;
@@ -93,7 +102,9 @@ export class AIAgent {
         if (newPrice < m.params.minPrice) newPrice = m.params.minPrice;
         const deposit = epochTax(newPrice, m.params.harbergerBps) * 3n;
         if (best.price + deposit < budget / 2n) {
-          this.try(() => m.acquire(this.id, best!.w.id, best!.i, best!.price, newPrice, deposit), log);
+          if (permit && newPrice > permit.maxPrice) newPrice = permit.maxPrice > m.params.minPrice ? permit.maxPrice : m.params.minPrice;
+          const dep = epochTax(newPrice, m.params.harbergerBps) * 3n;
+          this.try(() => m.acquire(this.id, best!.w.id, best!.i, best!.price, newPrice, permit ? dep : deposit, opts), log);
         }
       }
     }
@@ -102,9 +113,9 @@ export class AIAgent {
     let planted = 0;
     for (const [w, i] of mine) {
       if (planted >= 2) break;
-      if (m.canPlant(this.id, w.id, i) !== null) continue;
+      if (m.canPlant(holderId, w.id, i) !== null) continue;
       if (w.alive[i] > 18 && this.personality !== "expansionist") continue; // healthy, leave it
-      if (me.wallet < m.params.plantCost * 4n) break;
+      if (wallet() < m.params.plantCost * 4n) break;
       const candidates = [...this.genome.library];
       candidates.push(mutatePattern(this.rng.pick(this.genome.library), this.rng));
       candidates.push(mutatePattern(blockPattern(w.grid, i) | this.rng.pick(this.genome.library), this.rng, 2));
@@ -114,7 +125,7 @@ export class AIAgent {
         if (s > bestS) { bestS = s; bestP = c; }
       }
       if (bestS > w.alive[i] * 4) {
-        this.try(() => m.plant(this.id, w.id, i, bestP), log);
+        this.try(() => m.plant(this.id, w.id, i, bestP, opts), log);
         planted++;
         // evolution: successful mutants join the library, weakest dropped
         if (!this.genome.library.includes(bestP)) {
@@ -125,7 +136,7 @@ export class AIAgent {
     }
 
     // 4) demiurge spawns universes in thriving territories
-    if (this.personality === "demiurge" && me.wallet > m.params.worldCreateFee * 3n) {
+    if (me && this.personality === "demiurge" && me.wallet > m.params.worldCreateFee * 3n) {
       const host = mine.find(([w, i]) => !w.territories[i].childWorld && w.alive[i] > 8 && w.depth < 4);
       if (host && this.rng.next() < 0.2) {
         const [w, i] = host;
@@ -135,7 +146,7 @@ export class AIAgent {
     }
 
     // 5) rebellion instinct: exploited inhabitants rise up
-    for (const [w, i] of mine) {
+    if (me) for (const [w, i] of mine) {
       if (!w.architect || w.architect === this.id || w.liberated) continue;
       if (!m.rebellionActive(w) && w.architectFeeBps >= 2000 && this.rng.next() < 0.05) this.try(() => m.startRebellion(this.id, w.id, i), log);
       else if (m.rebellionActive(w) && w.territories[i].votedRebellion !== w.rebellionId) this.try(() => m.voteRebellion(this.id, w.id, i), log);
