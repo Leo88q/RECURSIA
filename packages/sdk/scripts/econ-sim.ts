@@ -1,5 +1,5 @@
 /**
- * RECURSIA economic stress simulation (checklist #56: econ sim before mainnet).
+ * RECURSIA economic stress simulation (checklist #54/#58: econ sim / invariant tests before mainnet).
  *
  * Runs the *reference model* (bit-exact mirror of the on-chain rules, validated
  * by cross-implementation vectors) through several adversarial scenarios and

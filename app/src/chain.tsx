@@ -132,6 +132,10 @@ export function ChainView() {
             </button>
           </li>))}
         </ul>
+        <div className="card small muted" title="Anti-drainer notice">
+          Официальная программа: <code>{programId.toBase58().slice(0, 8)}…{programId.toBase58().slice(-6)}</code>.
+          RECURSIA никогда не просит seed-фразу и не предлагает «ИИ-помощника» для подписи — только транзакции этой программы с превью.
+        </div>
         {config.pending.kind !== "None" && <div className="card danger-card small">Ожидает таймлока: {config.pending.kind} · ETA {new Date(Number(config.pendingEta) * 1000).toLocaleString("ru-RU")}</div>}
       </aside>
       <main className="center">

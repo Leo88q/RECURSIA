@@ -27,6 +27,8 @@ jobs:
         run: node scripts/check-unicode.mjs
       - name: npm ci (lockfile, no install scripts — checklist #50/#66)
         run: npm ci --ignore-scripts
+      - name: Known-compromised packages / non-registry sources
+        run: node scripts/check-supply-chain.mjs
       - name: npm audit (high+ fails)
         run: npm audit --audit-level=high
 

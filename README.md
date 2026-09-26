@@ -1,1 +1,40 @@
-# crispy-eureka
+# RECURSIA
+
+**Миры внутри миров. Ончейн-игра клеточной эволюции на Solana с собственным токеном RCR, живыми игроками и ИИ-жителями.**
+
+Каждый мир — это клеточный автомат 64×64, эволюция которого считается прямо в смарт-контракте.
+Игроки владеют территориями по налогу Харбергера, сажают жизнь, открывают дочерние миры со своими законами физики,
+а жизнь из вложенных симуляций может прорваться наверх.
+
+| Документ | О чём |
+|---|---|
+| [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md) | механики, новые ончейн-механизмы, игроки и ИИ |
+| [docs/TOKENOMICS.md](docs/TOKENOMICS.md) | токен RCR, потоки, эмиссия, монетизация, результаты econ-sim |
+| [docs/SECURITY.md](docs/SECURITY.md) | модель безопасности и сверка с чек-листом (части 0–3, A–W) |
+| [docs/DEPLOY.md](docs/DEPLOY.md) | деплой devnet → mainnet, multisig, keeper, клиент |
+
+## Структура
+```
+programs/recursia/   смарт-контракт (Anchor 0.31.1): 33 инструкции, симуляция на битбордах
+packages/sdk/        TypeScript SDK без @coral-xyz/anchor: PDA, раскладки, инструкции,
+                     эталонная модель GameModel (бит-в-бит с контрактом), ИИ-агенты, econ-sim
+keeper/              permissionless crank-бот (тики, эпохи, клеймы, форклоужеры, прорывы)
+app/                 клиент (React + Vite): песочница с ИИ и ончейн-режим с Wallet Standard
+tests/vectors/       кросс-реализационные векторы Rust ↔ TypeScript
+scripts/             CI-гигиена: скрытый unicode, supply-chain, аннотации ошибок
+```
+
+## Быстрый старт
+```bash
+npm ci --ignore-scripts
+npm test                  # SDK (22) + keeper (7) тестов
+npm run econ -- --quick   # экономическая стресс-симуляция, 7 инвариантов
+npm run dev               # клиент на http://localhost:5173 (режим «Песочница» работает без блокчейна)
+```
+Контракт: `cargo test -p recursia`, `anchor build` (см. `docs/DEPLOY.md`).
+
+## CI
+Каждый push проверяет: скрытый unicode, скомпрометированные пакеты, `npm audit`, юнит-тесты и clippy программы,
+SBF-сборку и сверку IDL ↔ SDK, тесты SDK/keeper, econ-sim и сборку клиента.
+
+> ⚠️ Внешний аудит ещё не проводился. Не используйте в mainnet до завершения пунктов раздела 10 в `docs/DEPLOY.md`.

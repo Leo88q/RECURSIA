@@ -13,7 +13,7 @@
  *   MIN_SOL                 stop when balance falls below, default 0.05
  * Flags: --once (single round), --dry-run (simulate only, never send)
  *
- * Security notes (checklist #38 key leakage, #64 auto-approve, #72 limits in code):
+ * Security notes (checklist: key leakage #38, auto-approve #77, limits in code not prompt #75):
  *  - the secret key is read from a file, never from argv/env text, never logged;
  *  - every transaction is simulated before signing; failures are skipped;
  *  - the keeper only ever signs instructions it built itself from the SDK and

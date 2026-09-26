@@ -11,3 +11,4 @@ test-ledger/
 keys/
 *-keypair.json
 id.json
+keeper.json
