@@ -32,6 +32,33 @@ jobs:
       - name: npm audit (high+ fails)
         run: npm audit --audit-level=high
 
+  lockfile:
+    # One-shot: commit a platform-tools compatible Cargo.lock (reproducible /
+    # verified builds need it). Least privilege: only this job may write, only
+    # on push, and it is a no-op once Cargo.lock is tracked.
+    name: Commit Cargo.lock (once)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check
+        id: have
+        run: git ls-files --error-unmatch Cargo.lock >/dev/null 2>&1 && echo "have=1" >> "$GITHUB_OUTPUT" || echo "have=0" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        if: steps.have.outputs.have == '0'
+        with: { toolchain: 1.86.0 }
+      - name: Generate + commit
+        if: steps.have.outputs.have == '0'
+        run: |
+          scripts/ci-run.sh sbf-lock scripts/sbf-lock.sh
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git commit -m "chore: commit platform-tools compatible Cargo.lock [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
   rust:
     name: Program unit tests + clippy
     runs-on: ubuntu-latest
@@ -46,8 +73,6 @@ jobs:
         run: |
           scripts/ci-run.sh sbf-lock scripts/sbf-lock.sh
           cp Cargo.lock /tmp/Cargo.lock
-          # export the lock (gzip+base64) as an annotation so it can be committed
-          echo "::notice title=cargo-lock-gz-b64::$(gzip -9c Cargo.lock | base64 -w0)"
       - name: fmt
         run: cargo fmt --all -- --check
         continue-on-error: true
