@@ -63,6 +63,11 @@ export function evaluatePattern(world: MWorld, idx: number, pattern: bigint, gen
 
 interface QuantumSecret { world: string; index: number; a: bigint; b: bigint; weight: number; salt: Uint8Array }
 
+/** How many epochs of income an agent is willing to pay for land (novices ignore yield). */
+/** value / price above which a skilled agent buys past its usual land limit. */
+const DEAL_RATIO = 3;
+const YIELD_HORIZON: Record<Skill, number> = { novice: 0, skilled: 2, pro: 3 };
+
 export class AIAgent {
   genome: AgentGenome;
   readonly rng: Rng;
@@ -101,7 +106,21 @@ export class AIAgent {
     const alive = BigInt(w.alive[idx] + 1);
     const u = unitOf(m);
     const hostBonus = w.territories[idx].childWorld ? 40n * u : 0n;
-    return m.params.minPrice + alive * u / 2n + hostBonus;
+    return m.params.minPrice + alive * u / 2n + hostBonus + this.yieldOf(w, idx) * BigInt(YIELD_HORIZON[this.skill]);
+  }
+
+  /**
+   * Expected per-epoch income of a territory: its share of last epoch's owned
+   * live-cell score × the world's pool contribution (the rebate ≤ 100% of it).
+   * Public on-chain data (World.scores_prev / sink_prev) — the same number the
+   * client shows as "доход за прошлую эпоху". Without it, cheap land in busy
+   * worlds is systematically underpriced and a passive squatter out-earns
+   * every skilled player (econ-sim I15).
+   */
+  yieldOf(w: MWorld, idx: number): bigint {
+    let total = 0n;
+    w.territories.forEach((t, i) => { if (t.holder || i === idx) total += BigInt(w.scoresPrev[i]); });
+    return total === 0n ? 0n : (w.sinkPrev * BigInt(w.scoresPrev[idx])) / total;
   }
 
   act(m: GameModel): string[] {
@@ -143,7 +162,10 @@ export class AIAgent {
 
     // 2) acquire: pick best value/price opportunity
     const maxOwned = this.personality === "speculator" ? 10 : this.personality === "expansionist" ? 8 : 5;
-    if (mine.length < maxOwned && this.rng.next() < this.genome.aggression) {
+    // skilled players look beyond their comfort limit when a clear deal shows up
+    // (cheap land that pays well): this keeps the Harberger market liquid
+    const hardMax = this.skill === "novice" ? maxOwned : maxOwned * 2;
+    if (mine.length < hardMax && this.rng.next() < this.genome.aggression) {
       let best: { w: MWorld; i: number; ratio: number; price: bigint } | null = null;
       for (let k = 0; k < 24; k++) {
         const w = this.rng.pick(worlds);
@@ -157,7 +179,7 @@ export class AIAgent {
         if (!best || adj > best.ratio) best = { w, i, ratio: adj, price };
       }
       const bar = (this.personality === "speculator" ? 1.05 : 0.8) + (this.skill === "pro" ? 0.3 : this.skill === "novice" ? -0.3 : 0);
-      if (best && best.ratio > bar) {
+      if (best && best.ratio > (mine.length < maxOwned ? bar : DEAL_RATIO)) {
         const value = this.valueOf(m, best.w, best.i);
         let newPrice = BigInt(Math.floor(Number(value) * this.genome.greed));
         if (newPrice < m.params.minPrice) newPrice = m.params.minPrice;

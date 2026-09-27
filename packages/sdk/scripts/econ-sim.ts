@@ -33,7 +33,11 @@
  * "guided" newcomers who heed the client's warnings (dying planting / low deposit).
  * Headline metric: % in profit among players who played ≥ 2 epochs.
  *
- * Usage: npm run econ [-- --quick] [-- --seeds N] [-- --epochs N] [-- --unguided] [-- --no-tournaments]
+ * v4: I15 "block squatter" — an actor that never evolves anything: it grabs cheap land in the
+ * busiest world and fills it with still-life grids (blocks), which stay alive every tick for
+ * free and so harvest a share of the world's rewards (score = live cells per tick).
+ *
+ * Usage: npm run econ [-- --squatter N] [-- --squatter-no-plant] [-- --quick] [-- --seeds N] [-- --epochs N] [-- --unguided] [-- --no-tournaments]
  */
 import { AIAgent, type Personality, type Skill } from "../src/agents.js";
 import { DEFAULT_PARAMS, MAX_ARCHITECT_FEE_BPS, ONE, PHYSICS_PRESETS, SEASON_PRIZE_CAP_BPS, SEASON_SHARE_BPS, SEASON_TOP, TOURNAMENT_TOP, type Params } from "../src/constants.js";
@@ -58,8 +62,13 @@ const ONLY = argv.includes("--only") ? argv[argv.indexOf("--only") + 1] : null;
 const SPONSOR_OVERRIDE = argv.includes("--sponsor") ? BigInt(opt("sponsor", 0)) : null;
 /** Scenario amounts are written in price units (plant_cost / 5 = 70 SKR at the default SKR price list). */
 const U = PARAMS.plantCost / 5n;
+/** Still-life grids (Conway): 4 blocks (tiles stably, 16 cells) / 9 blocks (36 cells, needs quiet neighbours). */
+const BLOCKS4 = 0x0066_6600_0066_6600n;
+const BLOCKS9 = 0xdbdb_00db_db00_dbdbn;
 
 type Scenario = {
+  /** I15: number of territories a block squatter tries to hold. */
+  squatter?: number;
   name: string; agents: number; farmer: boolean; whales: number; permitAgents: number; quantum?: boolean; neutral?: boolean;
   /** skill mix for the `agents` (cycled); default all skilled */ skills?: Skill[];
   /** novice newcomers joining at every epoch boundary */ newcomers?: number;
@@ -77,6 +86,7 @@ const SCENARIOS: Scenario[] = [
   { name: "neutral + laws", agents: 12, farmer: false, whales: 0, permitAgents: 0, quantum: true, neutral: true },
   { name: "sponsored", agents: 12, farmer: false, whales: 0, permitAgents: 0, sponsor: 20_000n },
   { name: "sponsored farm", agents: 8, farmer: true, whales: 0, permitAgents: 0, sponsor: 20_000n },
+  { name: "block squatter", agents: 12, farmer: false, whales: 1, permitAgents: 0, quantum: true, skills: ["novice", "skilled", "pro", "novice", "skilled", "pro"], newcomers: 2, sponsor: 20_000n, tournaments: true, guided: true, squatter: 8 },
   { name: "living economy", agents: 12, farmer: false, whales: 1, permitAgents: 0, quantum: true, skills: ["novice", "skilled", "pro", "novice", "skilled", "pro"], newcomers: 2, sponsor: 20_000n, tournaments: true, guided: true },
 ];
 const NEWCOMER0 = 300n; // U — a newcomer brings ~21k SKR (≈ $400)
@@ -85,6 +95,7 @@ const fmt = (v: bigint) => (Number(v / (ONE / 100n)) / 100).toLocaleString("en-U
 
 interface Result {
   scenario: string; seed: number; sunk: bigint; emitted: bigint; studio: bigint; worlds: number;
+  squatterPnl?: bigint; squatStats?: string;
   farmerPnl?: bigint; withholdGap?: bigint; qStats?: string; agentMedianPnl: bigint; agentBestPnl: bigint; permitOverspend: number; failures: string[];
   roles: string; season: string;
 }
@@ -203,6 +214,30 @@ function run(sc: Scenario, seed: number): Result {
     } catch (e) { failures.push(`I4 setup: ${(e as Error).message}`); }
   }
 
+  // I15 block squatter
+  const SQUAT = opt("squatter", sc.squatter ?? 0);
+  const SQ0 = 20_000n * U;
+  let sqPlants = 0, sqAcq = 0, sqCollected = 0n;
+  if (SQUAT) m.addPlayer("squatter", SQ0);
+  const squat = () => {
+    const id = "squatter";
+    const held: [string, number][] = [];
+    for (const w of m.worlds.values()) w.territories.forEach((t, i) => { if (t.holder === id) held.push([w.id, i]); });
+    const price = PARAMS.minPrice, tax = epochTax(price, PARAMS.harbergerBps);
+    if (held.length < SQUAT) {
+      // the busiest world: other people pay for its ticks
+      const w = [...m.worlds.values()].sort((a, b) => (b.sinkCur > a.sinkCur ? 1 : b.sinkCur < a.sinkCur ? -1 : 0))[0];
+      const vacant = w.territories.map((t, i) => [t, i] as const).filter(([t]) => !t.holder).sort((a, b) => w.alive[a[1]] - w.alive[b[1]]);
+      if (vacant.length) { try { m.acquire(id, w.id, vacant[0][1], price, price, tax * 8n); sqAcq++; } catch { /* broke / raced */ } }
+    }
+    for (const [wid, i] of held) {
+      const w = m.world(wid);
+      const quiet = [i - 1, i + 1, i - 8, i + 8].every((j) => j < 0 || j >= 64 || w.alive[j] === 0);
+      if (!flag("squatter-no-plant") && w.alive[i] < 8 && m.canPlant(id, wid, i) === null) { try { m.plant(id, wid, i, quiet ? BLOCKS9 : BLOCKS4); sqPlants++; } catch { /* */ } }
+      if (w.territories[i].deposit < tax * 3n) { try { m.topUp(id, wid, i, tax * 4n); } catch { /* */ } }
+      if (w.pending[i] > 0n) { sqCollected += w.pending[i]; try { m.collect(id, wid, i); } catch { sqCollected -= w.pending[i]; } }
+    }
+  };
   const farmW = () => m.world(farmId);
   const keeper0 = m.players.get("keeper")!.wallet;
   const founder0 = wealth(m, "founder");
@@ -231,6 +266,7 @@ function run(sc: Scenario, seed: number): Result {
       // the farmer also harvests its own cells (season points) — the worst case for I3/I13
       farmW().territories.forEach((t, i) => { if (t.holder === "farmer" && farmW().pending[i] > 0n) { try { m.collect("farmer", farmId, i); } catch { /* */ } } });
     }
+    if (SQUAT) squat();
     for (const a of agents) if (a.rng.next() < 0.6) { try { a.act(m); } catch (e) { failures.push(`agent threw: ${(e as Error).message}`); } }
     // twins act in lock-step on mirrored cells: they commit at the same moments
     // (only when BOTH can), so the only difference is how they settle.
@@ -346,6 +382,13 @@ function run(sc: Scenario, seed: number): Result {
     farmerPnl = back - FARM0;
     assert(farmerPnl < 0n, `I3 self-farming was profitable: +${fmt(farmerPnl)}`);
   }
+  // I15
+  let squatterPnl: bigint | undefined, squatStats: string | undefined;
+  if (SQUAT) {
+    squatterPnl = wealth(m, "squatter") - SQ0;
+    const share = m.totalEmitted > 0n ? Number((sqCollected * 10_000n) / m.totalEmitted) / 100 : 0;
+    squatStats = `squatter: PnL ${fmt(squatterPnl)} (${Math.round(Number((squatterPnl * 100n) / SQ0))}% of stake), acquires ${sqAcq}, plants ${sqPlants}, harvested ${fmt(sqCollected)} = ${share}% of all emission`;
+  }
   // I5
   const studio = m.treasury + m.players.get("studio")!.wallet + m.players.get("studio")!.claimable
     + m.modules.reduce((a, x) => a + x.accrued, 0n) - studio0;
@@ -396,7 +439,7 @@ function run(sc: Scenario, seed: number): Result {
     + (m.tournaments.size ? ` · турниры: ${m.tournaments.size}, взносы ${fmt(m.totalTournamentFees)}, призы ${fmt(m.totalTournamentPaid)}` : "");
   return {
     scenario: sc.name, seed, sunk: m.totalSunk, emitted: m.totalEmitted, studio, worlds: m.worlds.size,
-    farmerPnl, withholdGap, qStats, agentMedianPnl: pnls.length ? pnls[Math.floor(pnls.length / 2)] : 0n, agentBestPnl: pnls.length ? pnls[pnls.length - 1] : 0n,
+    farmerPnl, squatterPnl, squatStats, withholdGap, qStats, agentMedianPnl: pnls.length ? pnls[Math.floor(pnls.length / 2)] : 0n, agentBestPnl: pnls.length ? pnls[pnls.length - 1] : 0n,
     permitOverspend: failures.filter((f) => f.startsWith("I7")).length, failures, roles, season,
   };
 }
@@ -421,6 +464,7 @@ for (const sc0 of SCENARIOS) {
     console.log(`   👥 ${r.roles}`);
     console.log(`   🏆 ${r.season}`);
     if (r.qStats) console.log(`   ⚛ ${r.qStats}; withholder − honest = ${r.withholdGap === undefined ? "—" : fmt(r.withholdGap)} SKR`);
+    if (r.squatStats) console.log(`   ▦ ${r.squatStats}`);
     const uniq = [...new Set(r.failures)];
     for (const f of uniq.slice(0, 5)) console.log(`   ✗ ${f}`);
     if (uniq.length) bad++;

@@ -6,13 +6,13 @@
  * settle/claim → withdraw. After EVERY step the on-chain money invariants
  * are checked; attack attempts are made at the points where they would hurt.
  */
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PublicKey, type Keypair } from "@solana/web3.js";
 import {
   DEFAULT_PARAMS, EFFICIENCY_CAP_BPS, EFFICIENCY_SHARE_BPS, ONE, PHYSICS_PRESETS, SEASON_EPOCHS, TOURNAMENT_TIERS,
   ata, bpsFloor, epochTax, tournamentPlaces, tournamentPrizes, worldEmission, worldSponsor,
 } from "@recursia/sdk";
-import { Chain, HAVE_SO, REQUIRE_SO } from "./harness.js";
+import { Chain, HAVE_SO, REQUIRE_SO, trace } from "./harness.js";
 
 const P = DEFAULT_PARAMS;
 const BLOCKS = 0x0000_0018_1800_0000n; // still life: stays alive every tick
@@ -23,6 +23,7 @@ it("the compiled program is present when CI requires it", () => {
 });
 
 run("season lifecycle on the real program (LiteSVM)", () => {
+  beforeEach((ctx) => trace(`== ${ctx.task.name}`));
   let c: Chain;
   let studio: Keypair, dev: Keypair, alice: Keypair, bob: Keypair, carol: Keypair, dave: Keypair, keeper: Keypair, mallory: Keypair;
   let world: PublicKey, module: PublicKey;

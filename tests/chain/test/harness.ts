@@ -6,7 +6,7 @@
  * The program is deployed through the upgradeable loader with a known upgrade
  * authority, so `initialize` runs its real "only the upgrade authority" check.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Clock, FailedTransactionMetadata, LiteSVM, TransactionMetadata } from "litesvm";
@@ -54,8 +54,10 @@ export class Chain {
   supply = 0n;
 
   constructor(opts: { program?: boolean } = {}) {
+    trace("new LiteSVM");
     this.svm = new LiteSVM();
     if (opts.program ?? true) this.deployProgram();
+    trace("program deployed");
     this.rx = new RecursiaIx(PROGRAM_ID, this.mint);
     this.pda = this.rx.pda;
     this.writeMint();
@@ -64,7 +66,10 @@ export class Chain {
   }
 
   private deployProgram() {
-    this.svm.addProgramWithLoader(PROGRAM_ID, readFileSync(SO_PATH), UPGRADEABLE_LOADER);
+    const so = readFileSync(SO_PATH);
+    trace(`loading ${SO_PATH} (${so.length} bytes)`);
+    this.svm.addProgramWithLoader(PROGRAM_ID, so, UPGRADEABLE_LOADER);
+    trace("addProgramWithLoader ok");
     // Set the upgrade authority in ProgramData: [3u32][slot u64][Some=1][authority]
     const pdKey = PublicKey.findProgramAddressSync([PROGRAM_ID.toBytes()], UPGRADEABLE_LOADER)[0];
     const pd = this.svm.getAccount(pdKey)!;
@@ -120,7 +125,9 @@ export class Chain {
     tx.recentBlockhash = this.svm.latestBlockhash();
     tx.feePayer = signers[0].publicKey;
     tx.sign(...signers);
+    trace(`send ${ixs.map((ix) => ix.programId.equals(PROGRAM_ID) ? Buffer.from(ix.data.subarray(0, 8)).toString("hex") : ix.programId.toBase58().slice(0, 6)).join(",")}`);
     const r = this.svm.sendTransaction(tx);
+    trace(r instanceof FailedTransactionMetadata ? `  failed: ${String(r.err())}` : "  ok");
     if (r instanceof FailedTransactionMetadata) {
       const logs = r.meta().logs();
       throw new ChainError(errorCode(logs, String(r.err())), logs);
@@ -150,4 +157,9 @@ export class Chain {
   season() { return this.account(this.pda.season(), decodeSeason)!; }
   tournament(seasonId: bigint, tier: number) { return this.account(this.pda.tournament(seasonId, tier), decodeTournament); }
   bal(k: PublicKey) { return this.tokenBalance(k) ?? 0n; }
+}
+
+/** CHAIN_TRACE=1: step trace straight to fd 2 (survives a native abort of the test worker). */
+export function trace(msg: string) {
+  if (process.env.CHAIN_TRACE) writeSync(2, `chain-trace: ${msg}\n`);
 }
