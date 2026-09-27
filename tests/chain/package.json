@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Integration tests: the compiled SBF program executed in LiteSVM (checklist #54/#58)",
   "scripts": {
-    "test": "vitest run",
+    "test": "node --no-allocation-site-pretenuring ../../node_modules/vitest/vitest.mjs run --pool=forks",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
