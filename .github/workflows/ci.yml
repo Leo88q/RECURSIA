@@ -122,8 +122,26 @@ jobs:
           npm ci --ignore-scripts
           npx -w packages/sdk tsx scripts/check-idl.ts ../../target/idl/recursia.json
       - name: Integration tests — compiled program in LiteSVM (checklist #54/#58)
+        id: chain
         env: { REQUIRE_SO: "1", CHAIN_TRACE: "1", RUST_BACKTRACE: "1" }
         run: scripts/ci-run.sh chain-test npm -w tests/chain test -- --pool=threads --no-file-parallelism
+      - name: Native crash diagnostics (only when the LiteSVM run aborted)
+        # Node/V8 are built without C++ exceptions, so the first `throw` is the
+        # std::bad_alloc itself: gdb shows who asked for the memory.
+        if: failure() && steps.chain.outcome == 'failure'
+        env: { REQUIRE_SO: "1", RUST_BACKTRACE: "1" }
+        working-directory: tests/chain
+        run: |
+          sudo apt-get install -y -qq gdb >/dev/null 2>&1 || true
+          ( /usr/bin/time -v node ../../node_modules/vitest/vitest.mjs run test/lifecycle.test.ts --pool=threads > /tmp/rss.txt 2>&1 ) || true
+          RSS=$(grep -E "Maximum resident|Exit status" /tmp/rss.txt | tr '\n' ' ')
+          echo "::warning title=lifecycle peak memory::$RSS"
+          printf '%s\n' 'set pagination off' 'set print thread-events off' 'handle SIGPIPE SIGUSR1 SIGUSR2 SIG34 SIG35 nostop noprint pass' 'catch throw' 'run' 'bt 45' 'info threads' 'kill' 'quit' > /tmp/gdbcmds
+          timeout 900 gdb -batch -x /tmp/gdbcmds --args node ../../node_modules/vitest/vitest.mjs run test/lifecycle.test.ts --pool=threads > /tmp/gdb.txt 2>&1 || true
+          BT=$(grep -E "^#[0-9]+ |Catchpoint|signal|bad_alloc" /tmp/gdb.txt | head -70 | cut -c1-260)
+          BT="${BT//'%'/'%25'}"; BT="${BT//$'\n'/'%0A'}"
+          echo "::error title=bad_alloc backtrace::$BT"
+          exit 1
       - uses: actions/upload-artifact@v4
         with:
           name: recursia-build
