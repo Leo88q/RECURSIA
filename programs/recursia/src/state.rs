@@ -122,6 +122,24 @@ pub struct Config {
     // --- lifetime stats / invariants ---
     pub total_sunk: u64,
     pub total_emitted: u64,
+    // --- sponsor pool: extra rewards by live cells (see SPONSOR_*) ---
+    pub sponsor_pool_bump: u8,
+    /// Live-cell score on owned territories this epoch (all worlds).
+    pub cur_total_score: u64,
+    pub prev_total_score: u64,
+    pub prev_sponsor_budget: u64,
+    pub prev_sponsor_claimed: u64,
+    pub total_sponsored: u64,
+    // --- seasons ---
+    pub season_pool_bump: u8,
+    pub season_bump: u8,
+    /// Treasury balance already split with the season pool. Only this part is
+    /// spendable by governance (`TreasurySpend`).
+    pub treasury_seen: u64,
+    pub season_id: u64,
+    pub season_start_epoch: u64,
+    pub total_season_funded: u64,
+    pub total_season_paid: u64,
 }
 
 #[account]
@@ -187,6 +205,9 @@ pub struct World {
     /// Neutral world: no architect, no architect fee, no rebellion, quantum
     /// laws only; hosts quantum swaps between players.
     pub neutral: bool,
+    /// Live-cell score on OWNED territories (sponsor weight), current / previous epoch.
+    pub score_owned_cur: u64,
+    pub score_owned_prev: u64,
 }
 
 impl World {
@@ -242,6 +263,34 @@ pub struct Player {
     pub claimable: u64,
     pub total_earned: u64,
     pub territories: u32,
+    /// Season the points below belong to (reset lazily on the first collect
+    /// of a new season).
+    pub season_id: u64,
+    /// SKR collected from life rewards and host tax this season.
+    pub season_points: u64,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, PartialEq, Eq, InitSpace, Debug)]
+pub struct SeasonEntry {
+    pub player: Pubkey,
+    pub points: u64,
+}
+
+/// Season leaderboard (singleton PDA). The current season id lives in
+/// `Config::season_id`; `top` is its live top-10 (sorted, points desc).
+/// When a season closes its standings and fixed prizes move to `last_*`,
+/// claimable until the next season closes.
+#[account]
+#[derive(InitSpace)]
+pub struct Season {
+    pub version: u8,
+    pub bump: u8,
+    pub top: [SeasonEntry; SEASON_TOP],
+    pub last_id: u64,
+    pub last_top: [SeasonEntry; SEASON_TOP],
+    pub last_prizes: [u64; SEASON_TOP],
+    /// Bit i set = prize of rank i already paid.
+    pub last_claimed: u16,
 }
 
 #[account]
@@ -374,5 +423,13 @@ mod tests {
     #[test]
     fn skr_mint_is_the_official_one() {
         assert_eq!(SKR_MINT.to_string(), "SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3");
+    }
+
+    #[test]
+    fn account_sizes_match_sdk_layout() {
+        // mirrored in packages/sdk/src/layout.ts and app/src/lib/costs.ts
+        assert_eq!(8 + World::INIT_SPACE, 2022);
+        assert_eq!(8 + Player::INIT_SPACE, 78);
+        assert_eq!(8 + Season::INIT_SPACE, 900);
     }
 }

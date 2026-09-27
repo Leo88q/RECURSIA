@@ -6,9 +6,13 @@
 import {
   BREACH_POPULATION, BREACH_RESONANCE, DEFAULT_PARAMS, MAX_ARCHITECT_FEE_BPS, MAX_DEPTH, MAX_PRICE, ONE,
   PLANT_COOLDOWN_TICKS, PRICE_CHANGE_COOLDOWN_SLOTS, REBELLION_COOLDOWN_SLOTS, REBELLION_MIN_VOTES,
-  REBELLION_THRESHOLD_BPS, SKR_SUPPLY_APPROX, TERRITORIES, type Params,
+  REBELLION_THRESHOLD_BPS, SEASON_EPOCHS, SEASON_RANK_BPS, SEASON_SHARE_BPS, SEASON_TOP, SKR_SUPPLY_APPROX,
+  SPONSOR_CAP_BPS, SPONSOR_RATE_BPS, TERRITORIES, type Params,
 } from "./constants.js";
-import { bpsFloor, distribute, epochTax, harbergerDue, splitSpend, splitTick, worldEmission } from "./economy.js";
+import {
+  bpsFloor, distribute, epochTax, harbergerDue, leaderboardInsert, seasonPrize, splitSpend, splitTick, worldEmission, worldSponsor,
+  type LeaderEntry,
+} from "./economy.js";
 import { bigbang, GLIDER, orBlock, population, stepNQ, swapBlocks, territoryCounts, writeBlock, type Grid } from "./sim.js";
 import { sha256 } from "@noble/hashes/sha256";
 import {
@@ -43,13 +47,21 @@ export interface MWorld {
   key: Uint8Array; qBirth: number; qSurvive: number; qAmp: number; entropy: Uint8Array | null; quantumEscrow: bigint; superpositions: number;
   /** Neutral quantum world: no architect, SWAP market enabled. */
   neutral: boolean;
+  /** Live-cell score on owned territories (sponsor weight). */
+  scoreOwnedCur: bigint; scoreOwnedPrev: bigint;
 }
 /** Probabilistic block exchange in a neutral world (mirror of the `QuantumSwap` account). */
 export interface MSwap {
   key: string; world: string; offerer: string; acceptor: string; indexA: number; indexB: number; weightBps: number;
   premium: bigint; bounty: bigint; createdSlot: number; expirySlot: number; accepted: boolean; targetSlot: number; rearms: number;
 }
-export interface MPlayer { id: string; wallet: bigint; claimable: bigint; totalEarned: bigint; isAgent: boolean; spentFees: bigint }
+export interface MPlayer {
+  id: string; wallet: bigint; claimable: bigint; totalEarned: bigint; isAgent: boolean; spentFees: bigint;
+  /** Season the points belong to; points = SKR collected from life (rewards + host tax). */
+  seasonId: number; seasonPoints: bigint;
+}
+export interface MSeasonResult { id: number; top: LeaderEntry<string>[]; prizes: bigint[]; claimed: boolean[] }
+const emptyTop = (): LeaderEntry<string>[] => Array.from({ length: SEASON_TOP }, () => ({ player: "", points: 0n }));
 export interface MPermit { owner: string; agent: string; vault: bigint; maxSpendPerEpoch: bigint; maxPrice: bigint; spent: bigint; spendEpoch: number; expirySlot: number; scope: number }
 
 export type GameEvent = { slot: number; kind: string; text: string; world?: string };
@@ -67,6 +79,12 @@ export class GameModel {
   readonly supply: bigint;
   rewardPool: bigint; treasury: bigint; claims = 0n; distribution: bigint; totalSunk = 0n; totalEmitted = 0n;
   curEpoch = 1; epochStart = 0; curTotalSink = 0n; prevTotalSink = 0n; prevEmission = 0n; prevClaimed = 0n;
+  // sponsor pool (mirror of Config sponsor fields)
+  sponsorPool = 0n; curTotalScore = 0n; prevTotalScore = 0n; prevSponsorBudget = 0n; prevSponsorClaimed = 0n; totalSponsored = 0n;
+  // seasons
+  seasonPool = 0n; treasurySeen = 0n; seasonId = 1; seasonStartEpoch = 1; totalSeasonFunded = 0n; totalSeasonPaid = 0n;
+  seasonTop: LeaderEntry<string>[] = emptyTop();
+  lastSeason: MSeasonResult | null = null;
   events: GameEvent[] = [];
   paused = false;
   superpositions = new Map<string, MSuperposition>();
@@ -97,7 +115,7 @@ export class GameModel {
   addPlayer(id: string, airdrop: bigint, isAgent = false): MPlayer {
     req(this.distribution >= airdrop, "distribution exhausted");
     this.distribution -= airdrop;
-    const p: MPlayer = { id, wallet: airdrop, claimable: 0n, totalEarned: 0n, isAgent, spentFees: 0n };
+    const p: MPlayer = { id, wallet: airdrop, claimable: 0n, totalEarned: 0n, isAgent, spentFees: 0n, seasonId: 0, seasonPoints: 0n };
     this.players.set(id, p);
     return p;
   }
@@ -118,6 +136,14 @@ export class GameModel {
   fundRewardPool(id: string, amount: bigint) {
     req(amount > 0n, "zero amount");
     this.spend(id, amount); this.rewardPool += amount;
+    this.check();
+  }
+
+  /** Anyone may fund the sponsor pool (mirror of `fund_sponsor_pool`). */
+  fundSponsorPool(id: string, amount: bigint) {
+    req(amount > 0n, "zero amount");
+    this.spend(id, amount); this.sponsorPool += amount;
+    this.log("sponsor", `${id} пополнил спонсорский пул на ${fmtT(amount)}: награды за живые клетки выросли`);
     this.check();
   }
 
@@ -164,7 +190,7 @@ export class GameModel {
       resonance: 0, children: [], rebellionId: 0, rebellionVotes: 0, rebellionDeadline: 0, lastRebellionSlot: 0, liberated: false, totalSunk: 0n,
       history: [population(grid)],
       key: keyBytes, qBirth: m.qBirth, qSurvive: m.qSurvive, qAmp: m.qAmp, entropy: null, quantumEscrow: 0n, superpositions: 0,
-      neutral: false,
+      neutral: false, scoreOwnedCur: 0n, scoreOwnedPrev: 0n,
     };
     m.worldsUsing++;
     this.worlds.set(id, w);
@@ -241,10 +267,12 @@ export class GameModel {
     if (w.epochId >= this.curEpoch) return;
     if (w.epochId + 1 === this.curEpoch) {
       w.prevEpochId = w.epochId; w.sinkPrev = w.sinkCur; w.scoresPrev = w.scoresCur; w.prevClaimed = false;
+      w.scoreOwnedPrev = w.scoreOwnedCur;
     } else {
       w.prevEpochId = this.curEpoch - 1; w.sinkPrev = 0n; w.scoresPrev = new Array(TERRITORIES).fill(0); w.prevClaimed = true;
+      w.scoreOwnedPrev = 0n;
     }
-    w.epochId = this.curEpoch; w.sinkCur = 0n; w.scoresCur = new Array(TERRITORIES).fill(0);
+    w.epochId = this.curEpoch; w.sinkCur = 0n; w.scoresCur = new Array(TERRITORIES).fill(0); w.scoreOwnedCur = 0n;
   }
 
 
@@ -276,7 +304,9 @@ export class GameModel {
       w.grid = stepNQ(w.grid, w.birth, w.survive, null, 0n, p.gensPerTick);
     }
     w.alive = territoryCounts(w.grid);
-    for (let i = 0; i < TERRITORIES; i++) w.scoresCur[i] += w.alive[i];
+    let owned = 0n;
+    for (let i = 0; i < TERRITORIES; i++) { w.scoresCur[i] += w.alive[i]; if (w.territories[i].holder) owned += BigInt(w.alive[i]); }
+    w.scoreOwnedCur += owned; this.curTotalScore += owned;
     w.generation += p.gensPerTick; w.tickCount++; w.lastTickSlot = this.slot;
     const pop = population(w.grid);
     w.history.push(pop); if (w.history.length > 240) w.history.shift();
@@ -299,8 +329,15 @@ export class GameModel {
   advanceEpoch() {
     req(this.canAdvanceEpoch(), "epoch not over");
     const emission = this.curTotalSink === 0n ? 0n : bpsFloor(this.rewardPool, this.params.emissionRateBps);
+    const sponsorBudget = this.curTotalScore === 0n || this.curTotalSink === 0n ? 0n : bpsFloor(this.sponsorPool, SPONSOR_RATE_BPS);
     this.prevTotalSink = this.curTotalSink; this.prevEmission = emission; this.prevClaimed = 0n;
+    this.prevTotalScore = this.curTotalScore; this.prevSponsorBudget = sponsorBudget; this.prevSponsorClaimed = 0n; this.curTotalScore = 0n;
     this.curTotalSink = 0n; this.curEpoch++; this.epochStart = this.slot;
+    // season share of new studio inflow (treasury → season pool)
+    const inflow = this.treasury > this.treasurySeen ? this.treasury - this.treasurySeen : 0n;
+    const share = bpsFloor(inflow, SEASON_SHARE_BPS);
+    this.treasury -= share; this.seasonPool += share; this.treasurySeen = this.treasury; this.totalSeasonFunded += share;
+    if (this.curEpoch - this.seasonStartEpoch >= SEASON_EPOCHS) this.closeSeason();
     this.log("epoch", `Эпоха ${this.curEpoch - 1} закрыта: в пул наград пришло ${fmtT(this.prevTotalSink)}, к раздаче ${fmtT(emission)} (мир получает ≤ ${this.params.rebateCapBps / 100}% своего вклада в пул)`);
   }
   claimWorldEpoch(id: string): bigint {
@@ -308,16 +345,48 @@ export class GameModel {
     this.rollEpoch(w);
     req(!w.prevClaimed && w.prevEpochId + 1 === this.curEpoch, "claim window");
     const reward = worldEmission(this.prevEmission, this.prevTotalSink, w.sinkPrev, this.params.rebateCapBps, this.prevClaimed);
-    req(reward > 0n, "nothing to claim");
+    const sponsor = worldSponsor(this.prevSponsorBudget, this.prevTotalScore, w.scoreOwnedPrev, w.sinkPrev, SPONSOR_CAP_BPS, this.prevSponsorClaimed);
+    const total = reward + sponsor;
+    req(total > 0n, "nothing to claim");
     w.prevClaimed = true;
     const owned = w.territories.map((t) => !!t.holder);
-    const { shares, rest } = distribute(reward, w.scoresPrev, owned);
+    const { shares, rest } = distribute(total, w.scoresPrev, owned);
     shares.forEach((s, i) => { if (s > 0n) { w.pending[i] += s; w.rewardsReserved += s; } });
     w.energy += rest;
     this.prevClaimed += reward; this.totalEmitted += reward;
-    this.rewardPool -= reward; w.vault += reward;
+    this.prevSponsorClaimed += sponsor; this.totalSponsored += sponsor;
+    this.rewardPool -= reward; this.sponsorPool -= sponsor; w.vault += total;
     this.check();
-    return reward;
+    return total;
+  }
+
+  // --------------------------------------------------------------- seasons
+  private closeSeason() {
+    const prizes = this.seasonTop.map((e, r) => (e.player ? seasonPrize(this.seasonPool, SEASON_RANK_BPS[r], e.points) : 0n));
+    this.lastSeason = { id: this.seasonId, top: this.seasonTop, prizes, claimed: prizes.map(() => false) };
+    const total = prizes.reduce((a, b) => a + b, 0n);
+    this.log("season", `Сезон ${this.seasonId} закрыт: призовой фонд ${fmtT(this.seasonPool)}, призы ${fmtT(total)}${this.seasonTop[0].player ? `, победитель — ${this.seasonTop[0].player}` : ""}`);
+    this.seasonTop = emptyTop(); this.seasonId++; this.seasonStartEpoch = this.curEpoch;
+  }
+  /** Points of `id` in the current season (0 if none yet). */
+  seasonPointsOf(id: string) { const p = this.pl(id); return p.seasonId === this.seasonId ? p.seasonPoints : 0n; }
+  /** Permissionless: put a player's points on the top-10 (mirror of `season_submit`). */
+  seasonSubmit(id: string): boolean {
+    const p = this.pl(id);
+    req(p.seasonId === this.seasonId && p.seasonPoints > 0n, "no season points");
+    return leaderboardInsert(this.seasonTop, { player: id, points: p.seasonPoints }, (k) => k === "", (a, b) => a === b);
+  }
+  /** Permissionless: credit rank's prize of the last closed season (mirror of `claim_season_prize`). */
+  claimSeasonPrize(rank: number): bigint {
+    const s = this.lastSeason;
+    req(s && rank >= 0 && rank < SEASON_TOP && s.top[rank].player && !s.claimed[rank] && s.prizes[rank] > 0n, "no prize");
+    const amount = s.prizes[rank]; const p = this.pl(s.top[rank].player);
+    s.claimed[rank] = true;
+    p.claimable += amount; p.totalEarned += amount; this.claims += amount;
+    this.seasonPool -= amount; this.totalSeasonPaid += amount;
+    this.log("season", `${p.id} получил приз сезона ${s.id} за ${rank + 1}-е место: ${fmtT(amount)}`);
+    this.check();
+    return amount;
   }
 
   // --------------------------------------------------------------- territories
@@ -461,6 +530,8 @@ export class GameModel {
     this.accrueTax(w, idx);
     w.pending[idx] = 0n; w.rewardsReserved -= amt; w.vault -= amt; this.claims += amt;
     const p = this.pl(holder); p.claimable += amt; p.totalEarned += amt;
+    if (p.seasonId !== this.seasonId) { p.seasonId = this.seasonId; p.seasonPoints = 0n; }
+    p.seasonPoints += amt;
     this.check();
     return amt;
   }
@@ -820,7 +891,7 @@ export class GameModel {
   }
 
   circulating(): bigint {
-    let v = this.rewardPool + this.treasury + this.claims + this.distribution;
+    let v = this.rewardPool + this.sponsorPool + this.seasonPool + this.treasury + this.claims + this.distribution;
     for (const p of this.players.values()) v += p.wallet;
     for (const w of this.worlds.values()) v += w.vault;
     for (const p of this.permits.values()) v += p.vault;

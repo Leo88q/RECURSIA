@@ -3,7 +3,7 @@
 // Integrity: discriminators are verified on decode (type-confusion guard, #35).
 import { sha256 } from "@noble/hashes/sha256";
 import { PublicKey } from "@solana/web3.js";
-import { GRID, TERRITORIES, type Params } from "./constants.js";
+import { GRID, SEASON_TOP, TERRITORIES, type Params } from "./constants.js";
 import { decodeName, encodeName } from "./names.js";
 export { decodeName, encodeName };
 
@@ -92,6 +92,10 @@ export interface ConfigAccount {
   rootWorlds: bigint; totalWorlds: bigint; modules: bigint; curEpoch: bigint; epochStartSlot: bigint;
   curTotalSink: bigint; prevTotalSink: bigint; prevEmission: bigint; prevClaimed: bigint;
   totalSunk: bigint; totalEmitted: bigint;
+  /** Sponsor pool: extra rewards by live cells (see SPONSOR_* constants). */
+  curTotalScore: bigint; prevTotalScore: bigint; prevSponsorBudget: bigint; prevSponsorClaimed: bigint; totalSponsored: bigint;
+  /** Seasons: treasury part already split with the season pool, current season, lifetime stats. */
+  treasurySeen: bigint; seasonId: bigint; seasonStartEpoch: bigint; totalSeasonFunded: bigint; totalSeasonPaid: bigint;
 }
 
 export function decodeConfig(data: Uint8Array): ConfigAccount {
@@ -104,6 +108,8 @@ export function decodeConfig(data: Uint8Array): ConfigAccount {
     rootWorlds: r.u64(), totalWorlds: r.u64(), modules: r.u64(), curEpoch: r.u64(), epochStartSlot: r.u64(),
     curTotalSink: r.u64(), prevTotalSink: r.u64(), prevEmission: r.u64(), prevClaimed: r.u64(),
     totalSunk: r.u64(), totalEmitted: r.u64(),
+    ...(r.u8(), { curTotalScore: r.u64(), prevTotalScore: r.u64(), prevSponsorBudget: r.u64(), prevSponsorClaimed: r.u64(), totalSponsored: r.u64() }),
+    ...(r.u8(), r.u8(), { treasurySeen: r.u64(), seasonId: r.u64(), seasonStartEpoch: r.u64(), totalSeasonFunded: r.u64(), totalSeasonPaid: r.u64() }),
   };
 }
 
@@ -119,6 +125,8 @@ export interface WorldAccount {
   qBirth: number; qSurvive: number; qAmp: number; entropy: Uint8Array; quantumEscrow: bigint; superpositions: number;
   /** Neutral quantum world: no architect, SWAP market enabled. */
   neutral: boolean;
+  /** Live-cell score on owned territories (sponsor weight), current / previous epoch. */
+  scoreOwnedCur: bigint; scoreOwnedPrev: bigint;
 }
 
 export function decodeWorld(data: Uint8Array): WorldAccount {
@@ -142,6 +150,7 @@ export function decodeWorld(data: Uint8Array): WorldAccount {
   w.liberated = r.bool(); w.totalSunk = r.u64();
   w.qBirth = r.u16(); w.qSurvive = r.u16(); w.qAmp = r.u8(); w.entropy = r.bytes(32); w.quantumEscrow = r.u64(); w.superpositions = r.u16();
   w.neutral = r.bool();
+  w.scoreOwnedCur = r.u64(); w.scoreOwnedPrev = r.u64();
   return w as WorldAccount;
 }
 
@@ -161,12 +170,27 @@ export function decodeTerritory(data: Uint8Array): TerritoryAccount {
   };
 }
 
-export interface PlayerAccount { owner: PublicKey; claimable: bigint; totalEarned: bigint; territories: number }
+export interface PlayerAccount { owner: PublicKey; claimable: bigint; totalEarned: bigint; territories: number; seasonId: bigint; seasonPoints: bigint }
 export function decodePlayer(data: Uint8Array): PlayerAccount {
   const r = checkDisc(data, "Player");
   r.u8(); r.u8();
-  return { owner: r.pubkey(), claimable: r.u64(), totalEarned: r.u64(), territories: r.u32() };
+  return { owner: r.pubkey(), claimable: r.u64(), totalEarned: r.u64(), territories: r.u32(), seasonId: r.u64(), seasonPoints: r.u64() };
 }
+export const PLAYER_SPACE = 8 + 1 + 1 + 32 + 8 + 8 + 4 + 8 + 8;
+
+export interface SeasonEntry { player: PublicKey; points: bigint }
+export interface SeasonAccount { top: SeasonEntry[]; lastId: bigint; lastTop: SeasonEntry[]; lastPrizes: bigint[]; lastClaimed: number }
+export function decodeSeason(data: Uint8Array): SeasonAccount {
+  const r = checkDisc(data, "Season");
+  r.u8(); r.u8();
+  const entries = () => Array.from({ length: SEASON_TOP }, () => ({ player: r.pubkey(), points: r.u64() }));
+  const top = entries();
+  const lastId = r.u64();
+  const lastTop = entries();
+  const lastPrizes = Array.from({ length: SEASON_TOP }, () => r.u64());
+  return { top, lastId, lastTop, lastPrizes, lastClaimed: r.u16() };
+}
+export const SEASON_SPACE = 8 + 2 + SEASON_TOP * 40 + 8 + SEASON_TOP * 40 + SEASON_TOP * 8 + 2;
 
 export interface ModuleAccount { id: bigint; author: PublicKey; birth: number; survive: number; royaltyBps: number; name: string; accrued: bigint; totalEarned: bigint; worldsUsing: number; qBirth: number; qSurvive: number; qAmp: number }
 export function decodeModule(data: Uint8Array): ModuleAccount {
@@ -184,7 +208,7 @@ export function decodePermit(data: Uint8Array): PermitAccount {
 
 /** Byte size of World per InitSpace (used by tests to catch layout drift). */
 export const WORLD_SPACE = 8 + 4 + 32 + 1 + 8 + 32 + 2 + 32 + 2 + 2 + 32 + GRID * 8 + 8 * 4 + 8 * 4 + TERRITORIES * 2 + TERRITORIES * 8 + 8 + 8 + 8 + TERRITORIES * 4 + 8 + 8 + TERRITORIES * 4 + 1 + 2 + 2 + 4 + 1 + 8 + 8 + 1 + 8
-  + 2 + 2 + 1 + 32 + 8 + 2 + 1;
+  + 2 + 2 + 1 + 32 + 8 + 2 + 1 + 8 + 8;
 
 export interface SuperpositionAccount {
   owner: PublicKey; world: PublicKey; index: number; world2: PublicKey; index2: number; commitment: Uint8Array;

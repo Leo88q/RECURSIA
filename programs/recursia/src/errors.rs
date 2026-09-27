@@ -106,4 +106,10 @@ pub enum RecursiaError {
     InvalidWeight,
     #[msg("SlotHashes sysvar unavailable or malformed")]
     SlotHashes,
+    #[msg("No season points to submit")]
+    NoSeasonPoints,
+    #[msg("Season prize already paid or not won")]
+    NoPrize,
+    #[msg("Treasury amount not yet split with the season pool")]
+    TreasuryLocked,
 }

@@ -416,9 +416,17 @@ pub fn collect(mut ctx: Context<HolderOp>) -> Result<()> {
     require!(amount > 0, RecursiaError::NothingToClaim);
     ctx.accounts.world.territory_pending[idx] = 0;
     ctx.accounts.world.rewards_reserved = math::sub(ctx.accounts.world.rewards_reserved, amount)?;
+    let season_id = ctx.accounts.config.season_id;
     let pl = &mut ctx.accounts.player;
     pl.claimable = math::add(pl.claimable, amount)?;
     pl.total_earned = math::add(pl.total_earned, amount)?;
+    // Season points = SKR collected from life (epoch rewards + host tax).
+    // Architect fees and sale proceeds do not count: they can be self-dealt.
+    if pl.season_id != season_id {
+        pl.season_id = season_id;
+        pl.season_points = 0;
+    }
+    pl.season_points = math::add(pl.season_points, amount)?;
     let bump = ctx.accounts.config.bump;
     vault_transfer(
         &ctx.accounts.token_program.to_account_info(),

@@ -443,7 +443,7 @@ pub fn tick(ctx: Context<Tick>) -> Result<()> {
     )?;
 
     // --- effects on state BEFORE external calls (checklist #7)
-    let (generation, pop) = {
+    let (generation, pop, owned_score) = {
         let config_ro = Config::clone(&ctx.accounts.config);
         let w = &mut ctx.accounts.world;
         roll_world_epoch(w, &config_ro);
@@ -469,9 +469,15 @@ pub fn tick(ctx: Context<Tick>) -> Result<()> {
         w.grid = g;
         let counts = sim::territory_counts(&g);
         w.territory_alive = counts;
-        for (score, c) in w.scores_cur.iter_mut().zip(counts.iter()) {
+        let mut owned_score = 0u64;
+        let owned_mask = w.owned_mask;
+        for (i, (score, c)) in w.scores_cur.iter_mut().zip(counts.iter()).enumerate() {
             *score = score.saturating_add(*c as u32);
+            if (owned_mask >> i) & 1 == 1 {
+                owned_score += *c as u64;
+            }
         }
+        w.score_owned_cur = w.score_owned_cur.saturating_add(owned_score);
         w.generation = w.generation.saturating_add(p.gens_per_tick as u64);
         w.tick_count = w.tick_count.saturating_add(1);
         w.last_tick_slot = slot;
@@ -479,8 +485,10 @@ pub fn tick(ctx: Context<Tick>) -> Result<()> {
         if is_child && pop >= BREACH_POPULATION {
             w.resonance = w.resonance.saturating_add(1).min(BREACH_RESONANCE);
         }
-        (w.generation, pop)
+        (w.generation, pop, owned_score)
     };
+    let cfg_mut = &mut ctx.accounts.config;
+    cfg_mut.cur_total_score = cfg_mut.cur_total_score.saturating_add(owned_score);
     record_sink(&mut ctx.accounts.world, &mut ctx.accounts.config, split.pool)?;
     let m = &mut ctx.accounts.module;
     m.accrued = math::add(m.accrued, split.royalty)?;
@@ -542,6 +550,8 @@ pub struct ClaimWorldEpoch<'info> {
     pub world_vault: Box<Account<'info, TokenAccount>>,
     #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
     pub reward_pool: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [SEED_SPONSOR_POOL], bump = config.sponsor_pool_bump)]
+    pub sponsor_pool: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -563,9 +573,18 @@ pub fn claim_world_epoch(ctx: Context<ClaimWorldEpoch>) -> Result<()> {
         config_ro.params.rebate_cap_bps,
         config_ro.prev_claimed,
     )?;
+    let sponsor = math::world_sponsor(
+        config_ro.prev_sponsor_budget,
+        config_ro.prev_total_score,
+        w.score_owned_prev,
+        w.sink_prev,
+        SPONSOR_CAP_BPS,
+        config_ro.prev_sponsor_claimed,
+    )?;
     w.prev_claimed = true;
-    require!(reward > 0, RecursiaError::NothingToClaim);
-    let (shares, rest) = math::distribute(reward, &w.scores_prev, &owned_array(w.owned_mask))?;
+    let total = math::add(reward, sponsor)?;
+    require!(total > 0, RecursiaError::NothingToClaim);
+    let (shares, rest) = math::distribute(total, &w.scores_prev, &owned_array(w.owned_mask))?;
     let mut credited = 0u64;
     for (i, s) in shares.iter().enumerate() {
         if *s > 0 {
@@ -579,19 +598,18 @@ pub fn claim_world_epoch(ctx: Context<ClaimWorldEpoch>) -> Result<()> {
     let c = &mut ctx.accounts.config;
     c.prev_claimed = math::add(c.prev_claimed, reward)?;
     c.total_emitted = math::add(c.total_emitted, reward)?;
+    c.prev_sponsor_claimed = math::add(c.prev_sponsor_claimed, sponsor)?;
+    c.total_sponsored = math::add(c.total_sponsored, sponsor)?;
     let bump = c.bump;
-    vault_transfer(
-        &ctx.accounts.token_program.to_account_info(),
-        &ctx.accounts.mint.to_account_info(),
-        &ctx.accounts.reward_pool.to_account_info(),
-        &ctx.accounts.world_vault.to_account_info(),
-        &ctx.accounts.config.to_account_info(),
-        bump,
-        reward,
-    )?;
+    let tp = ctx.accounts.token_program.to_account_info();
+    let mint = ctx.accounts.mint.to_account_info();
+    let cfg = ctx.accounts.config.to_account_info();
+    let vault = ctx.accounts.world_vault.to_account_info();
+    vault_transfer(&tp, &mint, &ctx.accounts.reward_pool.to_account_info(), &vault, &cfg, bump, reward)?;
+    vault_transfer(&tp, &mint, &ctx.accounts.sponsor_pool.to_account_info(), &vault, &cfg, bump, sponsor)?;
     ctx.accounts.world_vault.reload()?;
     assert_world_solvent(&ctx.accounts.world, ctx.accounts.world_vault.amount)?;
-    emit!(EmissionClaimed { world: ctx.accounts.world.key(), epoch, amount: reward });
+    emit!(EmissionClaimed { world: ctx.accounts.world.key(), epoch, amount: total, sponsor });
     Ok(())
 }
 

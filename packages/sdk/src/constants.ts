@@ -15,6 +15,21 @@ export const BPS = 10_000n;
 export const MIN_TIMELOCK_SECS = 48 * 60 * 60;
 export const MIN_TICK_POOL_BPS = 3_000;
 export const MAX_PROTOCOL_BPS = 2_500;
+
+// Sponsor pool (mirror of constants.rs): extra rewards by live cells.
+/** Share of the sponsor pool paid out per epoch. */
+export const SPONSOR_RATE_BPS = 1_000;
+/** A world's sponsor reward ≤ this share of its own reward-pool contribution. */
+export const SPONSOR_CAP_BPS = 10_000;
+
+// Seasons (mirror of constants.rs).
+export const SEASON_EPOCHS = 7;
+/** Share of studio inflow swept into the season prize pool (25% of 20% = 5% of all spend). */
+export const SEASON_SHARE_BPS = 2_500;
+/** A prize never exceeds this share of the winner's own season points. */
+export const SEASON_PRIZE_CAP_BPS = 2_500;
+export const SEASON_TOP = 10;
+export const SEASON_RANK_BPS = [3_000, 2_000, 1_500, 1_000, 800, 600, 400, 300, 200, 200] as const;
 export const MAX_EMISSION_RATE_BPS = 2_000;
 export const MAX_ROYALTY_BPS = 500;
 export const MAX_ARCHITECT_FEE_BPS = 3_000;

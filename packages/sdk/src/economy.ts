@@ -1,5 +1,5 @@
 // Mirror of programs/recursia/src/math.rs (all bigint, floor division).
-import { BPS, TERRITORIES } from "./constants.js";
+import { BPS, SEASON_PRIZE_CAP_BPS, SEASON_TOP, TERRITORIES } from "./constants.js";
 
 export const bpsFloor = (amount: bigint, bps: number | bigint) => (amount * BigInt(bps)) / BPS;
 const divCeil = (a: bigint, b: bigint) => (a + b - 1n) / b;
@@ -35,6 +35,37 @@ export function worldEmission(emission: bigint, totalSink: bigint, sinkW: bigint
   const cap = bpsFloor(sinkW, rebateCapBps);
   const remaining = emission > alreadyClaimed ? emission - alreadyClaimed : 0n;
   return [proRata, cap, remaining].reduce((a, b) => (a < b ? a : b));
+}
+
+/** Mirror of math::world_sponsor: pro rata by owned live-cell score, capped by the world's own pool contribution. */
+export function worldSponsor(budget: bigint, totalScore: bigint, scoreW: bigint, sinkW: bigint, capBps: number, alreadyClaimed: bigint): bigint {
+  if (budget === 0n || totalScore === 0n || scoreW === 0n || sinkW === 0n) return 0n;
+  const proRata = (budget * scoreW) / totalScore;
+  const cap = bpsFloor(sinkW, capBps);
+  const remaining = budget > alreadyClaimed ? budget - alreadyClaimed : 0n;
+  return [proRata, cap, remaining].reduce((a, b) => (a < b ? a : b));
+}
+
+/** Mirror of math::season_prize: rank share of the pool, ≤ SEASON_PRIZE_CAP_BPS of the winner's points. */
+export function seasonPrize(pool: bigint, rankBps: number, points: bigint): bigint {
+  const share = bpsFloor(pool, rankBps);
+  const cap = bpsFloor(points, SEASON_PRIZE_CAP_BPS);
+  return share < cap ? share : cap;
+}
+
+export interface LeaderEntry<K> { player: K; points: bigint }
+/** Mirror of season::leaderboard_insert (stable sort, points desc, one entry per player). */
+export function leaderboardInsert<K>(top: LeaderEntry<K>[], entry: LeaderEntry<K>, isEmpty: (k: K) => boolean, eq: (a: K, b: K) => boolean): boolean {
+  const pos = top.findIndex((e) => eq(e.player, entry.player));
+  if (pos >= 0) {
+    if (entry.points > top[pos].points) top[pos].points = entry.points;
+  } else {
+    const last = SEASON_TOP - 1;
+    if (!isEmpty(top[last].player) && top[last].points >= entry.points) return false;
+    top[last] = { ...entry };
+  }
+  top.sort((a, b) => (b.points > a.points ? 1 : b.points < a.points ? -1 : 0)); // Array.sort is stable
+  return true;
 }
 
 export function distribute(amount: bigint, scores: number[], owned: boolean[]): { shares: bigint[]; rest: bigint } {

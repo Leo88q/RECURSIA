@@ -36,6 +36,9 @@ pub mod recursia {
     pub fn fund_reward_pool(ctx: Context<FundRewardPool>, amount: u64) -> Result<()> {
         admin::fund_reward_pool(ctx, amount)
     }
+    pub fn fund_sponsor_pool(ctx: Context<FundSponsorPool>, amount: u64) -> Result<()> {
+        instructions::admin::fund_sponsor_pool(ctx, amount)
+    }
     pub fn propose(ctx: Context<AdminOnly>, action: PendingAction) -> Result<()> {
         admin::propose(ctx, action)
     }
@@ -212,5 +215,13 @@ pub mod recursia {
     }
     pub fn swap_cancel(ctx: Context<SwapCancel>) -> Result<()> {
         instructions::swap::swap_cancel(ctx)
+    }
+
+    // ---- seasons
+    pub fn season_submit(ctx: Context<SeasonSubmit>) -> Result<()> {
+        instructions::season::season_submit(ctx)
+    }
+    pub fn claim_season_prize(ctx: Context<ClaimSeasonPrize>, rank: u8) -> Result<()> {
+        instructions::season::claim_season_prize(ctx, rank)
     }
 }

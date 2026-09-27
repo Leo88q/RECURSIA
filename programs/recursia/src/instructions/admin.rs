@@ -37,6 +37,12 @@ pub struct Initialize<'info> {
     pub reward_pool: Box<Account<'info, TokenAccount>>,
     #[account(init, payer = authority, seeds = [SEED_CLAIMS], bump, token::mint = mint, token::authority = config)]
     pub claims_vault: Box<Account<'info, TokenAccount>>,
+    #[account(init, payer = authority, seeds = [SEED_SPONSOR_POOL], bump, token::mint = mint, token::authority = config)]
+    pub sponsor_pool: Box<Account<'info, TokenAccount>>,
+    #[account(init, payer = authority, seeds = [SEED_SEASON_POOL], bump, token::mint = mint, token::authority = config)]
+    pub season_pool: Box<Account<'info, TokenAccount>>,
+    #[account(init, payer = authority, space = 8 + Season::INIT_SPACE, seeds = [SEED_SEASON], bump)]
+    pub season: Box<Account<'info, Season>>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
@@ -63,6 +69,14 @@ pub fn initialize(ctx: Context<Initialize>, admin: Pubkey, params: Params) -> Re
     c.pending_nonce = 0;
     c.cur_epoch = 1;
     c.epoch_start_slot = Clock::get()?.slot;
+    c.sponsor_pool_bump = ctx.bumps.sponsor_pool;
+    c.season_pool_bump = ctx.bumps.season_pool;
+    c.season_bump = ctx.bumps.season;
+    c.season_id = 1;
+    c.season_start_epoch = 1;
+    let s = &mut ctx.accounts.season;
+    s.version = ACCOUNT_VERSION;
+    s.bump = ctx.bumps.season;
     Ok(())
 }
 
@@ -95,6 +109,37 @@ pub fn fund_reward_pool(ctx: Context<FundRewardPool>, amount: u64) -> Result<()>
         amount,
     )?;
     emit!(RewardPoolFunded { funder: ctx.accounts.funder.key(), amount });
+    Ok(())
+}
+
+/// Anyone may fund the sponsor pool. Unlike the reward pool it is paid out by
+/// live cells (not by spend), so sponsor money is what lets the best players
+/// end up net positive. Per-world cap: `SPONSOR_CAP_BPS` of the world's own
+/// pool contribution. Nobody can withdraw it.
+#[derive(Accounts)]
+pub struct FundSponsorPool<'info> {
+    pub funder: Signer<'info>,
+    #[account(seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
+    pub config: Box<Account<'info, Config>>,
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(mut, seeds = [SEED_SPONSOR_POOL], bump = config.sponsor_pool_bump)]
+    pub sponsor_pool: Box<Account<'info, TokenAccount>>,
+    #[account(mut, token::mint = mint, token::authority = funder)]
+    pub funder_token: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+}
+
+pub fn fund_sponsor_pool(ctx: Context<FundSponsorPool>, amount: u64) -> Result<()> {
+    require!(amount > 0, RecursiaError::ZeroAmount);
+    user_transfer(
+        &ctx.accounts.token_program.to_account_info(),
+        &ctx.accounts.mint.to_account_info(),
+        &ctx.accounts.funder_token.to_account_info(),
+        &ctx.accounts.sponsor_pool.to_account_info(),
+        &ctx.accounts.funder.to_account_info(),
+        amount,
+    )?;
+    emit!(SponsorPoolFunded { funder: ctx.accounts.funder.key(), amount });
     Ok(())
 }
 
@@ -180,6 +225,11 @@ pub fn execute(ctx: Context<Execute>, expected_nonce: u64) -> Result<()> {
         PendingAction::TreasurySpend { amount, recipient } => {
             let r = ctx.accounts.recipient.as_ref().ok_or(RecursiaError::Mismatch)?;
             require_keys_eq!(r.key(), recipient, RecursiaError::Mismatch);
+            // Only treasury funds already split with the season pool are
+            // spendable: governance can never spend the players' season share.
+            let seen = ctx.accounts.config.treasury_seen;
+            require!(amount <= seen, RecursiaError::TreasuryLocked);
+            ctx.accounts.config.treasury_seen = seen - amount;
             vault_transfer(
                 &ctx.accounts.token_program.to_account_info(),
                 &ctx.accounts.mint.to_account_info(),
@@ -203,34 +253,106 @@ pub fn execute(ctx: Context<Execute>, expected_nonce: u64) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct AdvanceEpoch<'info> {
-    #[account(mut, seeds = [SEED_CONFIG], bump = config.bump)]
+    #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
+    pub mint: Box<Account<'info, Mint>>,
     #[account(seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
     pub reward_pool: Box<Account<'info, TokenAccount>>,
+    #[account(seeds = [SEED_SPONSOR_POOL], bump = config.sponsor_pool_bump)]
+    pub sponsor_pool: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [SEED_TREASURY], bump = config.treasury_bump)]
+    pub treasury: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [SEED_SEASON_POOL], bump = config.season_pool_bump)]
+    pub season_pool: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [SEED_SEASON], bump = config.season_bump)]
+    pub season: Box<Account<'info, Season>>,
+    pub token_program: Program<'info, Token>,
 }
 
-/// Permissionless crank. Closes the current epoch and reserves emission for
-/// it. Unclaimed emission of the epoch before simply stays in the pool.
+/// Permissionless crank. Closes the current epoch and reserves emission and
+/// sponsor budget for it (unclaimed amounts of the epoch before simply stay in
+/// their pools). Also sweeps the season share of new treasury inflow into the
+/// season pool and closes the season every `SEASON_EPOCHS` epochs.
 pub fn advance_epoch(ctx: Context<AdvanceEpoch>) -> Result<()> {
     let slot = Clock::get()?.slot;
+    let pool = ctx.accounts.reward_pool.amount;
+    let sponsor = ctx.accounts.sponsor_pool.amount;
+    let treasury_amount = ctx.accounts.treasury.amount;
+    let season_pool_before = ctx.accounts.season_pool.amount;
     let c = &mut ctx.accounts.config;
     let end = c
         .epoch_start_slot
         .checked_add(c.params.epoch_slots)
         .ok_or(RecursiaError::MathOverflow)?;
     require!(slot >= end, RecursiaError::EpochNotOver);
-    let pool = ctx.accounts.reward_pool.amount;
     let emission = if c.cur_total_sink == 0 {
         0
     } else {
         math::bps_floor(pool, c.params.emission_rate_bps as u64)?
     };
+    let sponsor_budget = if c.cur_total_score == 0 || c.cur_total_sink == 0 {
+        0
+    } else {
+        math::bps_floor(sponsor, SPONSOR_RATE_BPS)?
+    };
     c.prev_total_sink = c.cur_total_sink;
     c.prev_emission = emission;
     c.prev_claimed = 0;
     c.cur_total_sink = 0;
+    c.prev_total_score = c.cur_total_score;
+    c.prev_sponsor_budget = sponsor_budget;
+    c.prev_sponsor_claimed = 0;
+    c.cur_total_score = 0;
     c.cur_epoch = c.cur_epoch.checked_add(1).ok_or(RecursiaError::MathOverflow)?;
     c.epoch_start_slot = slot;
+
+    // --- season share of the studio inflow since the last sweep (state first, #7)
+    let inflow = treasury_amount.saturating_sub(c.treasury_seen);
+    let season_share = math::bps_floor(inflow, SEASON_SHARE_BPS)?;
+    c.treasury_seen = math::sub(treasury_amount, season_share)?;
+    c.total_season_funded = math::add(c.total_season_funded, season_share)?;
+    let season_pool_now = math::add(season_pool_before, season_share)?;
+    let season_id = c.season_id;
+
+    // --- season close: fix prizes of the finished season
+    let close = c.cur_epoch.saturating_sub(c.season_start_epoch) >= SEASON_EPOCHS;
+    let mut prizes_total = 0u64;
+    if close {
+        let s = &mut ctx.accounts.season;
+        // Unpaid prizes of the season before are forfeited: they never left
+        // the season pool, so the whole pool balance is available again.
+        let mut prizes = [0u64; SEASON_TOP];
+        for (r, e) in s.top.iter().enumerate() {
+            if e.player != Pubkey::default() {
+                prizes[r] = math::season_prize(season_pool_now, SEASON_RANK_BPS[r], e.points)?;
+                prizes_total = math::add(prizes_total, prizes[r])?;
+            }
+        }
+        s.last_id = season_id;
+        s.last_top = s.top;
+        s.last_prizes = prizes;
+        s.last_claimed = 0;
+        s.top = [SeasonEntry::default(); SEASON_TOP];
+        c.season_id = season_id.checked_add(1).ok_or(RecursiaError::MathOverflow)?;
+        c.season_start_epoch = c.cur_epoch;
+    }
+    let bump = c.bump;
     emit!(EpochAdvanced { epoch: c.cur_epoch - 1, total_sink: c.prev_total_sink, emission });
+
+    vault_transfer(
+        &ctx.accounts.token_program.to_account_info(),
+        &ctx.accounts.mint.to_account_info(),
+        &ctx.accounts.treasury.to_account_info(),
+        &ctx.accounts.season_pool.to_account_info(),
+        &ctx.accounts.config.to_account_info(),
+        bump,
+        season_share,
+    )?;
+    if season_share > 0 {
+        emit!(SeasonFunded { season: season_id, amount: season_share });
+    }
+    if close {
+        emit!(SeasonClosed { season: season_id, prize_pool: season_pool_now, prizes_total });
+    }
     Ok(())
 }

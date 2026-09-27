@@ -35,7 +35,8 @@ export class RecursiaIx {
     const p = this.pda;
     return this.ix("initialize", [
       S(authority, true), R(this.programId), R(p.programData()), W(p.config()), R(this.mint), W(p.treasury()),
-      W(p.rewardPool()), W(p.claims()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId), R(SYSVAR_RENT_PUBKEY),
+      W(p.rewardPool()), W(p.claims()), W(p.sponsorPool()), W(p.seasonPool()), W(p.season()),
+      R(TOKEN_PROGRAM_ID), R(SystemProgram.programId), R(SYSVAR_RENT_PUBKEY),
     ], (w) => { w.pubkey(admin); writeParams(w, params); });
   }
 
@@ -43,6 +44,12 @@ export class RecursiaIx {
   fundRewardPool(funder: PublicKey, amount: bigint) {
     const p = this.pda;
     return this.ix("fund_reward_pool", [S(funder), R(p.config()), R(this.mint), W(p.rewardPool()), W(ata(funder, this.mint)), R(TOKEN_PROGRAM_ID)], (w) => w.u64(amount));
+  }
+
+  /** Anyone may fund the sponsor pool: paid out by live cells, capped per world by its own pool contribution. */
+  fundSponsorPool(funder: PublicKey, amount: bigint) {
+    const p = this.pda;
+    return this.ix("fund_sponsor_pool", [S(funder), R(p.config()), R(this.mint), W(p.sponsorPool()), W(ata(funder, this.mint)), R(TOKEN_PROGRAM_ID)], (w) => w.u64(amount));
   }
 
   propose(admin: PublicKey, action: PendingAction) {
@@ -56,7 +63,24 @@ export class RecursiaIx {
     const p = this.pda;
     return this.ix("execute", [S(admin), W(p.config()), R(this.mint), W(p.treasury()), this.opt(recipient), R(TOKEN_PROGRAM_ID)], (w) => w.u64(expectedNonce));
   }
-  advanceEpoch() { return this.ix("advance_epoch", [W(this.pda.config()), R(this.pda.rewardPool())]); }
+  advanceEpoch() {
+    const p = this.pda;
+    return this.ix("advance_epoch", [
+      W(p.config()), R(this.mint), R(p.rewardPool()), R(p.sponsorPool()), W(p.treasury()), W(p.seasonPool()), W(p.season()), R(TOKEN_PROGRAM_ID),
+    ]);
+  }
+
+  // ------------------------------------------------------------ seasons
+  /** Permissionless: put `owner`'s current season points on the on-chain top-10. */
+  seasonSubmit(owner: PublicKey) {
+    const p = this.pda;
+    return this.ix("season_submit", [R(p.config()), W(p.season()), R(p.player(owner))]);
+  }
+  /** Permissionless: credit rank `rank`'s prize of the last closed season to the winner's game balance. */
+  claimSeasonPrize(winner: PublicKey, rank: number) {
+    const p = this.pda;
+    return this.ix("claim_season_prize", [W(p.config()), R(this.mint), W(p.season()), W(p.player(winner)), W(p.seasonPool()), W(p.claims()), R(TOKEN_PROGRAM_ID)], (w) => w.u8(rank));
+  }
 
   // ------------------------------------------------------------ modules
   registerModule(author: PublicKey, moduleId: bigint, birth: number, survive: number, royaltyBps: number, name: string, q: { qBirth: number; qSurvive: number; qAmp: number } = { qBirth: 0, qSurvive: 0, qAmp: 0 }) {
@@ -203,7 +227,7 @@ export class RecursiaIx {
 
   claimWorldEpoch(world: PublicKey) {
     const p = this.pda;
-    return this.ix("claim_world_epoch", [W(p.config()), R(this.mint), W(world), W(p.worldVault(world)), W(p.rewardPool()), R(TOKEN_PROGRAM_ID)]);
+    return this.ix("claim_world_epoch", [W(p.config()), R(this.mint), W(world), W(p.worldVault(world)), W(p.rewardPool()), W(p.sponsorPool()), R(TOKEN_PROGRAM_ID)]);
   }
 
   breach(child: PublicKey, host: PublicKey) {

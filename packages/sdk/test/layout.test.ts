@@ -15,7 +15,12 @@ describe("layout & instructions", () => {
   it("builds instructions with expected account counts", () => {
     const ix = new RecursiaIx();
     const k = Keypair.generate().publicKey;
-    expect(ix.initialize(k, k, DEFAULT_PARAMS).keys).toHaveLength(11);
+    expect(ix.initialize(k, k, DEFAULT_PARAMS).keys).toHaveLength(14);
+    expect(ix.advanceEpoch().keys).toHaveLength(8);
+    expect(ix.claimWorldEpoch(k).keys).toHaveLength(7);
+    expect(ix.fundSponsorPool(k, 1n).keys).toHaveLength(6);
+    expect(ix.seasonSubmit(k).keys).toHaveLength(3);
+    expect(ix.claimSeasonPrize(k, 0).keys).toHaveLength(7);
     expect(ix.tick(k, k, k).keys).toHaveLength(14);
     expect(ix.quantumCommit(k, k, 1, new Uint8Array(32).fill(1)).keys).toHaveLength(14);
     expect(ix.quantumObserve(k, k, 1).keys).toHaveLength(10);

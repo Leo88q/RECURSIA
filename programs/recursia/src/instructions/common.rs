@@ -144,17 +144,20 @@ pub fn roll_world_epoch(world: &mut World, config: &Config) {
         world.prev_epoch_id = world.epoch_id;
         world.sink_prev = world.sink_cur;
         world.scores_prev = world.scores_cur;
+        world.score_owned_prev = world.score_owned_cur;
         world.prev_claimed = false;
     } else {
         // skipped at least one full epoch: the old window is unclaimable
         world.prev_epoch_id = config.cur_epoch.saturating_sub(1);
         world.sink_prev = 0;
         world.scores_prev = [0; TERRITORIES];
+        world.score_owned_prev = 0;
         world.prev_claimed = true;
     }
     world.epoch_id = config.cur_epoch;
     world.sink_cur = 0;
     world.scores_cur = [0; TERRITORIES];
+    world.score_owned_cur = 0;
 }
 
 /// Record a pool-bound spend attributed to a world.  Only the POOL part is

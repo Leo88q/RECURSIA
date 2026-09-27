@@ -11,6 +11,9 @@ const a = k(), b = k(), c = k();
 const built: Record<string, TransactionInstruction> = {
   initialize: x.initialize(a, b, DEFAULT_PARAMS),
   fund_reward_pool: x.fundRewardPool(a, 1n),
+  fund_sponsor_pool: x.fundSponsorPool(a, 1n),
+  season_submit: x.seasonSubmit(a),
+  claim_season_prize: x.claimSeasonPrize(a, 0),
   propose: x.propose(a, { kind: "SetAdmin", admin: b }),
   cancel: x.cancel(a),
   execute: x.execute(a, 1n, b),

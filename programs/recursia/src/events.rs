@@ -61,6 +61,8 @@ pub struct EmissionClaimed {
     pub world: Pubkey,
     pub epoch: u64,
     pub amount: u64,
+    /// Part of `amount` paid from the sponsor pool.
+    pub sponsor: u64,
 }
 
 #[event]
@@ -192,5 +194,32 @@ pub struct SwapCancelled {
 #[event]
 pub struct RewardPoolFunded {
     pub funder: Pubkey,
+    pub amount: u64,
+}
+
+#[event]
+pub struct SponsorPoolFunded {
+    pub funder: Pubkey,
+    pub amount: u64,
+}
+
+#[event]
+pub struct SeasonFunded {
+    pub season: u64,
+    pub amount: u64,
+}
+
+#[event]
+pub struct SeasonClosed {
+    pub season: u64,
+    pub prize_pool: u64,
+    pub prizes_total: u64,
+}
+
+#[event]
+pub struct SeasonPrizePaid {
+    pub season: u64,
+    pub rank: u8,
+    pub player: Pubkey,
     pub amount: u64,
 }

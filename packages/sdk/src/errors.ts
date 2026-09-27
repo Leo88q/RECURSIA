@@ -58,6 +58,9 @@ export const PROGRAM_ERRORS: ReadonlyArray<readonly [name: string, ru: string]> 
   ["StillCoherent", "Суперпозиция ещё когерентна — рано"],
   ["InvalidWeight", "Недопустимая амплитуда / вероятность"],
   ["SlotHashes", "Системный аккаунт SlotHashes недоступен"],
+  ["NoSeasonPoints", "В этом сезоне у игрока ещё нет очков (соберите награды за жизнь)"],
+  ["NoPrize", "Приз не выигран или уже выплачен"],
+  ["TreasuryLocked", "Эта сумма казны ещё не разделена с призовым фондом сезона"],
 ];
 
 const ANCHOR_FRAMEWORK: Record<number, string> = {

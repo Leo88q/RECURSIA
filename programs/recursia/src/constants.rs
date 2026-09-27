@@ -48,6 +48,28 @@ pub const PLANT_COOLDOWN_TICKS: u64 = 1;
 /// A territory price can change at most once per this many slots.
 pub const PRICE_CHANGE_COOLDOWN_SLOTS: u64 = 150;
 
+// ---------------- sponsor pool ----------------
+/// Share of the sponsor pool paid out per epoch (by live cells, not by spend).
+pub const SPONSOR_RATE_BPS: u64 = 1_000;
+/// A world's sponsor reward can never exceed this share of its OWN pool
+/// contribution in the epoch: a world that did not play gets nothing, so
+/// empty sybil worlds cannot drain sponsor money (#48/#58).
+pub const SPONSOR_CAP_BPS: u64 = 10_000;
+
+// ---------------- seasons ----------------
+/// Season length in epochs (≈ 1 week).
+pub const SEASON_EPOCHS: u64 = 7;
+/// Share of every studio inflow into the treasury that is swept into the
+/// season prize pool at each `advance_epoch` (25% of 20% = 5% of all spend).
+pub const SEASON_SHARE_BPS: u64 = 2_500;
+/// A prize can never exceed this share of the winner's own season points
+/// (SKR collected from life rewards): buying points always costs more than
+/// the prize they can win (anti leaderboard farming).
+pub const SEASON_PRIZE_CAP_BPS: u64 = 2_500;
+pub const SEASON_TOP: usize = 10;
+/// Prize split of the season pool by rank (sums to 100%).
+pub const SEASON_RANK_BPS: [u64; SEASON_TOP] = [3_000, 2_000, 1_500, 1_000, 800, 600, 400, 300, 200, 200];
+
 // ---------------- rebellion / breach ----------------
 pub const REBELLION_THRESHOLD_BPS: u64 = 6_667;
 pub const REBELLION_MIN_VOTES: u8 = 8;
@@ -66,6 +88,9 @@ pub const SEED_CONFIG: &[u8] = b"config";
 pub const SEED_TREASURY: &[u8] = b"treasury";
 pub const SEED_REWARD_POOL: &[u8] = b"reward_pool";
 pub const SEED_CLAIMS: &[u8] = b"claims";
+pub const SEED_SPONSOR_POOL: &[u8] = b"sponsor_pool";
+pub const SEED_SEASON_POOL: &[u8] = b"season_pool";
+pub const SEED_SEASON: &[u8] = b"season";
 pub const SEED_WORLD: &[u8] = b"world";
 pub const SEED_WORLD_VAULT: &[u8] = b"world_vault";
 pub const SEED_TERRITORY: &[u8] = b"territory";

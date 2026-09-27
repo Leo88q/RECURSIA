@@ -3,7 +3,7 @@
 
 use anchor_lang::prelude::*;
 
-use crate::constants::{BPS, TERRITORIES};
+use crate::constants::{BPS, SEASON_PRIZE_CAP_BPS, TERRITORIES};
 use crate::errors::RecursiaError;
 
 #[inline]
@@ -117,6 +117,40 @@ pub fn world_emission(
     Ok(v as u64)
 }
 
+/// Sponsor share of a world for the previous epoch: pro rata by live-cell
+/// score on owned territories, capped by `cap_bps` of the world's own pool
+/// contribution and by what is left of the budget.
+pub fn world_sponsor(
+    budget: u64,
+    total_score: u64,
+    score_w: u64,
+    sink_w: u64,
+    cap_bps: u64,
+    already_claimed: u64,
+) -> Result<u64> {
+    if budget == 0 || total_score == 0 || score_w == 0 || sink_w == 0 {
+        return Ok(0);
+    }
+    let pro_rata = (budget as u128)
+        .checked_mul(score_w as u128)
+        .ok_or(RecursiaError::MathOverflow)?
+        / total_score as u128;
+    let cap = (sink_w as u128)
+        .checked_mul(cap_bps as u128)
+        .ok_or(RecursiaError::MathOverflow)?
+        / BPS as u128;
+    let remaining = budget.saturating_sub(already_claimed) as u128;
+    Ok(pro_rata.min(cap).min(remaining) as u64)
+}
+
+/// Season prize for a rank: its share of the pool, capped by
+/// `SEASON_PRIZE_CAP_BPS` of the winner's own points.
+pub fn season_prize(pool: u64, rank_bps: u64, points: u64) -> Result<u64> {
+    let share = bps_floor(pool, rank_bps)?;
+    let cap = bps_floor(points, SEASON_PRIZE_CAP_BPS)?;
+    Ok(share.min(cap))
+}
+
 /// Distribute `amount` across territories by score. Returns per-territory
 /// shares (floored) plus the remainder (dust + unowned share), which the caller
 /// sends to world energy. Invariant: sum(shares) + rest == amount.
@@ -210,6 +244,29 @@ mod tests {
             assert!(r as u128 <= bw as u128 * 9_000 / 10_000);
             assert!(r <= em);
         }
+    }
+
+    #[test]
+    fn sponsor_is_capped_by_own_contribution() {
+        // pro rata by score
+        assert_eq!(world_sponsor(1_000, 100, 25, 10_000, 10_000, 0).unwrap(), 250);
+        // capped at 100% of the world's own pool contribution
+        assert_eq!(world_sponsor(1_000_000, 100, 100, 700, 10_000, 0).unwrap(), 700);
+        // a world that contributed nothing gets nothing, however alive it is
+        assert_eq!(world_sponsor(1_000_000, 100, 100, 0, 10_000, 0).unwrap(), 0);
+        // never more than what is left of the budget
+        assert_eq!(world_sponsor(1_000, 100, 60, 10_000, 10_000, 900).unwrap(), 100);
+        assert_eq!(world_sponsor(0, 100, 60, 10_000, 10_000, 0).unwrap(), 0);
+    }
+
+    #[test]
+    fn season_prize_never_exceeds_quarter_of_points() {
+        assert_eq!(season_prize(1_000_000, 3_000, 10_000_000).unwrap(), 300_000);
+        // a farmer with few points cannot take the whole first prize
+        assert_eq!(season_prize(1_000_000, 3_000, 400_000).unwrap(), 100_000);
+        assert_eq!(season_prize(1_000_000, 3_000, 0).unwrap(), 0);
+        let sum: u64 = crate::constants::SEASON_RANK_BPS.iter().sum();
+        assert_eq!(sum, BPS);
     }
 
     #[test]
