@@ -4,8 +4,9 @@ import { WorldCanvas } from "./WorldCanvas";
 import { Chronicle, EconomyStrip, TerritoryPanel, WalletPanel, WorldPanel, WorldTree } from "./panels";
 import { ChainView } from "./chain";
 import { fmtRcr } from "./sandbox";
+import { PhysicsLab } from "./lab";
 
-type Mode = "sandbox" | "chain";
+type Mode = "sandbox" | "lab" | "chain";
 type Tab = "cell" | "world" | "wallet";
 
 export function App() {
@@ -31,7 +32,7 @@ export function App() {
   }, [mode]);
 
   useEffect(() => {
-    if (mode !== "sandbox" || speed === 0) return;
+    if (mode === "chain" || speed === 0) return; // the multiverse keeps living while you are in the lab
     const i = setInterval(() => { sb.step(); setVersion((v) => v + 1); }, 1000 / speed);
     return () => clearInterval(i);
   }, [mode, speed, sb]);
@@ -69,13 +70,22 @@ export function App() {
         </div>
         <div className="modes">
           <button className={mode === "sandbox" ? "on" : ""} onClick={() => setMode("sandbox")}>Песочница</button>
+          <button className={mode === "lab" ? "on" : ""} onClick={() => setMode("lab")}>⚗ Лаборатория физики</button>
           <button className={mode === "chain" ? "on" : ""} onClick={() => setMode("chain")}>Devnet</button>
         </div>
-        {mode === "sandbox" && <EconomyStrip sb={sb} />}
-        {mode === "sandbox" && <div className="me-pill">{YOU}: <b>{fmtRcr(me.wallet)}</b></div>}
+        {mode !== "chain" && <EconomyStrip sb={sb} />}
+        {mode !== "chain" && <div className="me-pill">{YOU}: <b>{fmtRcr(me.wallet)}</b></div>}
       </header>
 
-      {mode === "chain" ? <ChainView /> : (
+      {mode === "lab" && (
+        <PhysicsLab
+          modules={sb.labModules()} fee={sb.m.params.moduleRegisterFee} feeBurnBps={sb.m.params.feeBurnBps} fmt={(v) => fmtRcr(v, 2)}
+          onPublish={(law, name) => { const e = sb.publishLaw(law, name); setVersion((v) => v + 1); return e; }}
+          onClaim={(id) => notify(sb.act(() => { sb.m.claimModuleRoyalties(YOU, id); }), "Роялти перенесены к выводу (Кошелёк → Вывести)")}
+          note="Песочница: публикация тратит тестовые RCR. ИИ-демиурги начнут использовать ваш закон, если он жизнеспособен."
+        />
+      )}
+      {mode === "chain" ? <ChainView /> : mode === "lab" ? null : (
         <div className="layout">
           <aside className="left">
             <div className="panel-title">Мультивселенная</div>

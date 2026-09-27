@@ -5,6 +5,11 @@ import { ONE, TERRITORIES } from "./constants.js";
 import { epochTax } from "./economy.js";
 import { GameModel, isQuantum, type MWorld } from "./model.js";
 import { blockPattern, PATTERNS, scoreBlockPattern } from "./sim.js";
+import { lawString, moduleVitality, mutateLaw, pickModuleByVitality, probeLaw } from "./physics.js";
+
+/** Law probes are pure functions of immutable module rules → cache per model. */
+const vitalityCache = new WeakMap<GameModel, Map<number, number>>();
+const vcache = (m: GameModel) => { let c = vitalityCache.get(m); if (!c) { c = new Map(); vitalityCache.set(m, c); } return c; };
 
 export type Personality = "gardener" | "expansionist" | "speculator" | "demiurge";
 
@@ -52,6 +57,8 @@ export class AIAgent {
   readonly rng: Rng;
   /** Preimages of this agent's open superpositions (off-chain memory). */
   readonly secrets = new Map<string, QuantumSecret>();
+  /** Laws this agent authored (AI physicist). */
+  authored = 0;
   /**
    * @param owner when set, the agent acts through an AgentPermit on behalf of
    *   `owner`: it spends only the permit vault, territories go to the owner.
@@ -167,15 +174,26 @@ export class AIAgent {
     //     (bounty) for anybody's superposition that is ready to be measured.
     if (me) this.settleQuantum(m, log);
 
-    // 4) demiurge spawns universes in thriving territories
+    // 3d) neutral worlds: trade outcomes via quantum SWAP
+    if (me) this.tradeSwaps(m, mine, log);
+
+    // 4) demiurge spawns universes in thriving territories, choosing physics
+    //    like an investor: weighted by the laws' observed vitality
     if (me && this.personality === "demiurge" && me.wallet > m.params.worldCreateFee * 3n) {
       const host = mine.find(([w, i]) => !w.territories[i].childWorld && w.alive[i] > 8 && w.depth < 4);
       if (host && this.rng.next() < 0.2) {
         const [w, i] = host;
-        const mod = this.rng.int(m.modules.length);
+        const mod = pickModuleByVitality(m, this.rng, undefined, vcache(m)) ?? 0;
         this.try(() => m.createChildWorld(this.id, w.id, i, `${NAMES[this.rng.int(NAMES.length)]}-${w.depth + 1}`, mod, 1000 + this.rng.int(1500), 400n * ONE), log);
       }
     }
+
+    // 4b) AI physicist: rich demiurges mutate the most vital law and publish
+    //     the mutant only if the probe says it is at least as alive (≤2 laws each)
+    if (me && this.personality === "demiurge" && this.authored < 2 && me.wallet > m.params.moduleRegisterFee * 6n && this.rng.next() < 0.02) {
+      this.physicist(m, log);
+    }
+    if (me) for (const mod of m.modules) if (mod.author === this.id && mod.accrued > 0n) this.try(() => m.claimModuleRoyalties(this.id, mod.id), log);
 
     // 5) rebellion instinct: exploited inhabitants rise up
     if (me) for (const [w, i] of mine) {
@@ -185,6 +203,67 @@ export class AIAgent {
       if (m.canExecuteRebellion(w)) this.try(() => m.executeRebellion(w.id), log);
     }
     return log;
+  }
+
+  private physicist(m: GameModel, log: string[]) {
+    const cache = vcache(m);
+    const ranked = m.modules.map((x) => ({ x, v: moduleVitality(m, x.id, cache) })).sort((a, b) => b.v - a.v);
+    if (!ranked.length) return;
+    const parent = ranked[this.rng.int(Math.min(3, ranked.length))];
+    const p = parent.x;
+    const child = mutateLaw({ birth: p.birth, survive: p.survive, qBirth: p.qBirth, qSurvive: p.qSurvive, qAmp: p.qAmp, royaltyBps: 100 + this.rng.int(300) }, this.rng);
+    const probe = probeLaw(child, 64, 2, this.rng.int(1 << 16));
+    if (probe.vitality < Math.max(40, parent.v) || probe.verdict !== "жизнь") return;
+    if (m.modules.some((x) => x.birth === child.birth && x.survive === child.survive && x.qBirth === child.qBirth && x.qSurvive === child.qSurvive && x.qAmp === child.qAmp)) return;
+    const name = `${NAMES[this.rng.int(NAMES.length)]}·${lawString(child).split(" ")[0]}`.slice(0, 30);
+    this.try(() => {
+      const id = m.registerModule(this.id, name, child.birth, child.survive, child.royaltyBps, child);
+      cache.set(id, probe.vitality);
+      this.authored++;
+    }, log);
+  }
+
+  /**
+   * SWAP trading in neutral worlds. Value of a block ≈ alive cells × ONE/2
+   * (same scale as valueOf). Offer: my weak block for a strong foreign one,
+   * premium = w × gap × discount. Accept: iff premium ≥ expected loss × (1 − greed slack).
+   */
+  private tradeSwaps(m: GameModel, mine: Array<[MWorld, number]>, log: string[]) {
+    const me = m.players.get(this.id)!;
+    // crank: resolve ready swaps (bounty), cancel stale offers (bounty)
+    for (const s of [...m.swaps.values()]) {
+      if (m.canSwapResolve(s.world, s.indexA, s.indexB) === null && this.rng.next() < 0.5) this.try(() => m.swapResolve(this.id, s.world, s.indexA, s.indexB), log);
+      else if (m.canSwapCancel(this.id, s.world, s.indexA, s.indexB) === null && (s.offerer === this.id || this.rng.next() < 0.3)) this.try(() => m.swapCancel(this.id, s.world, s.indexA, s.indexB), log);
+    }
+    const unit = ONE / 2n;
+    // accept offers addressed to me when the premium covers the expected loss
+    for (const s of [...m.swaps.values()]) {
+      if (s.acceptor !== this.id || m.canSwapAccept(this.id, s.world, s.indexA, s.indexB) !== null) continue;
+      const w = m.world(s.world);
+      const gap = BigInt(Math.max(0, w.alive[s.indexB] - w.alive[s.indexA]));
+      const expLoss = (gap * unit * BigInt(s.weightBps)) / 10_000n;
+      const slack = BigInt(Math.round(100 * Math.min(0.5, (this.genome.greed - 1) / 3)));
+      if (s.premium * 100n >= expLoss * (100n - slack)) this.try(() => m.swapAccept(this.id, s.world, s.indexA, s.indexB), log);
+    }
+    // offer: speculators & expansionists gamble weak blocks against strong ones
+    if (this.personality !== "speculator" && this.personality !== "expansionist") return;
+    if (this.rng.next() > 0.25) return;
+    const neutral = mine.filter(([w]) => w.neutral);
+    if (!neutral.length) return;
+    const [w, a] = neutral.reduce((lo, cur) => (cur[0].alive[cur[1]] < lo[0].alive[lo[1]] ? cur : lo));
+    let bestB = -1;
+    for (let k = 0; k < 16; k++) {
+      const b = this.rng.int(TERRITORIES);
+      const h = w.territories[b].holder;
+      if (!h || h === this.id || m.swap(w.id, a, b)) continue;
+      if (bestB < 0 || w.alive[b] > w.alive[bestB]) bestB = b;
+    }
+    if (bestB < 0 || w.alive[bestB] <= w.alive[a] + 4) return;
+    const weight = 1_000 + this.rng.int(4_000);
+    const gap = BigInt(w.alive[bestB] - w.alive[a]);
+    const premium = (gap * unit * BigInt(weight)) / 10_000n * BigInt(80 + this.rng.int(40)) / 100n;
+    if (me.wallet < premium + m.swapFee() * 4n) return;
+    this.try(() => m.swapOffer(this.id, w.id, a, bestB, weight, premium), log);
   }
 
   private quantumAppetite() {

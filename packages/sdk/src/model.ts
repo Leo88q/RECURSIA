@@ -115,7 +115,7 @@ export class GameModel {
     this.burn(burn); this.treasury += fee - burn;
     this.pl(author).spentFees += fee;
     const id = this.modules.length;
-    this.modules.push({ id, author, name, birth, survive, royaltyBps, accrued: 0n, totalEarned: 0n, worldsUsing: 0, ...q });
+    this.modules.push({ id, author, name, birth, survive, royaltyBps, accrued: 0n, totalEarned: 0n, worldsUsing: 0, qBirth: q.qBirth, qSurvive: q.qSurvive, qAmp: q.qAmp });
     this.log("module", `${author} опубликовал законы физики «${name}»${q.qAmp ? " ⚛ (квантовые)" : ""}`);
     this.check();
     return id;

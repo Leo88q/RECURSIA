@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { DEFAULT_PARAMS, PROGRAM_ID, RecursiaIx, TERRITORIES, type ConfigAccount, type SuperpositionAccount, type TerritoryAccount, type WorldAccount } from "@recursia/sdk";
+import { DEFAULT_PARAMS, PROGRAM_ID, RecursiaIx, TERRITORIES, type ConfigAccount, type SuperpositionAccount, type SwapAccount, type TerritoryAccount, type WorldAccount } from "@recursia/sdk";
 import { claimable, plan, type Snapshot } from "../src/plan.js";
 import { toInstruction } from "../src/ix.js";
 
@@ -20,7 +20,7 @@ const world = (o: Partial<WorldAccount> = {}): WorldAccount => ({
   ownedMask: 0n, epochId: 5n, burnCur: 0n, scoresCur: new Array(TERRITORIES).fill(0), prevEpochId: 4n, burnPrev: 0n,
   scoresPrev: new Array(TERRITORIES).fill(0), prevClaimed: true, resonance: 0, childCount: 0, rebellionId: 0,
   rebellionVotes: 0, rebellionDeadline: 0n, lastRebellionSlot: 0n, liberated: false, totalBurned: 0n,
-  qBirth: 0, qSurvive: 0, qAmp: 0, entropy: new Uint8Array(32), quantumEscrow: 0n, superpositions: 0, ...o,
+  qBirth: 0, qSurvive: 0, qAmp: 0, entropy: new Uint8Array(32), quantumEscrow: 0n, superpositions: 0, neutral: false, ...o,
 });
 const terr = (w: PublicKey, o: Partial<TerritoryAccount> = {}): TerritoryAccount => ({
   world: w, index: 3, holder: key(), price: 100n * 1_000_000n, deposit: 10n * 1_000_000n, lastTaxSlot: 1_000_000n,
@@ -117,5 +117,27 @@ describe("keeper planner", () => {
     expect(paused.map((a) => a.kind)).toEqual(["quantum_observe"]);
     const rx = new RecursiaIx(PROGRAM_ID);
     for (const a of q) expect(toInstruction(rx, key(), a).keys.filter((k) => k.isSigner)).toHaveLength(1);
+  });
+  it("resolves accepted swaps after the target slot, cancels expired offers (also while paused)", () => {
+    const w = key();
+    const sw = (o: Partial<SwapAccount>): { key: PublicKey; acc: SwapAccount } => ({
+      key: key(),
+      acc: {
+        world: w, offerer: key(), acceptor: key(), indexA: 1, indexB: 2, weightBps: 5_000, premium: 0n, bounty: 200_000n,
+        createdSlot: 0n, expirySlot: 1_200_000n, accepted: false, targetSlot: 0n, rearms: 0, ...o,
+      },
+    });
+    const swaps = [
+      sw({ indexA: 1, accepted: true, targetSlot: 1_000_050n }), // ready
+      sw({ indexA: 2, accepted: true, targetSlot: 1_000_500n }), // not yet
+      sw({ indexA: 3, expirySlot: 1_000_000n }), // expired offer
+      sw({ indexA: 4 }), // open offer
+      sw({ indexA: 5, accepted: true, targetSlot: 1_000_050n, bounty: 0n }), // nothing to earn
+    ];
+    const got = plan(snap({ swaps })).filter((a) => a.kind.startsWith("swap"));
+    expect(got.map((a) => `${a.kind}:${"a" in a ? a.a : ""}`)).toEqual(["swap_cancel:3", "swap_resolve:1"]);
+    expect(plan(snap({ config: cfg({ paused: true }), swaps })).map((a) => a.kind)).toEqual(["swap_cancel", "swap_resolve"]);
+    const rx = new RecursiaIx(PROGRAM_ID);
+    for (const a of got) expect(toInstruction(rx, key(), a).keys.filter((k) => k.isSigner)).toHaveLength(1);
   });
 });

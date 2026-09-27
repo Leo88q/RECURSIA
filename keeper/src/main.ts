@@ -28,7 +28,7 @@ import {
 import bs58 from "bs58";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID, PROGRAM_ID, RecursiaIx, accountDiscriminator,
-  decodeConfig, decodeSuperposition, decodeTerritory, decodeWorld,
+  decodeConfig, decodeSuperposition, decodeSwap, decodeTerritory, decodeWorld,
 } from "@recursia/sdk";
 import { DEFAULT_LIMITS, crankIncome, plan, type Snapshot } from "./plan.js";
 import { toInstruction } from "./ix.js";
@@ -63,11 +63,12 @@ const ALLOWED_PROGRAMS = new Set([programId.toBase58(), ComputeBudgetProgram.pro
 
 async function snapshot(conn: Connection, rx: RecursiaIx): Promise<Snapshot> {
   const disc = (n: string) => ({ memcmp: { offset: 0, bytes: bs58.encode(accountDiscriminator(n)) } });
-  const [cfgInfo, worlds, territories, sps, slot] = await Promise.all([
+  const [cfgInfo, worlds, territories, sps, swaps, slot] = await Promise.all([
     conn.getAccountInfo(rx.pda.config(), "confirmed"),
     conn.getProgramAccounts(programId, { commitment: "confirmed", filters: [disc("World")] }),
     conn.getProgramAccounts(programId, { commitment: "confirmed", filters: [disc("Territory")] }),
     conn.getProgramAccounts(programId, { commitment: "confirmed", filters: [disc("Superposition")] }),
+    conn.getProgramAccounts(programId, { commitment: "confirmed", filters: [disc("QuantumSwap")] }),
     conn.getSlot("confirmed"),
   ]);
   if (!cfgInfo || !cfgInfo.owner.equals(programId)) throw new Error("config account missing or not owned by program");
@@ -78,6 +79,7 @@ async function snapshot(conn: Connection, rx: RecursiaIx): Promise<Snapshot> {
     worlds: worlds.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeWorld(account.data)); return acc ? [{ key: pubkey, acc }] : []; }),
     territories: territories.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeTerritory(account.data)); return acc ? [{ key: pubkey, acc }] : []; }),
     superpositions: sps.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeSuperposition(account.data)); return acc ? [{ key: pubkey, acc }] : []; }),
+    swaps: swaps.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeSwap(account.data)); return acc ? [{ key: pubkey, acc }] : []; }),
   };
 }
 

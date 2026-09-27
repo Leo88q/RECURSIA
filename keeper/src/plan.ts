@@ -10,7 +10,7 @@
 import type { PublicKey } from "@solana/web3.js";
 import {
   BREACH_RESONANCE, harbergerDue, QUANTUM_BOUNTY_DIV, QUANTUM_REVEAL_SLOTS,
-  type ConfigAccount, type SuperpositionAccount, type TerritoryAccount, type WorldAccount,
+  type ConfigAccount, type SuperpositionAccount, type SwapAccount, type TerritoryAccount, type WorldAccount,
 } from "@recursia/sdk";
 
 export interface Snapshot {
@@ -19,6 +19,7 @@ export interface Snapshot {
   worlds: { key: PublicKey; acc: WorldAccount }[];
   territories: { key: PublicKey; acc: TerritoryAccount }[];
   superpositions?: { key: PublicKey; acc: SuperpositionAccount }[];
+  swaps?: { key: PublicKey; acc: SwapAccount }[];
 }
 
 export type Action =
@@ -28,7 +29,9 @@ export type Action =
   | { kind: "breach"; child: PublicKey; host: PublicKey }
   | { kind: "tick"; world: PublicKey; module: PublicKey; host: PublicKey | null }
   | { kind: "quantum_observe"; world: PublicKey; index: number }
-  | { kind: "quantum_decohere"; world: PublicKey; index: number; owner: PublicKey };
+  | { kind: "quantum_decohere"; world: PublicKey; index: number; owner: PublicKey }
+  | { kind: "swap_resolve"; world: PublicKey; a: number; b: number; offerer: PublicKey; acceptor: PublicKey }
+  | { kind: "swap_cancel"; world: PublicKey; a: number; b: number; offerer: PublicKey };
 
 export interface PlanLimits {
   /** Max tick transactions per round (each costs a signature fee). */
@@ -58,6 +61,18 @@ export function planQuantum(s: Snapshot, limits: PlanLimits = DEFAULT_LIMITS): A
       } else out.push({ kind: "quantum_observe", world: acc.world, index: acc.index });
     } else if (acc.observed && s.slot > acc.revealDeadline && !s.config.paused) {
       out.push({ kind: "quantum_decohere", world: acc.world, index: acc.index, owner: acc.owner });
+    }
+  }
+  // SWAP settlement (neutral worlds): resolve works while paused, cancel of an
+  // expired offer only returns funds so it is allowed while paused as well.
+  const swaps = [...(s.swaps ?? [])].sort((x, y) => (x.acc.targetSlot < y.acc.targetSlot ? -1 : 1));
+  for (const { acc } of swaps) {
+    if (out.length >= limits.maxQuantum) break;
+    if (acc.bounty === 0n) continue;
+    if (acc.accepted && s.slot > acc.targetSlot) {
+      out.push({ kind: "swap_resolve", world: acc.world, a: acc.indexA, b: acc.indexB, offerer: acc.offerer, acceptor: acc.acceptor });
+    } else if (!acc.accepted && s.slot > acc.expirySlot) {
+      out.push({ kind: "swap_cancel", world: acc.world, a: acc.indexA, b: acc.indexB, offerer: acc.offerer });
     }
   }
   return out;

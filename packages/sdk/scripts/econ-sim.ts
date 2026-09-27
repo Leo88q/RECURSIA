@@ -16,14 +16,16 @@
  *   I7  AI agents cannot overspend their permit (per-epoch cap enforced)
  *   I8  quantum withholding is unprofitable: a player who hides unfavourable
  *       collapses (lets them decohere) ends poorer than an honest twin
- *   I9  quantum escrow is fully settled or still open — never leaks
+ *   I9  quantum escrow (superpositions + SWAP premiums/bounties) is fully settled or still open — never leaks
+ *   I10 neutral worlds stay neutral: no architect, no architect income, ever
+ *   I11 player-authored laws: royalty accrues only to modules that worlds actually run
  *
  * Usage: npm run econ [-- --quick] [-- --seeds N] [-- --epochs N]
  */
 import { AIAgent, type Personality } from "../src/agents.js";
 import { DEFAULT_PARAMS, MAX_ARCHITECT_FEE_BPS, ONE, PHYSICS_PRESETS, type Params } from "../src/constants.js";
 import { GameModel } from "../src/model.js";
-import { bpsFloor } from "../src/economy.js";
+import { bpsFloor, epochTax } from "../src/economy.js";
 
 const argv = process.argv.slice(2);
 const flag = (n: string) => argv.includes(`--${n}`);
@@ -34,7 +36,7 @@ const EPOCHS = opt("epochs", QUICK ? 6 : 20);
 const STEP = 300;
 const PARAMS: Params = { ...DEFAULT_PARAMS, epochSlots: 9_000n };
 
-type Scenario = { name: string; agents: number; farmer: boolean; whales: number; permitAgents: number; quantum?: boolean };
+type Scenario = { name: string; agents: number; farmer: boolean; whales: number; permitAgents: number; quantum?: boolean; neutral?: boolean };
 const SCENARIOS: Scenario[] = [
   { name: "baseline", agents: 12, farmer: false, whales: 0, permitAgents: 0 },
   { name: "self-farm attack", agents: 8, farmer: true, whales: 0, permitAgents: 0 },
@@ -42,6 +44,7 @@ const SCENARIOS: Scenario[] = [
   { name: "delegated AI", agents: 6, farmer: false, whales: 0, permitAgents: 6 },
   { name: "thin market", agents: 2, farmer: false, whales: 0, permitAgents: 0 },
   { name: "quantum worlds", agents: 10, farmer: false, whales: 0, permitAgents: 0, quantum: true },
+  { name: "neutral + laws", agents: 12, farmer: false, whales: 0, permitAgents: 0, quantum: true, neutral: true },
 ];
 const PERS: Personality[] = ["gardener", "expansionist", "speculator", "demiurge"];
 const fmt = (v: bigint) => (Number(v / (ONE / 100n)) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -73,16 +76,21 @@ function run(sc: Scenario, seed: number): Result {
   const qMod = (n: string) => PHYSICS_PRESETS.findIndex((p) => p.name === n);
   const worldA = m.createRootWorld("founder", "A", sc.quantum ? qMod("Quantum Foam") : 0, 1_500, 8_000n * ONE).id;
   m.createRootWorld("founder", "B", sc.quantum ? qMod("Tunnel Life") : 1, 2_500, 6_000n * ONE);
+  const neutralId = sc.neutral ? m.createNeutralWorld("founder", "N", qMod("Tunnel Life"), 8_000n * ONE).id : "";
 
   // I8 twins: identical scripted quantum players; one withholds bad outcomes.
   const TWIN0 = 5_000n * ONE;
+  const TWIN_PRICE = 3_000n * ONE;
   const twins = sc.quantum ? (["honest", "withholder"] as const) : [];
   const secrets = new Map<string, Uint8Array>();
   twins.forEach((id, k) => {
     m.addPlayer(id, TWIN0);
     for (const j of [0, 1]) {
       const idx = 40 + k * 8 + j;
-      try { m.acquire(id, worldA, idx, 10n ** 12n, PARAMS.minPrice, 150n * ONE); } catch (e) { failures.push(`I8 setup: ${(e as Error).message}`); }
+      // High self-assessed price: the twins' cells must not be bought out by AI
+      // (a buyout would measure Harberger luck, not withholding). Both twins
+      // pay the same tax, so the comparison stays symmetric.
+      try { m.acquire(id, worldA, idx, 10n ** 12n, TWIN_PRICE, epochTax(TWIN_PRICE, PARAMS.harbergerBps) * 4n); } catch (e) { failures.push(`I8 setup: ${(e as Error).message}`); }
     }
   });
   const GOOD = 0x0000_1824_2418_0000n, BAD = 0n;
@@ -171,9 +179,19 @@ function run(sc: Scenario, seed: number): Result {
         }
         if (restore.has(c.idx) && m.canPlant(c.id, worldA, c.idx) === null) { try { m.plant(c.id, worldA, c.idx, GOOD); restore.delete(c.idx); } catch { /* */ } }
         const d = m.world(worldA).territories[c.idx];
-        if (d.holder === c.id && d.deposit < 40n * ONE) { try { m.topUp(c.id, worldA, c.idx, 60n * ONE); } catch { /* */ } }
+        const tax = epochTax(TWIN_PRICE, PARAMS.harbergerBps);
+        if (d.holder === c.id && d.deposit < tax * 2n) { try { m.topUp(c.id, worldA, c.idx, tax * 3n); } catch { /* */ } }
         void k;
       });
+    }
+    // keeper: settle SWAPs (bounty) and clean expired offers
+    for (const s of [...m.swaps.values()]) {
+      if (m.canSwapResolve(s.world, s.indexA, s.indexB) === null) m.swapResolve("keeper", s.world, s.indexA, s.indexB);
+      else if (m.canSwapCancel("keeper", s.world, s.indexA, s.indexB) === null) m.swapCancel("keeper", s.world, s.indexA, s.indexB);
+    }
+    if (neutralId) {
+      const nw = m.world(neutralId);
+      assert(nw.architect === null && nw.architectAccrued === 0n && nw.architectFeeBps === 0, "I10 neutral world acquired a ruler / ruler income");
     }
     // keeper: measure & clean up (bounty = stake/20)
     for (const sp of [...m.superpositions.values()]) {
@@ -222,19 +240,27 @@ function run(sc: Scenario, seed: number): Result {
   // I8 / I9
   let withholdGap: bigint | undefined;
   if (sc.quantum) {
-    const esc = (id: string) => [...m.superpositions.values()].filter((sp) => sp.owner === id).reduce((a, sp) => a + sp.stake, 0n);
+    // Open stakes count only while the outcome is still unknown; an observed
+    // superposition the withholder refuses to reveal is lost by its own policy.
+    const esc = (id: string) => [...m.superpositions.values()].filter((sp) => sp.owner === id && !sp.observed).reduce((a, sp) => a + sp.stake, 0n);
     const hw = wealth(m, "honest") + esc("honest"), ww = wealth(m, "withholder") + esc("withholder");
     withholdGap = ww - hw;
     assert(ww < hw, `I8 withholding paid off: withholder ${fmt(ww)} ≥ honest ${fmt(hw)}`);
     for (const w of m.worlds.values()) {
-      const open = [...m.superpositions.values()].filter((sp) => sp.world === w.id).reduce((a, sp) => a + sp.stake, 0n);
+      const open = [...m.superpositions.values()].filter((sp) => sp.world === w.id).reduce((a, sp) => a + sp.stake, 0n)
+        + [...m.swaps.values()].filter((s) => s.world === w.id).reduce((a, s) => a + s.premium + s.bounty, 0n);
       assert(open === w.quantumEscrow, `I9 escrow leak in ${w.id}`);
     }
   }
   const allCommits = m.events.filter((e) => e.kind === "quantum" && /суперпозицию/.test(e.text)).length;
   const allCollapses = m.events.filter((e) => e.kind === "quantum" && /Коллапс/.test(e.text)).length;
+  // I11
+  for (const x of m.modules) if (x.worldsUsing === 0) assert(x.accrued + x.totalEarned === 0n, `I11 unused module ${x.name} earned royalty`);
+  const swapEv = m.events.filter((e) => e.kind === "swap");
+  const aiLaws = m.modules.filter((x) => x.author !== "studio");
   const qStats = sc.quantum
     ? `ψ commits ${allCommits} (twins ${qCommits}), collapses ${allCollapses} (twins ${qCollapses}), decohered ${qDecoheres}, re-armed ${qRearms}`
+      + (sc.neutral ? `; SWAP offers ${swapEv.filter((e) => /предлагает/.test(e.text)).length}, accepted ${swapEv.filter((e) => /принял/.test(e.text)).length}, exchanged ${swapEv.filter((e) => /обменялись/.test(e.text)).length}; AI laws ${aiLaws.length} (used by ${aiLaws.reduce((a, x) => a + x.worldsUsing, 0)} worlds, royalty ${fmt(aiLaws.reduce((a, x) => a + x.accrued + x.totalEarned, 0n))})` : "")
     : undefined;
 
   const pnls = [...start.entries()].map(([id, s0]) => wealth(m, id) - s0).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));

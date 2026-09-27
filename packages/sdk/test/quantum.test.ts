@@ -309,3 +309,30 @@ describe("neutral world + SWAP market (model)", () => {
     expect(m.canSwapAccept("bob", w.id, 3, 40)).toMatch(/offerer lost/);
   });
 });
+
+describe("AI in a neutral world", () => {
+  it("agents trade swaps, crank them, invent laws; invariants hold; no escrow leaks", async () => {
+    const { AIAgent } = await import("../src/agents.js");
+    const m = new GameModel();
+    m.addPlayer("dev", 1_000_000n * ONE);
+    for (const p of PHYSICS_PRESETS) m.registerModule("dev", p.name, p.birth, p.survive, p.royaltyBps, p);
+    const qi = PHYSICS_PRESETS.findIndex((p) => p.name === "Tunnel Life");
+    m.addPlayer("founder", 100_000n * ONE);
+    const w = m.createNeutralWorld("founder", "Ничья", qi, 20_000n * ONE);
+    const agents = (["speculator", "expansionist", "gardener", "demiurge"] as const).flatMap((k, i) =>
+      [0, 1, 2].map((j) => { const id = `n-${k}-${j}`; m.addPlayer(id, 60_000n * ONE, true); return new AIAgent(id, k, 900 + i * 10 + j); }));
+    for (let r = 0; r < 120; r++) {
+      m.advanceSlots(160);
+      for (const id of m.worlds.keys()) if (!m.canTick(id)) m.tick("dev", id);
+      for (const a of agents) a.act(m);
+    }
+    const kinds = m.events.filter((e) => e.kind === "swap").map((e) => e.text);
+    expect(kinds.some((t) => t.includes("предлагает"))).toBe(true);
+    expect(kinds.some((t) => t.includes("⇄ SWAP"))).toBe(true);
+    expect(w.architect).toBeNull();
+    let esc = 0n; for (const s of m.swaps.values()) if (s.world === w.id) esc += s.premium + s.bounty;
+    for (const sp of m.superpositions.values()) if (sp.world === w.id) esc += sp.stake;
+    expect(esc).toBe(w.quantumEscrow);
+    m.check();
+  }, 60_000);
+});

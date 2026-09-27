@@ -7,11 +7,12 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { ComputeBudgetProgram, PublicKey, Transaction, type TransactionInstruction } from "@solana/web3.js";
 import bs58 from "bs58";
 import {
-  PATTERNS, PROGRAM_ID, RecursiaIx, TERRITORIES, accountDiscriminator, ata, collapse, commitment, decodeConfig, decodeSuperposition,
-  decodeTerritory, decodeWorld, epochTax, fmt, randomSalt, ruleString,
-  type ConfigAccount, type MWorld, type SuperpositionAccount, type TerritoryAccount, type WorldAccount,
+  PATTERNS, PROGRAM_ID, RecursiaIx, TERRITORIES, accountDiscriminator, ata, collapse, commitment, decodeConfig, decodeModule, decodeSuperposition,
+  decodeSwap, decodeTerritory, decodeWorld, epochTax, fmt, probeLaw, randomSalt, ruleString,
+  type ConfigAccount, type ModuleAccount, type MWorld, type SuperpositionAccount, type SwapAccount, type TerritoryAccount, type WorldAccount,
 } from "@recursia/sdk";
 import { WorldCanvas } from "./WorldCanvas";
+import { PhysicsLab, type LabModule } from "./lab";
 
 const programId = new PublicKey(import.meta.env.VITE_PROGRAM_ID ?? PROGRAM_ID.toBase58());
 const rx = new RecursiaIx(programId);
@@ -39,6 +40,7 @@ function toModel(key: PublicKey, w: WorldAccount, terr: Map<number, TerritoryAcc
     liberated: w.liberated, totalBurned: w.totalBurned, history: [],
     key: key.toBytes(), qBirth: w.qBirth, qSurvive: w.qSurvive, qAmp: w.qAmp,
     entropy: w.entropy.some((b) => b !== 0) ? w.entropy : null, quantumEscrow: w.quantumEscrow, superpositions: w.superpositions,
+    neutral: w.neutral,
   };
 }
 
@@ -80,6 +82,11 @@ export function ChainView() {
   const [status, setStatus] = useState<string>("");
   const [frame, setFrame] = useState(0);
   const [sp, setSp] = useState<SuperpositionAccount | null>(null);
+  const [view, setView] = useState<"worlds" | "lab">("worlds");
+  const [modules, setModules] = useState<Array<{ key: PublicKey; acc: ModuleAccount }>>([]);
+  const [swaps, setSwaps] = useState<Array<{ key: PublicKey; acc: SwapAccount }>>([]);
+  const [swapFrom, setSwapFrom] = useState<number>(-1);
+  const [swapWeight, setSwapWeight] = useState(3_000);
 
   const load = useCallback(async () => {
     try {
@@ -105,7 +112,22 @@ export function ChainView() {
     setTerritories(map);
   }, [connection]);
 
+  const loadExtra = useCallback(async () => {
+    const disc = (n: string) => ({ memcmp: { offset: 0, bytes: bs58.encode(accountDiscriminator(n)) } });
+    const safe = <T,>(f: () => T) => { try { return f(); } catch { return null; } };
+    try {
+      const [mods, sws] = await Promise.all([
+        connection.getProgramAccounts(programId, { filters: [disc("PhysicsModule")] }),
+        connection.getProgramAccounts(programId, { filters: [disc("QuantumSwap")] }),
+      ]);
+      setModules(mods.flatMap((r) => { const acc = safe(() => decodeModule(r.account.data)); return acc ? [{ key: r.pubkey, acc }] : []; }).sort((a, b) => Number(a.acc.id - b.acc.id)));
+      setSwaps(sws.flatMap((r) => { const acc = safe(() => decodeSwap(r.account.data)); return acc ? [{ key: r.pubkey, acc }] : []; }));
+    } catch { /* RPC may not support gPA for these filters */ }
+  }, [connection]);
+
   useEffect(() => { load(); const i = setInterval(load, 8000); return () => clearInterval(i); }, [load]);
+  useEffect(() => { loadExtra(); const i = setInterval(loadExtra, 15000); return () => clearInterval(i); }, [loadExtra]);
+  const vitality = useMemo(() => new Map(modules.map((m) => [m.acc.id, probeLaw(m.acc, 48, 2).vitality])), [modules]);
   useEffect(() => { if (current) loadTerritories(current); }, [current, loadTerritories, worlds]);
   useEffect(() => { const i = setInterval(() => setFrame((f) => f + 1), 120); return () => clearInterval(i); }, []);
   useEffect(() => {
@@ -155,15 +177,51 @@ export function ChainView() {
   const me = wallet.publicKey;
   const t = selected !== null && model ? model.territories[selected] : null;
   const p = config.params;
+  const viewToggle = (
+    <div className="modes sub">
+      <button className={view === "worlds" ? "on" : ""} onClick={() => setView("worlds")}>Миры</button>
+      <button className={view === "lab" ? "on" : ""} onClick={() => setView("lab")}>⚗ Лаборатория</button>
+    </div>
+  );
+  if (view === "lab") {
+    const labMods: LabModule[] = modules.map(({ acc }) => ({
+      id: Number(acc.id), name: acc.name, author: `${acc.author.toBase58().slice(0, 4)}…${acc.author.toBase58().slice(-4)}`,
+      law: { birth: acc.birth, survive: acc.survive, qBirth: acc.qBirth, qSurvive: acc.qSurvive, qAmp: acc.qAmp, royaltyBps: acc.royaltyBps },
+      worldsUsing: acc.worldsUsing, earned: acc.totalEarned, accrued: acc.accrued, vitality: vitality.get(acc.id) ?? 0, mine: !!me && acc.author.equals(me),
+    }));
+    return (
+      <div className="chain-lab">
+        <div className="row-wrap">{viewToggle}<WalletMultiButton />{status && <span className="toast-inline">{status}</span>}</div>
+        <PhysicsLab modules={labMods} fee={p.moduleRegisterFee} feeBurnBps={p.feeBurnBps} fmt={(v) => `${fmt(v)} RCR`}
+          note="Транзакция будет просимулирована и показана перед подписью. Роялти неизменяемо после публикации."
+          onPublish={async (law, name) => {
+            if (!me) return "Подключите кошелёк";
+            await propose("Публикация закона физики", [
+              `«${name}»: ${ruleString(law.birth, law.survive, law.qBirth, law.qSurvive, law.qAmp)}`,
+              `Роялти автора: ${law.royaltyBps / 100}% каждого тика миров с этой физикой (неизменяемо)`,
+              `Сбор регистрации: ${fmt(p.moduleRegisterFee)} RCR (${p.feeBurnBps / 100}% сжигается)`,
+              `Модуль #${config.modules.toString()} · автор ${me.toBase58().slice(0, 8)}…`,
+            ], [rx.registerModule(me, config.modules, law.birth, law.survive, law.royaltyBps, name, law)]);
+            return null;
+          }}
+          onClaim={(id) => me && propose("Роялти автора", ["Накопленные роялти → ваш баланс к выводу (claims)"], [rx.claimModuleRoyalties(me, rx.pda.module(BigInt(id)))])}
+        />
+        {preview && <PreviewModal preview={preview} onCancel={() => setPreview(null)} onConfirm={confirm} />}
+      </div>
+    );
+  }
+  const worldSwaps = cur ? swaps.filter((s) => s.acc.world.equals(cur.key)) : [];
+  const myBlocks = model && me ? model.territories.map((x, i) => [x, i] as const).filter(([x]) => x.holder === me.toBase58()).map(([, i]) => i) : [];
   return (
     <div className="chain">
       <aside className="left">
+        {viewToggle}
         <div className="panel-title">Ончейн-вселенные</div>
         <div className="muted small">Эпоха {config.curEpoch.toString()} · миров {config.totalWorlds.toString()} · сожжено {fmt(config.totalBurned, 6, 0)} RCR{config.paused ? " · ПАУЗА" : ""}</div>
         <ul className="tree">{worlds.map((w) => (
           <li key={w.key.toBase58()} style={{ paddingLeft: w.acc.depth * 12 }}>
             <button className={`tree-node ${current && w.key.equals(current) ? "active" : ""}`} onClick={() => { setCurrent(w.key); setSelected(null); }}>
-              <span className="tree-name">{w.acc.depth ? "⧉" : "◈"} {w.acc.name}{w.acc.qAmp > 0 ? " ⚛" : ""}</span><span className="tree-pop">{w.acc.territoryAlive.reduce((a, b) => a + b, 0)}</span>
+              <span className="tree-name">{w.acc.neutral ? "⚖" : w.acc.depth ? "⧉" : "◈"} {w.acc.name}{w.acc.qAmp > 0 ? " ⚛" : ""}</span><span className="tree-pop">{w.acc.territoryAlive.reduce((a, b) => a + b, 0)}</span>
             </button>
           </li>))}
         </ul>
@@ -237,27 +295,63 @@ export function ChainView() {
                 </div>
               );
             })()}
+            {cur.acc.neutral && me && (
+              <div className="card swap-card">
+                <div className="card-title">⇄ Квантовый SWAP (нейтральный мир)</div>
+                {t.holder && t.holder !== me.toBase58() && myBlocks.length > 0 && (() => {
+                  const a = myBlocks.includes(swapFrom) ? swapFrom : myBlocks[0];
+                  return (
+                    <>
+                      <label className="field inline">Моя клетка
+                        <select value={a} onChange={(e) => setSwapFrom(Number(e.target.value))}>{myBlocks.map((i) => <option key={i} value={i}>#{i} · {model.alive[i]} живых</option>)}</select>
+                      </label>
+                      <label className="field">p = {(swapWeight / 100).toFixed(0)}%<input type="range" min={500} max={10_000} step={500} value={swapWeight} onChange={(e) => setSwapWeight(Number(e.target.value))} /></label>
+                      <button className="btn portal" onClick={() => propose("Предложение квантового SWAP", [
+                        `Мир ${cur.acc.name}: ваша #${a} ⇄ #${selected} (${t.holder!.slice(0, 4)}…)`, `Вероятность обмена ${swapWeight / 100}%`,
+                        `Сбор ${fmt(p.plantCost)} RCR: 80% сжигается, 20% — награда резолверу`, "Премия: 0 RCR (можно добавить через SDK)",
+                        "После принятия сделка обязательна для клеток, даже если они сменят владельца",
+                      ], [rx.swapOffer(me, cur.key, a, selected, swapWeight, 0n)])}>Предложить SWAP</button>
+                    </>
+                  );
+                })()}
+                {worldSwaps.filter((s) => s.acc.indexA === selected || s.acc.indexB === selected).map(({ key: k, acc: s }) => (
+                  <div key={k.toBase58()} className="swap-row small">
+                    #{s.indexA} ⇄ #{s.indexB} · p={s.weightBps / 100}% · премия {fmt(s.premium)} RCR · {s.accepted ? `цель слот ${s.targetSlot}` : `до слота ${s.expirySlot}`}
+                    <div className="row-wrap">
+                      {!s.accepted && s.acceptor.equals(me) && <button className="btn portal" onClick={() => propose("Принять SWAP", [`#${s.indexA} ⇄ #${s.indexB} с вероятностью ${s.weightBps / 100}%`, `Премия ${fmt(s.premium)} RCR поступит вам при разрешении`, "Исход решит хеш слота через 32 слота"], [rx.swapAccept(me, cur.key, s.indexA, s.indexB)])}>Принять</button>}
+                      {s.accepted && <button className="btn" onClick={() => propose("Разрешить SWAP", ["Измерение по SlotHashes", `Награда: ${fmt(s.bounty)} RCR`], [rx.createAtaIdempotent(me, me), rx.swapResolve(me, cur.key, s.indexA, s.indexB, s.offerer, s.acceptor)])}>Разрешить</button>}
+                      {!s.accepted && <button className="btn" onClick={() => propose("Отменить SWAP", ["Предлагающий — в любой момент до принятия; остальные — после истечения", `Награда: ${fmt(s.bounty)} RCR`], [rx.createAtaIdempotent(me, me), rx.swapCancel(me, cur.key, s.indexA, s.indexB, s.offerer)])}>Отменить</button>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             {me && <button className="btn" onClick={() => propose("Создание RCR-аккаунта", ["Идемпотентное создание вашего токен-аккаунта RCR", `ATA: ${ata(me, rx.pda.mint()).toBase58().slice(0, 8)}…`], [rx.createAtaIdempotent(me, me)])}>Создать RCR-аккаунт</button>}
           </div>
         )}
       </aside>
-      {preview && (
-        <div className="modal-back" onClick={() => setPreview(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>{preview.title}</h3>
-            <ul>{preview.lines.map((l) => <li key={l}>{l}</li>)}</ul>
-            <div className={preview.err ? "sim bad" : "sim ok"}>
-              Симуляция: {preview.err ? `ОШИБКА ${preview.err}` : `успешно · ${preview.units ?? "?"} CU`}
-            </div>
-            <details><summary>Логи программы</summary><pre>{preview.logs?.join("\n")}</pre></details>
-            <p className="muted small">Проверьте адрес программы: <code>{programId.toBase58()}</code>. Официальные адреса публикуются только в README репозитория.</p>
-            <div className="row-wrap">
-              <button className="btn" onClick={() => setPreview(null)}>Отмена</button>
-              <button className="btn primary" disabled={!!preview.err} onClick={confirm}>Подписать</button>
-            </div>
-          </div>
+      {preview && <PreviewModal preview={preview} onCancel={() => setPreview(null)} onConfirm={confirm} />}
+    </div>
+  );
+}
+
+/** Human-readable simulation preview before any signature (#51). */
+function PreviewModal({ preview, onCancel, onConfirm }: { preview: Preview; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <div className="modal-back" onClick={onCancel}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>{preview.title}</h3>
+        <ul>{preview.lines.map((l) => <li key={l}>{l}</li>)}</ul>
+        <div className={preview.err ? "sim bad" : "sim ok"}>
+          Симуляция: {preview.err ? `ОШИБКА ${preview.err}` : `успешно · ${preview.units ?? "?"} CU`}
         </div>
-      )}
+        <details><summary>Логи программы</summary><pre>{preview.logs?.join("\n")}</pre></details>
+        <p className="muted small">Проверьте адрес программы: <code>{programId.toBase58()}</code>. Официальные адреса публикуются только в README репозитория.</p>
+        <div className="row-wrap">
+          <button className="btn" onClick={onCancel}>Отмена</button>
+          <button className="btn primary" disabled={!!preview.err} onClick={onConfirm}>Подписать</button>
+        </div>
+      </div>
     </div>
   );
 }

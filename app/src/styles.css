@@ -167,3 +167,42 @@ code, .mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-size:
 .tag.quantum { color: #9fe8ff; background: rgba(110, 220, 255, 0.14); animation: qflicker 2.4s infinite; }
 .danger-text { color: var(--rose); }
 @keyframes qflicker { 0%, 100% { opacity: 1; } 45% { opacity: 0.55; } 50% { opacity: 0.9; } 55% { opacity: 0.4; } }
+
+/* ---- neutral worlds: SWAP market */
+.swap-card { border-color: rgba(255, 214, 107, 0.35); background: linear-gradient(135deg, rgba(255, 214, 107, 0.06), rgba(124, 140, 255, 0.05)); }
+.swap-card .card-title { color: var(--gold); }
+.swap-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.swap-row { border-top: 1px dashed var(--line); padding-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.tiny { font-size: 11px; }
+.ok-text { color: var(--mint); }
+
+/* ---- physics lab */
+.lab { flex: 1; display: grid; grid-template-columns: 360px 300px minmax(0, 1fr); gap: 14px; padding: 14px; min-height: 0; overflow: auto; }
+.lab-col { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; }
+.rule-grid { border-collapse: separate; border-spacing: 3px; }
+.rule-grid th { font-size: 11px; color: var(--muted); font-weight: 600; }
+.rule-grid th.q { color: #9fe8ff; }
+.rc { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--mint); font-size: 14px; padding: 0; }
+.rc.q { color: #9fe8ff; }
+.rc.on { background: rgba(124, 247, 212, 0.16); border-color: var(--mint); }
+.rc.q.on { background: rgba(110, 220, 255, 0.16); border-color: #9fe8ff; }
+.rc.clash, .rc.forbid.on { background: rgba(255, 107, 139, 0.25); border-color: var(--rose); color: var(--rose); }
+.rc.forbid { opacity: 0.5; }
+.law-string { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 16px; color: var(--violet); }
+.lab-canvas { width: 192px; height: 192px; border-radius: 10px; border: 1px solid var(--line); image-rendering: pixelated; align-self: center; }
+.curve { width: 100%; height: 70px; background: rgba(8, 7, 20, 0.6); border-radius: 8px; }
+.curve-label { fill: var(--muted); font-size: 8px; }
+.verdict { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.verdict.ok { background: rgba(124, 247, 212, 0.18); color: var(--mint); }
+.verdict.meh { background: rgba(255, 214, 107, 0.18); color: var(--gold); }
+.verdict.bad { background: rgba(255, 107, 139, 0.18); color: var(--rose); }
+.market { width: 100%; border-collapse: collapse; font-size: 13px; }
+.market th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; padding: 4px; border-bottom: 1px solid var(--line); }
+.market td { padding: 6px 4px; border-bottom: 1px solid rgba(140, 130, 255, 0.07); vertical-align: middle; }
+.market tr.mine td { background: rgba(124, 247, 212, 0.05); }
+.market .actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.bar.thin { height: 5px; width: 70px; }
+.modes.sub { margin-bottom: 8px; align-self: flex-start; }
+.chain-lab { flex: 1; display: flex; flex-direction: column; padding: 14px 0 0; min-height: 0; }
+.chain-lab > .row-wrap { padding: 0 14px; }
+@media (max-width: 1100px) { .lab { grid-template-columns: 1fr; } }

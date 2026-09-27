@@ -1,8 +1,10 @@
 // Sandbox universe: the exact game rules (reference model mirrored from the
 // on-chain program) with AI inhabitants, running locally in the browser.
 import {
-  AIAgent, DEFAULT_PARAMS, GameModel, ONE, PHYSICS_PRESETS, epochTax, randomSalt, type MWorld, type Params, type Personality,
+  AIAgent, DEFAULT_PARAMS, GameModel, ONE, PHYSICS_PRESETS, epochTax, moduleVitality, randomSalt, type Law, type MWorld, type Params, type Personality,
 } from "@recursia/sdk";
+
+export interface LabModuleInfo { id: number; name: string; author: string; law: Law; worldsUsing: number; earned: bigint; accrued: bigint; vitality: number; mine: boolean }
 
 /** Off-chain preimage of a superposition — only the player knows it. */
 export interface QuantumSecret { a: bigint; b: bigint; weight: number; salt: Uint8Array; entangle?: { world: string; index: number } }
@@ -41,6 +43,8 @@ export class Sandbox {
     m.createRootWorld("Основатель", "Бета", 1, 2_500, 6_000n * ONE);
     m.createRootWorld("Основатель", "Коралл", 5, 1_000, 6_000n * ONE);
     m.createRootWorld("Основатель", "Квантовая пена", PHYSICS_PRESETS.findIndex((p) => p.name === "Quantum Foam"), 1_500, 8_000n * ONE);
+    // neutral quantum world: nobody rules it, players exchange outcomes via SWAP
+    m.createNeutralWorld("Основатель", "Ничья земля", PHYSICS_PRESETS.findIndex((p) => p.name === "Tunnel Life"), 8_000n * ONE);
     let k = 0;
     for (const [pers, label] of PERSONAS) {
       for (let j = 1; j <= 3; j++) {
@@ -68,6 +72,11 @@ export class Sandbox {
       else if (m.canDecohere(sp.world, sp.index) === null) { try { m.quantumDecohere(KEEPER, sp.world, sp.index); } catch { /* */ } }
     }
     for (const k of [...this.secrets.keys()]) if (!m.superpositions.has(k)) this.secrets.delete(k);
+    // keeper: settle quantum SWAPs (bounty) and clean up expired offers
+    for (const s of [...m.swaps.values()]) {
+      if (m.canSwapResolve(s.world, s.indexA, s.indexB) === null) { try { m.swapResolve(KEEPER, s.world, s.indexA, s.indexB); } catch { /* */ } }
+      else if (m.canSwapCancel(KEEPER, s.world, s.indexA, s.indexB) === null) { try { m.swapCancel(KEEPER, s.world, s.indexA, s.indexB); } catch { /* */ } }
+    }
     // keeper crank duties: foreclosures, breaches, epochs, emission claims
     for (const w of m.worlds.values()) {
       w.territories.forEach((t, i) => { if (t.holder && m.wouldForeclose(w, i)) { try { m.settle(w.id, i); } catch { /* */ } } });
@@ -117,6 +126,21 @@ export class Sandbox {
     return out;
   }
 
+  /** Player publishes a law of physics (PhysicsModule) — royalty forever. */
+  publishLaw(law: Law, name: string): string | null {
+    return this.act(() => this.m.registerModule(YOU, name, law.birth, law.survive, law.royaltyBps, law));
+  }
+
+  labModules(): LabModuleInfo[] {
+    const cache = this.vitality;
+    return this.m.modules.map((x) => ({
+      id: x.id, name: x.name, author: x.author, worldsUsing: x.worldsUsing, earned: x.totalEarned, accrued: x.accrued, mine: x.author === YOU,
+      law: { birth: x.birth, survive: x.survive, qBirth: x.qBirth, qSurvive: x.qSurvive, qAmp: x.qAmp, royaltyBps: x.royaltyBps },
+      vitality: moduleVitality(this.m, x.id, cache),
+    }));
+  }
+  private vitality = new Map<number, number>();
+
   defaultDeposit(price: bigint) { return epochTax(price, this.m.params.harbergerBps) * 3n; }
   world(id: string): MWorld { return this.m.world(id); }
 }
@@ -156,5 +180,21 @@ const DICT: Record<string, string> = {
   "entangle across different worlds": "Запутывать можно только клетки разных миров",
   "no superposition": "Суперпозиции нет",
   "paused": "Протокол на паузе",
+  "not a neutral quantum world": "SWAP доступен только в нейтральных квантовых мирах",
+  "bad blocks": "Выберите две разные клетки",
+  "weight": "Вероятность должна быть 1–100%",
+  "target block has no holder": "У целевой клетки нет владельца",
+  "cannot swap with yourself": "Нельзя меняться с самим собой",
+  "offer exists": "Такое предложение уже есть",
+  "no offer": "Предложения нет",
+  "not addressed to you": "Предложение адресовано не вам",
+  "already accepted": "Уже принято",
+  "expired": "Срок предложения истёк",
+  "offerer lost block A": "Предлагающий больше не владеет своей клеткой",
+  "not accepted": "Ещё не принято",
+  "offer still open": "Предложение ещё действует",
+  "neutral worlds need quantum physics": "Нейтральному миру нужны квантовые законы",
+  "royalty too high": "Роялти не выше 5%",
+  "invalid rule": "Недопустимый закон",
 };
 export const translate = (m: string) => DICT[m] ?? m;

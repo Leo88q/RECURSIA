@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   BREACH_RESONANCE, ONE, PATTERNS, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS, REBELLION_MIN_VOTES, REBELLION_THRESHOLD_BPS, Rng,
-  cellsFromPattern, epochTax, isQuantum, patternFromCells, ruleString, scoreBlockPattern, splitTick, type MWorld, type Personality,
+  cellsFromPattern, epochTax, isQuantum, patternFromCells, ruleString, scoreBlockPattern, splitTick, type MSwap, type MWorld, type Personality,
 } from "@recursia/sdk";
 import { fmtRcr, YOU, type Sandbox } from "./sandbox";
 import { holderColor } from "./WorldCanvas";
@@ -21,7 +21,7 @@ export function WorldTree({ sb, current, onPick }: { sb: Sandbox; current: strin
       <li key={w.id}>
         <button className={`tree-node ${w.id === current ? "active" : ""}`} onClick={() => onPick(w.id)}>
           <span className={`dot ${status === "dormant" ? "dormant" : status === "no energy" ? "dead" : "live"}`} />
-          <span className="tree-name">{w.depth > 0 ? "⧉ " : "◈ "}{w.name}</span>
+          <span className="tree-name">{w.neutral ? "⚖ " : w.depth > 0 ? "⧉ " : "◈ "}{w.name}</span>
           {w.liberated && <span className="tag free">свободен</span>}
           {isQuantum(w) && <span className="tag quantum" title="квантовые законы физики">⚛</span>}
           <svg className="spark" viewBox="0 0 40 12" preserveAspectRatio="none">
@@ -152,6 +152,71 @@ export function QuantumCard({ sb, world, idx, notify }: { sb: Sandbox; world: MW
   );
 }
 
+// ------------------------------------------------------------------ neutral worlds: SWAP
+function SwapRow({ sb, s, notify }: { sb: Sandbox; s: MSwap; notify: (e: string | null, ok?: string) => void }) {
+  const m = sb.m; const w = m.world(s.world);
+  const gap = w.alive[s.indexB] - w.alive[s.indexA];
+  const state = s.accepted
+    ? (m.slot > s.targetSlot ? "измеряется…" : `ждёт хеша слота ${s.targetSlot} (${s.targetSlot - m.slot} сл.)`)
+    : m.slot > s.expirySlot ? "истекло" : `открыто ещё ${s.expirySlot - m.slot} сл.`;
+  return (
+    <div className="swap-row">
+      <div className="small"><b>#{s.indexA}</b> ({s.offerer}) ⇄ <b>#{s.indexB}</b> ({s.acceptor}) · p={(s.weightBps / 100).toFixed(0)}% · премия {fmtRcr(s.premium, 2)}</div>
+      <div className="muted tiny">{state} · разница жизни {gap > 0 ? "+" : ""}{gap} кл. в пользу #{gap >= 0 ? s.indexB : s.indexA}</div>
+      <div className="row-wrap">
+        {m.canSwapAccept(YOU, s.world, s.indexA, s.indexB) === null && <button className="btn portal" onClick={() => notify(sb.act(() => m.swapAccept(YOU, s.world, s.indexA, s.indexB)), "SWAP принят — исход решит энтропия")}>Принять · получить {fmtRcr(s.premium, 2)}</button>}
+        {m.canSwapCancel(YOU, s.world, s.indexA, s.indexB) === null && <button className="btn" onClick={() => notify(sb.act(() => m.swapCancel(YOU, s.world, s.indexA, s.indexB)), "Предложение отменено")}>Отменить</button>}
+      </div>
+    </div>
+  );
+}
+
+export function SwapCard({ sb, world, idx, notify }: { sb: Sandbox; world: MWorld; idx: number; notify: (e: string | null, ok?: string) => void }) {
+  const m = sb.m;
+  const t = world.territories[idx];
+  const myBlocks = world.territories.map((x, i) => [x, i] as const).filter(([x]) => x.holder === YOU).map(([, i]) => i);
+  const [from, setFrom] = useState<number>(myBlocks[0] ?? -1);
+  const [weight, setWeight] = useState(3_000);
+  const [premium, setPremium] = useState("2");
+  const related = [...m.swaps.values()].filter((s) => s.world === world.id && (s.indexA === idx || s.indexB === idx));
+  const foreign = !!t.holder && t.holder !== YOU;
+  const a = myBlocks.includes(from) ? from : myBlocks[0] ?? -1;
+  const prem = toUnits(premium);
+  const why = a >= 0 ? m.canSwapOffer(YOU, world.id, a, idx, weight, prem) : "нужна своя клетка в этом мире";
+  const gap = a >= 0 ? world.alive[idx] - world.alive[a] : 0;
+  const ev = (gap * weight) / 10_000;
+  return (
+    <div className="card swap-card">
+      <div className="card-title">⇄ Квантовый SWAP</div>
+      <p className="muted small">В нейтральном мире нет архитектора — игроки обмениваются исходами. Предложите владельцу обмен содержимым клеток с вероятностью p; он получает премию за риск при любом исходе. Исход решает хеш будущего слота, после принятия сделка обязательна для клеток.</p>
+      {foreign && (
+        <>
+          <div className="row-wrap">
+            <label className="field inline">Моя клетка
+              <select value={a} onChange={(e) => setFrom(Number(e.target.value))}>
+                {myBlocks.length === 0 && <option value={-1}>— нет —</option>}
+                {myBlocks.map((i) => <option key={i} value={i}>#{i} · {world.alive[i]} живых</option>)}
+              </select>
+            </label>
+            <label className="field inline">Премия<input value={premium} onChange={(e) => setPremium(e.target.value)} inputMode="decimal" /></label>
+          </div>
+          <label className="field">Вероятность обмена p = {(weight / 100).toFixed(0)}%
+            <input type="range" min={500} max={10_000} step={500} value={weight} onChange={(e) => setWeight(Number(e.target.value))} />
+          </label>
+          {a >= 0 && <div className="small">Ожидание: {ev >= 0 ? "+" : ""}{ev.toFixed(1)} живых клеток для вас (#{a}: {world.alive[a]} ⇄ #{idx}: {world.alive[idx]})</div>}
+          <div className="muted small">Сбор {fmtRcr(m.swapFee(), 2)}: 80% сжигается, 20% — награда тому, кто разрешит обмен.</div>
+          <button className="btn portal" disabled={!!why} title={why ?? ""} onClick={() => notify(sb.act(() => m.swapOffer(YOU, world.id, a, idx, weight, prem)), "Предложение SWAP отправлено")}>
+            Предложить SWAP · {fmtRcr(m.swapFee() + prem, 2)}
+          </button>
+          {why && <div className="muted small">{why}</div>}
+        </>
+      )}
+      {related.length > 0 && <div className="swap-list">{related.map((s) => <SwapRow key={s.key} sb={sb} s={s} notify={notify} />)}</div>}
+      {!foreign && related.length === 0 && <div className="muted small">Выберите чужую клетку, чтобы предложить обмен.</div>}
+    </div>
+  );
+}
+
 const PATTERN_NAMES: Record<string, string> = { glider: "глайдер", lwss: "корабль", rpentomino: "R-пентамино", block: "блок", acorn: "жёлудь", beacon: "маяк" };
 
 // ------------------------------------------------------------------ territory
@@ -211,6 +276,8 @@ export function TerritoryPanel({ sb, world, idx, onDescend, notify }: { sb: Sand
         </div>
       )}
 
+      {!mine && world.neutral && t.holder && <SwapCard sb={sb} world={world} idx={idx} notify={notify} />}
+
       {mine && (
         <>
           <div className="card">
@@ -219,6 +286,7 @@ export function TerritoryPanel({ sb, world, idx, onDescend, notify }: { sb: Sand
               onPlant={(p) => run(() => m.plant(YOU, world.id, idx, p), "Паттерн посажен")} />
           </div>
           <QuantumCard sb={sb} world={world} idx={idx} notify={notify} />
+          {world.neutral && <SwapCard sb={sb} world={world} idx={idx} notify={notify} />}
           <div className="card row-wrap">
             <button className="btn" disabled={world.pending[idx] === 0n} onClick={() => run(() => m.collect(YOU, world.id, idx), "Награды перенесены в кошелёк")}>Собрать {fmtRcr(world.pending[idx], 2)}</button>
             <label className="field inline">Депозит +<input value={topup} onChange={(e) => setTopup(e.target.value)} /></label>
@@ -274,7 +342,7 @@ export function WorldPanel({ sb, world, notify }: { sb: Sandbox; world: MWorld; 
       <div className="title">{world.depth > 0 ? "⧉" : "◈"} {world.name}</div>
       <div className="muted small">{world.parent ? `Симуляция внутри клетки #${world.parentTerritory} мира «${m.world(world.parent).name}»` : "Корневая вселенная"} · глубина {world.depth}</div>
       <dl className="kv">
-        <dt>Архитектор</dt><dd>{world.architect ?? "— (свергнут)"} {world.architect && <span className="muted">· {world.architectFeeBps / 100}% налогов</span>}</dd>
+        <dt>Архитектор</dt><dd>{world.architect ?? (world.neutral ? "— нейтральный мир" : "— (свергнут)")} {world.architect && <span className="muted">· {world.architectFeeBps / 100}% налогов</span>}</dd>
         <dt>Законы физики</dt><dd>{mod.name} <span className="muted">{ruleString(world.birth, world.survive, world.qBirth, world.qSurvive, world.qAmp)} · автор {mod.author}</span></dd>
         {isQuantum(world) && <><dt>⚛ Квантовый мир</dt><dd>будущее не вычислимо заранее · энтропия {world.entropy ? Array.from(world.entropy.slice(0, 4), (x) => x.toString(16).padStart(2, "0")).join("") + "…" : "—"} · в суперпозиции {world.superpositions}</dd></>}
         <dt>Поколение</dt><dd>{world.generation.toLocaleString("ru-RU")}</dd>
@@ -298,6 +366,15 @@ export function WorldPanel({ sb, world, notify }: { sb: Sandbox; world: MWorld; 
           ["автор физики", split.royalty, "#7cf7d4"], ["кранкер", split.cranker, "#ffd66b"],
         ]} total={m.params.tickCost} />
       </div>
+      {world.neutral && (
+        <div className="card swap-card">
+          <div className="card-title">⚖ Нейтральный мир · рынок SWAP</div>
+          <p className="muted small">Никто не правит этим миром: нет архитектора и его налога, восстание невозможно. Здесь разрешены только квантовые законы, а игроки торгуют исходами — вероятностными обменами клеток.</p>
+          {[...m.swaps.values()].filter((s) => s.world === world.id).length === 0
+            ? <div className="muted small">Открытых сделок нет. Выберите чужую клетку, чтобы предложить обмен.</div>
+            : <div className="swap-list">{[...m.swaps.values()].filter((s) => s.world === world.id).map((s) => <SwapRow key={s.key} sb={sb} s={s} notify={notify} />)}</div>}
+        </div>
+      )}
       {m.rebellionActive(world) && <div className="card danger-card">⚑ Идёт восстание: {world.rebellionVotes} голосов из {owned} владельцев</div>}
       <div className="card row-wrap">
         <label className="field inline">Энергия +<input value={fund} onChange={(e) => setFund(e.target.value)} /></label>
