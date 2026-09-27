@@ -382,5 +382,5 @@ run(`stateful fuzz of the full instruction surface (seed ${SEED}, ${STEPS} steps
     if (!process.env.FUZZ_SEED) for (const n of ["acquire", "swap_accept", "quantum_collapse", "quantum_commit", "quantum_observe", "swap_offer", "create_permit", "agent_plant", "create_child_world", "vote_rebellion"]) {
       expect(stats.get(n)?.ok ?? 0, `${n} never succeeded (${summary})`).toBeGreaterThan(0);
     }
-  }, 600_000);
+  }, Math.max(600_000, STEPS * 1_000)); // ~1 s per step budget: long nightly walks must not time out
 });
