@@ -14,6 +14,9 @@ use anchor_lang::prelude::*;
 pub mod constants;
 pub mod errors;
 pub mod events;
+#[cfg(test)]
+#[rustfmt::skip]
+mod fuzz_math;
 pub mod instructions;
 pub mod math;
 pub mod quantum;

@@ -13,6 +13,7 @@ import {
   ata, bpsFloor, epochTax, tournamentPlaces, tournamentPrizes, worldEmission, worldSponsor,
 } from "@recursia/sdk";
 import { Chain, HAVE_SO, REQUIRE_SO, trace } from "./harness.js";
+import { checkInvariants } from "./invariants.js";
 
 const P = DEFAULT_PARAMS;
 const BLOCKS = 0x0000_0018_1800_0000n; // still life: stays alive every tick
@@ -31,33 +32,7 @@ run("season lifecycle on the real program (LiteSVM)", () => {
   const players: PublicKey[] = [];
   const worlds: PublicKey[] = [];
 
-  /** Money invariants of the deployed program (checked after every step). */
-  function invariants(step: string) {
-    const cfg = c.config();
-    // I1 conservation: every SKR base unit is in a known token account
-    let sum = 0n; for (const k of c.tokenAccounts) sum += c.tokenBalance(new PublicKey(k)) ?? 0n;
-    expect(sum, `${step}: Σ balances == supply`).toBe(c.supply);
-    // reward pool ledger: only external funding + recorded pool inflows − emission
-    expect(c.bal(c.pda.rewardPool()), `${step}: reward pool ledger`).toBe(rewardFunded + cfg.totalSunk - cfg.totalEmitted);
-    // season pool ledger
-    expect(c.bal(c.pda.seasonPool()), `${step}: season pool ledger`).toBe(cfg.totalSeasonFunded - cfg.totalSeasonPaid);
-    // sponsor pool: nothing funded in this test
-    expect(c.bal(c.pda.sponsorPool()) + cfg.totalSponsored, `${step}: sponsor ledger`).toBe(0n);
-    // tournament pool == Σ open pots
-    let pots = 0n;
-    for (let s = 1n; s <= cfg.seasonId; s++) for (let t = 0; t < TOURNAMENT_TIERS.length; t++) pots += c.tournament(s, t)?.pot ?? 0n;
-    expect(c.bal(c.pda.tournamentPool()), `${step}: tournament pool == Σ pots`).toBe(pots);
-    // claims vault solvency: it can pay every player's balance
-    let owed = 0n; for (const p of players) owed += c.player(p)?.claimable ?? 0n;
-    expect(c.bal(c.pda.claims()) >= owed, `${step}: claims vault solvent`).toBe(true);
-    // world vault solvency: energy + reserved rewards + deposits are backed
-    for (const w of worlds) {
-      const a = c.world(w);
-      expect(c.bal(c.pda.worldVault(w)) >= a.energy + a.rewardsReserved + a.deposits, `${step}: world vault solvent`).toBe(true);
-    }
-    // treasury: the governance-spendable part never exceeds the balance
-    expect(cfg.treasurySeen <= c.bal(c.pda.treasury()), `${step}: treasury_seen ≤ treasury`).toBe(true);
-  }
+  const invariants = (step: string) => checkInvariants(c, { rewardFunded, players, worlds }, step);
 
   function tick(n = 3) {
     for (let i = 0; i < n; i++) { c.warp(P.tickIntervalSlots); c.send([c.rx.tick(keeper.publicKey, world, module)], [keeper]); }
@@ -95,7 +70,11 @@ run("season lifecycle on the real program (LiteSVM)", () => {
     const id = c.config().modules;
     c.send([c.rx.registerModule(dev.publicKey, id, conway.birth, conway.survive, conway.royaltyBps, conway.name)], [dev]);
     module = c.pda.module(id);
-    const created = c.rx.createRootWorld(alice.publicKey, c.config().rootWorlds, module, 1_000, "Genesis", 200_000n * ONE);
+    trace("module pda ok");
+    const rootIndex = c.config().rootWorlds;
+    trace(`root index ${rootIndex}`);
+    const created = c.rx.createRootWorld(alice.publicKey, rootIndex, module, 1_000, "Genesis", 200_000n * ONE);
+    trace(`createRootWorld ix built (${created.ix.keys.length} keys, ${created.ix.data.length} bytes)`);
     c.send([created.ix], [alice]);
     world = created.world; worlds.push(world);
     c.tokenAccounts.add(c.pda.worldVault(world).toBase58());

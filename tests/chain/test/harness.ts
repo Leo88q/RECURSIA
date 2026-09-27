@@ -120,6 +120,7 @@ export class Chain {
 
   /** Send; throws ChainError with the Anchor error name on failure. */
   send(ixs: TransactionInstruction[], signers: Keypair[]): string[] {
+    trace("expire blockhash");
     this.svm.expireBlockhash(); // identical instructions twice must not collide as "already processed"
     const tx = new Transaction().add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), ...ixs);
     tx.recentBlockhash = this.svm.latestBlockhash();

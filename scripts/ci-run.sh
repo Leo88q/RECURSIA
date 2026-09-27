@@ -8,6 +8,8 @@ code=${PIPESTATUS[0]}
 if [ "$code" -ne 0 ]; then
   msg=$(grep -E "^(error|warning)|-->|^\s+\||panicked|FAIL|✗|Error|chain-trace|SIG|fatal|abort" /tmp/ci-out.txt | tail -c 20000)
   [ -z "$msg" ] && msg=$(tail -c 20000 /tmp/ci-out.txt)
+  # native aborts (glibc / napi) print free-form lines: always append the raw tail
+  msg="$(printf '%s\n----- tail -----\n%s' "$(printf '%s' "$msg" | tail -c 12000)" "$(tail -n 40 /tmp/ci-out.txt | cut -c1-300)")"
   msg="${msg//'%'/'%25'}"; msg="${msg//$'\r'/'%0D'}"; msg="${msg//$'\n'/'%0A'}"
   echo "::error title=${title}::${msg}"
 fi

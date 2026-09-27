@@ -123,7 +123,7 @@ jobs:
           npx -w packages/sdk tsx scripts/check-idl.ts ../../target/idl/recursia.json
       - name: Integration tests — compiled program in LiteSVM (checklist #54/#58)
         env: { REQUIRE_SO: "1", CHAIN_TRACE: "1", RUST_BACKTRACE: "1" }
-        run: scripts/ci-run.sh chain-test npm -w tests/chain test -- --pool=threads
+        run: scripts/ci-run.sh chain-test npm -w tests/chain test -- --pool=threads --no-file-parallelism
       - uses: actions/upload-artifact@v4
         with:
           name: recursia-build
