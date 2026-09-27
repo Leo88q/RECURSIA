@@ -76,7 +76,7 @@ fn fuzz_world_emission_bounded() {
     for _ in 0..CASES {
         let (e, total, claimed) = (r.amount(), r.amount(), r.amount());
         let sink = r.amount() % total.saturating_add(1).max(1); // a world is part of the total
-        let cap = r.bps(MAX_REBATE_BPS as u64) as u16;
+        let cap = r.bps(MAX_REBATE_BPS) as u16;
         let v = world_emission(e, total, sink, cap, claimed).unwrap();
         assert!(v <= e.saturating_sub(claimed), "more than what's left of the budget");
         assert!(v as u128 <= sink as u128 * cap as u128 / BPS as u128, "above the rebate cap");
@@ -95,7 +95,7 @@ fn fuzz_world_emission_many_claims_never_exceed_budget() {
         let n = 1 + (r.next() % 60) as usize;
         let sinks: Vec<u64> = (0..n).map(|_| r.next() % 1_000_000_000_000_000).collect();
         let total: u64 = sinks.iter().fold(0u64, |a, s| a.saturating_add(*s));
-        let cap = r.bps(MAX_REBATE_BPS as u64) as u16;
+        let cap = r.bps(MAX_REBATE_BPS) as u16;
         let mut claimed = 0u64;
         for s in &sinks {
             claimed += world_emission(e, total, *s, cap, claimed).unwrap();
