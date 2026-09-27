@@ -9,7 +9,7 @@ import type { AccountInfo, Connection, GetProgramAccountsFilter, PublicKey as PK
 import { PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 import {
-  accountDiscriminator, ata, decodeConfig, decodeModule, decodePermit, decodePlayer, decodeSuperposition, decodeSwap, decodeTerritory, decodeWorld,
+  accountDiscriminator, ata, decodeConfig, decodeSeason, type SeasonAccount, decodeModule, decodePermit, decodePlayer, decodeSuperposition, decodeSwap, decodeTerritory, decodeWorld,
   Pdas, TERRITORIES, type ConfigAccount, type ModuleAccount, type PermitAccount, type PlayerAccount, type SuperpositionAccount, type SwapAccount,
   type TerritoryAccount, type WorldAccount,
 } from "@recursia/sdk";
@@ -42,6 +42,10 @@ export interface ProgramData {
   worlds: Array<Keyed<WorldAccount>>;
   modules: Array<Keyed<ModuleAccount>>;
   swaps: Array<Keyed<SwapAccount>>;
+  /** Season leaderboard + last season's prizes (null until loaded / on old deployments). */
+  season: SeasonAccount | null;
+  /** Token balances of the sponsor and season pools (null = unknown). */
+  pools: { sponsor: bigint | null; season: bigint | null };
   slot: number;
   error: string | null;
   /** Bumped on every live update of a world (key → counter). */
@@ -55,6 +59,8 @@ export function useProgramData(connection: Connection, programId: PublicKey): Pr
   const [worlds, setWorlds] = useState<Map<string, WorldAccount>>(new Map());
   const [modules, setModules] = useState<Array<Keyed<ModuleAccount>>>([]);
   const [swaps, setSwaps] = useState<Array<Keyed<SwapAccount>>>([]);
+  const [season, setSeason] = useState<SeasonAccount | null>(null);
+  const [pools, setPools] = useState<{ sponsor: bigint | null; season: bigint | null }>({ sponsor: null, season: null });
   const [slot, setSlot] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [worldVersion, setWorldVersion] = useState<Map<string, number>>(new Map());
@@ -84,10 +90,13 @@ export function useProgramData(connection: Connection, programId: PublicKey): Pr
         connection.getProgramAccounts(programId, { commitment: "confirmed", filters: [disc("PhysicsModule")] }),
         connection.getProgramAccounts(programId, { commitment: "confirmed", filters: [disc("QuantumSwap")] }),
       ]);
+      const [si, sp, ssp] = await connection.getMultipleAccountsInfo([pda.season(), pda.sponsorPool(), pda.seasonPool()], "confirmed").catch(() => [null, null, null]);
+      setSeason(owned(si, programId) ? safe(() => decodeSeason(si!.data)) : null);
+      setPools({ sponsor: sp ? readTokenAmount(sp.data) : null, season: ssp ? readTokenAmount(ssp.data) : null });
       setModules(mods.flatMap((r) => { const acc = safe(() => decodeModule(r.account.data)); return acc ? [{ key: r.pubkey, acc }] : []; }).sort((a, b) => Number(a.acc.id - b.acc.id)));
       setSwaps(sws.flatMap((r) => { const acc = safe(() => decodeSwap(r.account.data)); return acc ? [{ key: r.pubkey, acc }] : []; }));
     } catch { /* optional data */ }
-  }, [connection, programId]);
+  }, [connection, programId, pda]);
   usePoll(loadExtra, 20_000, [loadExtra, tick]);
 
   usePoll(() => { connection.getSlot("confirmed").then(setSlot).catch(() => {}); }, 4_000, [connection]);
@@ -114,7 +123,7 @@ export function useProgramData(connection: Connection, programId: PublicKey): Pr
 
   const list = useMemo(() => [...worlds.entries()].map(([k, acc]) => ({ key: new PublicKey(k), acc }))
     .sort((a, b) => a.acc.depth - b.acc.depth || Number(a.acc.index - b.acc.index) || a.key.toBase58().localeCompare(b.key.toBase58())), [worlds]);
-  return useMemo(() => ({ config, worlds: list, modules, swaps, slot, error, worldVersion, refresh }), [config, list, modules, swaps, slot, error, worldVersion, refresh]);
+  return useMemo(() => ({ config, worlds: list, modules, swaps, season, pools, slot, error, worldVersion, refresh }), [config, list, modules, swaps, season, pools, slot, error, worldVersion, refresh]);
 }
 
 export interface WorldDetail { territories: Map<number, TerritoryAccount>; superpositions: Map<number, SuperpositionAccount>; loading: boolean }

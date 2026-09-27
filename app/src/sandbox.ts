@@ -44,6 +44,8 @@ export class Sandbox {
     m.addPlayer(DEV, 200_000n * U);
     for (const p of PHYSICS_PRESETS) m.registerModule(DEV, p.name, p.birth, p.survive, p.royaltyBps, p);
     m.addPlayer(KEEPER, 0n);
+    // the studio sponsors living worlds from day one (sponsor pool, 10% per epoch)
+    m.fundSponsorPool(DEV, 20_000n * U);
     m.addPlayer("Основатель", 60_000n * U);
     m.createRootWorld("Основатель", "Альфа", 0, 1_500, 8_000n * U);
     m.createRootWorld("Основатель", "Бета", 1, 2_500, 6_000n * U);
@@ -89,7 +91,11 @@ export class Sandbox {
       if (w.parent && w.resonance >= 64) { try { m.breach(w.id); } catch { /* */ } }
     }
     if (m.canAdvanceEpoch()) {
+      // keeper: season leaderboard for everyone who has points (permissionless), then close the epoch
+      for (const id of m.players.keys()) if (id !== YOU && m.seasonPointsOf(id) > 0n) { try { m.seasonSubmit(id); } catch { /* */ } }
+      const season = m.seasonId;
       m.advanceEpoch();
+      if (season !== m.seasonId) for (let r = 0; r < 10; r++) { try { m.claimSeasonPrize(r); } catch { /* empty rank */ } }
       for (const w of m.worlds.values()) { try { m.claimWorldEpoch(w.id); } catch { /* nothing */ } }
     }
   }

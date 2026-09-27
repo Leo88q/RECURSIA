@@ -26,6 +26,8 @@ function config(): Uint8Array {
   const w = new Writer(); writeParams(w, DEFAULT_PARAMS); writePending(w, { kind: "None" } as any); b.raw(w.done());
   b.u64(0n).u64(0n); // eta, nonce
   b.u64(2n).u64(2n).u64(1n).u64(3n).u64(0n).u64(0n).u64(0n).u64(0n).u64(0n).u64(5_000_000_000n).u64(0n);
+  b.u8(255).u64(0n).u64(0n).u64(0n).u64(0n).u64(0n); // sponsor pool
+  b.u8(255).u8(255).u64(0n).u64(1n).u64(1n).u64(0n).u64(0n); // seasons
   return b.done();
 }
 function world(name: string, index: bigint, neutral: boolean): Uint8Array {
@@ -39,6 +41,7 @@ function world(name: string, index: bigint, neutral: boolean): Uint8Array {
   b.u64(2n).u64(0n); for (let i = 0; i < TERRITORIES; i++) b.u32(0);
   b.bool(false).u16(10).u16(0).u32(0).u8(0).u64(0n).u64(0n).bool(neutral).u64(0n);
   b.u16(neutral ? 1 << 6 : 0).u16(0).u8(neutral ? 1 : 0).raw(new Uint8Array(32)).u64(0n).u16(0).bool(neutral);
+  b.u64(0n).u64(0n); // score_owned_cur / prev
   return b.done();
 }
 function territory(w: PublicKey, idx: number, who: PublicKey): Uint8Array {

@@ -26,6 +26,6 @@ export function toModel(key: PublicKey, w: WorldAccount, terr: Map<number, Terri
     liberated: w.liberated, totalSunk: w.totalSunk, history: [],
     key: key.toBytes(), qBirth: w.qBirth, qSurvive: w.qSurvive, qAmp: w.qAmp,
     entropy: w.entropy.some((b) => b !== 0) ? w.entropy : null, quantumEscrow: w.quantumEscrow, superpositions: w.superpositions,
-    neutral: w.neutral,
+    neutral: w.neutral, scoreOwnedCur: w.scoreOwnedCur, scoreOwnedPrev: w.scoreOwnedPrev,
   };
 }

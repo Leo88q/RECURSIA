@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { DEFAULT_PARAMS, PROGRAM_ID, RecursiaIx, TERRITORIES, type ConfigAccount, type SuperpositionAccount, type SwapAccount, type TerritoryAccount, type WorldAccount } from "@recursia/sdk";
-import { claimable, plan, type Snapshot } from "../src/plan.js";
+import { claimable, plan, seasonPrizes, type Snapshot } from "../src/plan.js";
 import { toInstruction } from "../src/ix.js";
 
 const P = DEFAULT_PARAMS;
@@ -10,7 +10,9 @@ const cfg = (o: Partial<ConfigAccount> = {}): ConfigAccount => ({
   version: 1, bump: 255, admin: key(), mint: key(), paused: false, params: P,
   pending: { kind: 0 } as never, pendingEta: 0n, pendingNonce: 0n, rootWorlds: 1n, totalWorlds: 1n, modules: 1n,
   curEpoch: 5n, epochStartSlot: 1_000_000n, curTotalSink: 0n, prevTotalSink: 0n, prevEmission: 0n, prevClaimed: 0n,
-  totalSunk: 0n, totalEmitted: 0n, ...o,
+  totalSunk: 0n, totalEmitted: 0n,
+  curTotalScore: 0n, prevTotalScore: 0n, prevSponsorBudget: 0n, prevSponsorClaimed: 0n, totalSponsored: 0n,
+  treasurySeen: 0n, seasonId: 1n, seasonStartEpoch: 1n, totalSeasonFunded: 0n, totalSeasonPaid: 0n, ...o,
 });
 const world = (o: Partial<WorldAccount> = {}): WorldAccount => ({
   version: 1, bump: 1, vaultBump: 1, depth: 0, parent: PublicKey.default, parentTerritory: 0, index: 0n, architect: key(),
@@ -20,7 +22,7 @@ const world = (o: Partial<WorldAccount> = {}): WorldAccount => ({
   ownedMask: 0n, epochId: 5n, sinkCur: 0n, scoresCur: new Array(TERRITORIES).fill(0), prevEpochId: 4n, sinkPrev: 0n,
   scoresPrev: new Array(TERRITORIES).fill(0), prevClaimed: true, resonance: 0, childCount: 0, rebellionId: 0,
   rebellionVotes: 0, rebellionDeadline: 0n, lastRebellionSlot: 0n, liberated: false, totalSunk: 0n,
-  qBirth: 0, qSurvive: 0, qAmp: 0, entropy: new Uint8Array(32), quantumEscrow: 0n, superpositions: 0, neutral: false, ...o,
+  qBirth: 0, qSurvive: 0, qAmp: 0, entropy: new Uint8Array(32), quantumEscrow: 0n, superpositions: 0, neutral: false, scoreOwnedCur: 0n, scoreOwnedPrev: 0n, ...o,
 });
 const terr = (w: PublicKey, o: Partial<TerritoryAccount> = {}): TerritoryAccount => ({
   world: w, index: 3, holder: key(), price: 100n * 1_000_000n, deposit: 10n * 1_000_000n, lastTaxSlot: 1_000_000n,
@@ -138,5 +140,18 @@ describe("keeper planner", () => {
     expect(plan(snap({ config: cfg({ paused: true }), swaps })).map((a) => a.kind)).toEqual(["swap_cancel", "swap_resolve"]);
     const rx = new RecursiaIx(PROGRAM_ID);
     for (const a of got) expect(toInstruction(rx, key(), a).keys.filter((k) => k.isSigner)).toHaveLength(1);
+  });
+
+  it("claims unpaid season prizes of the last closed season, skipping paid / empty ranks", () => {
+    const winner = key(), second = key();
+    const e = (player: PublicKey, points: bigint) => ({ player, points });
+    const empty = Array.from({ length: 10 }, () => e(PublicKey.default, 0n));
+    const lastTop = [e(winner, 100n), e(second, 50n), ...empty.slice(2)];
+    const season = { top: empty, lastId: 1n, lastTop, lastPrizes: [25n, 12n, ...new Array(8).fill(0n)], lastClaimed: 0b10 };
+    const acts = seasonPrizes(season);
+    expect(acts).toEqual([{ kind: "claim_season_prize", winner, rank: 0 }]);
+    expect(plan(snap({ season })).some((a) => a.kind === "claim_season_prize")).toBe(true);
+    const rx = new RecursiaIx(PROGRAM_ID, key());
+    expect(toInstruction(rx, key(), acts[0]).keys).toHaveLength(7);
   });
 });

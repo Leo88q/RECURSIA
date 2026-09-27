@@ -48,10 +48,14 @@ anchor deploy --provider.cluster devnet
   ```
   Клиенту и keeper'у передайте его: `VITE_MINT=<TEST_MINT>` и `MINT=<TEST_MINT>`.
 
-`initialize` создаёт PDA-аккаунты `treasury`, `reward_pool`, `claims` для этого mint. Mint больше не меняется.
+`initialize` создаёт PDA-аккаунты `treasury`, `reward_pool`, `claims`, `sponsor_pool`, `season_pool` и аккаунт таблицы `season`
+для этого mint. Mint больше не меняется. Первый сезон начинается с эпохи 1.
 Дальше по желанию:
 
 1. `fund_reward_pool(amount)` — пополнить пул наград (студия на запуске, партнёры). Подписать может любой, вывести пул не может никто.
+1a. `fund_sponsor_pool(amount)` — спонсорский пул (платит мирам за живые клетки, 10% в эпоху). Рекомендуется на запуске:
+   по econ-sim именно он превращает игру из чистого перераспределения в игру, где часть игроков выходит в плюс.
+   Взнос невозвратный: вывести его нельзя, в том числе студии.
 2. Проверьте: `spl-token display SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3` → `Freeze authority: (not set)`, decimals 6;
    `config.mint` в аккаунте Config совпадает с ним. Клиент на `mainnet-beta` откажется работать, если `VITE_MINT` не официальный SKR.
 
@@ -80,6 +84,11 @@ RPC_URL=https://api.devnet.solana.com KEEPER_KEYPAIR=./keeper.json npm -w keeper
 RPC_URL=... KEEPER_KEYPAIR=./keeper.json npm -w keeper start
 ```
 Keeper permissionless — запускать может кто угодно, несколько независимых keeper'ов повышают живучесть.
+Помимо тиков, эпох и квантовых измерений keeper читает аккаунт `season` и отправляет `claim_season_prize` за каждое
+невыплаченное место прошлого сезона. Приз всегда уходит победителю, keeper платит только комиссию сети.
+
+Внимание: `advance_epoch` теперь принимает 8 аккаунтов (добавлены `sponsor_pool`, `treasury` (mut), `season_pool`, `season`).
+Старые скрипты, собранные до этой версии, нужно пересобрать через SDK.
 
 ## 9. Клиент (фронтенд)
 

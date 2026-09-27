@@ -5,6 +5,40 @@ import { lamportsToSol, rcr, shortAddr, slotsToHuman } from "../lib/format";
 import { AmountField, Address, amountOf } from "../ui/fields";
 import { blocked, type ChainCtx } from "./ctx";
 import { Glyph, Art } from "../ui/Icon";
+import { SeasonCard, SponsorCard } from "../ui/Season";
+import { SEASON_EPOCHS } from "@recursia/sdk";
+
+const isDefaultKey = (k: PublicKey) => k.equals(PublicKey.default);
+
+/** Season leaderboard, prizes and sponsor pool (live data; all actions are permissionless program calls). */
+function SeasonSection({ c }: { c: ChainCtx }) {
+  const { me, my, rx, config } = c;
+  const s = c.data.season;
+  if (!me) return null;
+  const label = (k: PublicKey) => (k.equals(me) ? "Вы" : shortAddr(k.toBase58()));
+  const myPoints = my.player && my.player.seasonId === config.seasonId ? my.player.seasonPoints : 0n;
+  const inTop = s?.top.some((e) => e.player.equals(me)) ?? false;
+  const betterThanLast = !s || isDefaultKey(s.top[s.top.length - 1].player) || myPoints > s.top[s.top.length - 1].points || inTop;
+  const submitBlocked = blocked(c) ?? (myPoints === 0n ? "Сначала соберите награды с клеток — это и есть очки" : !betterThanLast ? "Очков пока мало для топ-10" : null);
+  const epochsLeft = Number(config.seasonStartEpoch) + SEASON_EPOCHS - Number(config.curEpoch) - 1;
+  return (
+    <>
+      <SeasonCard
+        seasonId={Number(config.seasonId)} epochsLeft={epochsLeft} pool={c.data.pools.season}
+        top={(s?.top ?? []).filter((e) => !isDefaultKey(e.player)).map((e) => ({ label: label(e.player), points: e.points, you: e.player.equals(me) }))}
+        myPoints={myPoints} submitBlocked={submitBlocked}
+        onSubmit={() => c.run({ title: "Заявить очки сезона", lines: [`Очки: ${rcr(myPoints)}`, "Программа сама вставит вас в топ-10 по очкам из вашего аккаунта игрока — подделать их нельзя"], ixs: [rx.seasonSubmit(me)], successText: "Очки в таблице" }).then(() => c.data.refresh())}
+        last={s && s.lastId > 0n ? { id: Number(s.lastId), rows: s.lastTop.map((e, r) => ({ label: isDefaultKey(e.player) ? "—" : label(e.player), points: e.points, you: e.player.equals(me), prize: isDefaultKey(e.player) ? 0n : s.lastPrizes[r], claimed: (s.lastClaimed & (1 << r)) !== 0 })) } : null}
+        onClaim={(r) => c.run({ title: "Зачислить приз сезона", lines: [`${r + 1}-е место: ${rcr(s!.lastPrizes[r])} → «к выводу» победителя`, "Отправить может любой, деньги получает только победитель"], ixs: [rx.claimSeasonPrize(s!.lastTop[r].player, r)], successText: "Приз зачислен" }).then(() => c.data.refresh())}
+        claimBlocked={blocked(c, { paused: false })}
+        fmt={(v) => rcr(v, 0)}
+      />
+      <SponsorCard pool={c.data.pools.sponsor} fmt={(v) => rcr(v, 0)} parse={(v) => amountOf(v)}
+        blockedWhy={(a) => (a === null ? "Введите сумму" : blocked(c, { spend: a }))}
+        onFund={(a) => { c.run({ title: "Спонсировать живые миры", lines: [`${rcr(a)} → спонсорский пул`, "Невозвратно: пул раздаётся мирам по 10% за эпоху пропорционально живым клеткам"], danger: "Это пожертвование в пул наград, а не вклад: вернуть его нельзя.", ixs: [rx.fundSponsorPool(me, a)], successText: "Спасибо! Живые миры получат больше" }).then(() => c.data.refresh()); }} />
+    </>
+  );
+}
 
 export function WalletPanel({ c }: { c: ChainCtx }) {
   const { me, my, rx } = c;
@@ -52,6 +86,7 @@ export function WalletPanel({ c }: { c: ChainCtx }) {
           ))}
         </div>
       )}
+      <SeasonSection c={c} />
       <div className="card">
         <div className="card-title"><Art name="cell" size={20} />Ваши клетки</div>
         {my.holdings.length === 0 && <div className="muted small">Пока нет. Выберите свободную клетку на карте.</div>}

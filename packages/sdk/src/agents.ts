@@ -16,6 +16,13 @@ const vitalityCache = new WeakMap<GameModel, Map<number, number>>();
 const vcache = (m: GameModel) => { let c = vitalityCache.get(m); if (!c) { c = new Map(); vitalityCache.set(m, c); } return c; };
 
 export type Personality = "gardener" | "expansionist" | "speculator" | "demiurge";
+/**
+ * Skill level (econ-sim realism: real player bases are mixed).
+ *  novice  — plants without simulating, overpays for land, sometimes forgets its deposit
+ *  skilled — the default heuristic + evolutionary player
+ *  pro     — searches more mutants, buys only clear bargains, submits season points
+ */
+export type Skill = "novice" | "skilled" | "pro";
 
 export interface AgentGenome {
   /** willingness to spend (0..1) */ aggression: number;
@@ -67,7 +74,9 @@ export class AIAgent {
    * @param owner when set, the agent acts through an AgentPermit on behalf of
    *   `owner`: it spends only the permit vault, territories go to the owner.
    */
-  constructor(readonly id: string, readonly personality: Personality, seed: number, readonly owner?: string) {
+  readonly skill: Skill;
+  constructor(readonly id: string, readonly personality: Personality, seed: number, readonly owner?: string, opts: { skill?: Skill } = {}) {
+    this.skill = opts.skill ?? "skilled";
     this.rng = new Rng(seed);
     this.genome = {
       aggression: 0.3 + this.rng.next() * 0.6,
@@ -104,9 +113,11 @@ export class AIAgent {
     if (me) for (const [w, i] of mine) {
       const t = w.territories[i];
       const need = epochTax(t.price, m.params.harbergerBps) * 2n;
-      if (t.deposit < need && me.wallet > need) { this.try(() => m.topUp(this.id, w.id, i, need - t.deposit), log); }
+      const forgets = this.skill === "novice" && this.rng.next() < 0.3;
+      if (!forgets && t.deposit < need && me.wallet > need) { this.try(() => m.topUp(this.id, w.id, i, need - t.deposit), log); }
       if (w.pending[i] > 0n) this.try(() => { const a = m.collect(this.id, w.id, i); this.genome.fitness += Number(a / unitOf(m)); }, log);
     }
+    if (me && this.skill === "pro" && m.seasonPointsOf(this.id) > 0n) this.try(() => m.seasonSubmit(this.id), log);
     if (me && me.claimable > 0n) this.try(() => m.withdraw(this.id, me.claimable), log);
 
     // 2) acquire: pick best value/price opportunity
@@ -124,7 +135,8 @@ export class AIAgent {
         const adj = this.personality === "expansionist" && mine.some(([mw, mi]) => mw.id === w.id && Math.abs(mi - i) <= 9) ? ratio * 1.5 : ratio;
         if (!best || adj > best.ratio) best = { w, i, ratio: adj, price };
       }
-      if (best && best.ratio > (this.personality === "speculator" ? 1.05 : 0.8)) {
+      const bar = (this.personality === "speculator" ? 1.05 : 0.8) + (this.skill === "pro" ? 0.3 : this.skill === "novice" ? -0.3 : 0);
+      if (best && best.ratio > bar) {
         const value = this.valueOf(m, best.w, best.i);
         let newPrice = BigInt(Math.floor(Number(value) * this.genome.greed));
         if (newPrice < m.params.minPrice) newPrice = m.params.minPrice;
@@ -144,7 +156,13 @@ export class AIAgent {
       if (m.canPlant(holderId, w.id, i) !== null) continue;
       if (w.alive[i] > 18 && this.personality !== "expansionist") continue; // healthy, leave it
       if (wallet() < m.params.plantCost * 4n) break;
+      if (this.skill === "novice") {
+        // plants a favourite shape without simulating the neighbourhood
+        if (this.rng.next() < 0.5) { const p = this.rng.pick(this.genome.library); this.try(() => m.plant(this.id, w.id, i, p, opts), log); planted++; }
+        continue;
+      }
       const candidates = [...this.genome.library];
+      if (this.skill === "pro") for (let k = 0; k < 4; k++) candidates.push(mutatePattern(this.rng.pick(this.genome.library), this.rng, 1 + k));
       candidates.push(mutatePattern(this.rng.pick(this.genome.library), this.rng));
       candidates.push(mutatePattern(blockPattern(w.grid, i) | this.rng.pick(this.genome.library), this.rng, 2));
       const scored = candidates.map((c) => ({ c, s: evaluatePattern(w, i, c, 8, this.rng) })).sort((x, y) => y.s - x.s);
@@ -195,7 +213,7 @@ export class AIAgent {
 
     // 4b) AI physicist: rich demiurges mutate the most vital law and publish
     //     the mutant only if the probe says it is at least as alive (≤2 laws each)
-    if (me && this.personality === "demiurge" && this.authored < 2 && me.wallet > m.params.moduleRegisterFee * 6n && this.rng.next() < 0.02) {
+    if (me && this.personality === "demiurge" && this.skill !== "novice" && this.authored < 2 && me.wallet > (m.params.moduleRegisterFee * 3n) / 2n && this.rng.next() < 0.02) {
       this.physicist(m, log);
     }
     if (me) for (const mod of m.modules) if (mod.author === this.id && mod.accrued > 0n) this.try(() => m.claimModuleRoyalties(this.id, mod.id), log);

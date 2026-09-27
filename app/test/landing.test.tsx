@@ -35,7 +35,7 @@ describe("landing", () => {
   });
   it("states the entry cost computed from the protocol params", () => {
     expect(text).toMatch(/от 1\s053,5 SKR/);
-    expect(text).toMatch(/до 0,00538 SOL/);
+    expect(text).toMatch(/до 0,00549 SOL/);
     expect(text).toContain("350 000 SKR"); // law fee shown in whole SKR, not divided twice
     expect(text).toMatch(/Итого 1\s053,5 SKR/);
     expect(text).toMatch(/≈ \$20/);

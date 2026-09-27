@@ -10,7 +10,7 @@
 import type { PublicKey } from "@solana/web3.js";
 import {
   BREACH_RESONANCE, harbergerDue, QUANTUM_BOUNTY_DIV, QUANTUM_REVEAL_SLOTS,
-  type ConfigAccount, type SuperpositionAccount, type SwapAccount, type TerritoryAccount, type WorldAccount,
+  type ConfigAccount, type SeasonAccount, type SuperpositionAccount, type SwapAccount, type TerritoryAccount, type WorldAccount,
 } from "@recursia/sdk";
 
 export interface Snapshot {
@@ -20,11 +20,13 @@ export interface Snapshot {
   territories: { key: PublicKey; acc: TerritoryAccount }[];
   superpositions?: { key: PublicKey; acc: SuperpositionAccount }[];
   swaps?: { key: PublicKey; acc: SwapAccount }[];
+  season?: SeasonAccount;
 }
 
 export type Action =
   | { kind: "advance_epoch" }
   | { kind: "claim_world_epoch"; world: PublicKey }
+  | { kind: "claim_season_prize"; winner: PublicKey; rank: number }
   | { kind: "settle"; world: PublicKey; index: number; holder: PublicKey }
   | { kind: "breach"; child: PublicKey; host: PublicKey }
   | { kind: "tick"; world: PublicKey; module: PublicKey; host: PublicKey | null }
@@ -87,6 +89,17 @@ export function claimable(w: WorldAccount, curEpoch: bigint): boolean {
   return false; // skipped ≥1 epoch: window is forfeited
 }
 
+/** Unclaimed, non-zero prizes of the last closed season (bit r of lastClaimed = rank r paid). */
+export function seasonPrizes(season: SeasonAccount | undefined): Action[] {
+  if (!season) return [];
+  const out: Action[] = [];
+  season.lastTop.forEach((e, rank) => {
+    if (isDefault(e.player) || season.lastPrizes[rank] === 0n || (season.lastClaimed & (1 << rank)) !== 0) return;
+    out.push({ kind: "claim_season_prize", winner: e.player, rank });
+  });
+  return out;
+}
+
 export function plan(s: Snapshot, limits: PlanLimits = DEFAULT_LIMITS): Action[] {
   const out: Action[] = [];
   const c = s.config;
@@ -103,6 +116,9 @@ export function plan(s: Snapshot, limits: PlanLimits = DEFAULT_LIMITS): Action[]
 
   // 1. emission claims (every world, cheap, benefits all holders)
   for (const w of s.worlds) if (claimable(w.acc, curEpoch)) out.push({ kind: "claim_world_epoch", world: w.key });
+
+  // 1b. season prizes of the last closed season (permissionless; credited to the winner, not to us)
+  out.push(...seasonPrizes(s.season));
 
   // 2. foreclosures — keep the Harberger market honest
   const settles: Action[] = [];

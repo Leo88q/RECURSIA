@@ -18,9 +18,9 @@ describe("entry cost (landing numbers)", () => {
     expect(rentLamports(0)).toBe(890_880); // well-known 0-byte minimum
     expect(rentLamports(165)).toBe(2_039_280); // well-known SPL token account minimum
     const c = entryCost();
-    expect(c.rentPlayer).toBe(1_322_400);
+    expect(c.rentPlayer).toBe(1_433_760); // (128 + 78) × 6960
     expect(c.rentTerritory).toBe(2_004_480);
-    expect(c.solMax).toBe(1_322_400 + 2_004_480 + 2_039_280 + 10_000);
+    expect(c.solMax).toBe(1_433_760 + 2_004_480 + 2_039_280 + 10_000);
     expect(c.solMax / 1e9).toBeLessThan(0.0055);
   });
   it("account sizes stay in sync with the SDK layout", () => {

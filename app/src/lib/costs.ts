@@ -7,7 +7,7 @@ import { DEFAULT_PARAMS, QUANTUM_BOUNTY_DIV, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL
 
 /** Account sizes in bytes, discriminator included (8 + INIT_SPACE). */
 export const ACCOUNT_BYTES = {
-  player: 62,
+  player: 78,
   territory: 160,
   /** SPL token account: your SKR wallet (ATA), a world vault, an agent vault. */
   tokenAccount: 165,
@@ -16,7 +16,7 @@ export const ACCOUNT_BYTES = {
   permit: 156,
   module: 113,
   /** = SDK WORLD_SPACE (asserted in test; not imported: layout.ts pulls web3.js into the landing chunk). */
-  world: 2006,
+  world: 2022,
 } as const;
 
 /** Solana rent-exempt minimum: (128 header + data) × 3480 lamports/byte-year × 2 years. */

@@ -7,6 +7,7 @@ export function toInstruction(rx: RecursiaIx, cranker: PublicKey, a: Action): Tr
   switch (a.kind) {
     case "advance_epoch": return rx.advanceEpoch();
     case "claim_world_epoch": return rx.claimWorldEpoch(a.world);
+    case "claim_season_prize": return rx.claimSeasonPrize(a.winner, a.rank);
     case "settle": return rx.settle(a.world, a.index, a.holder);
     case "breach": return rx.breach(a.child, a.host);
     case "tick": return rx.tick(cranker, a.world, a.module, a.host);

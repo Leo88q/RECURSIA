@@ -20,11 +20,18 @@
  *   I9  quantum escrow (superpositions + SWAP premiums/bounties) is fully settled or still open — never leaks
  *   I10 neutral worlds stay neutral: no architect, no architect income, ever
  *   I11 player-authored laws: royalty accrues only to modules that worlds actually run
+ *   I12 sponsor pool is exact and bounded: pool == funded − paid, and no world ever got
+ *       more sponsor money than it paid into the pool that epoch (Σ ≤ totalSunk)
+ *   I13 seasons are exact and bounded: season pool == funded − paid; every prize ≤ 25% of
+ *       the winner's own season points (a prize can never exceed what the game already paid)
+ *
+ * Realism (v2): mixed AI skill (novice / skilled / pro), newcomers joining every epoch,
+ * a studio-funded sponsor pool, weekly seasons, and a per-role PnL breakdown.
  *
  * Usage: npm run econ [-- --quick] [-- --seeds N] [-- --epochs N]
  */
-import { AIAgent, type Personality } from "../src/agents.js";
-import { DEFAULT_PARAMS, MAX_ARCHITECT_FEE_BPS, ONE, PHYSICS_PRESETS, type Params } from "../src/constants.js";
+import { AIAgent, type Personality, type Skill } from "../src/agents.js";
+import { DEFAULT_PARAMS, MAX_ARCHITECT_FEE_BPS, ONE, PHYSICS_PRESETS, SEASON_PRIZE_CAP_BPS, SEASON_SHARE_BPS, SEASON_TOP, type Params } from "../src/constants.js";
 import { GameModel } from "../src/model.js";
 import { bpsFloor, epochTax } from "../src/economy.js";
 
@@ -33,13 +40,18 @@ const flag = (n: string) => argv.includes(`--${n}`);
 const opt = (n: string, d: number) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? Number(argv[i + 1]) : d; };
 const QUICK = flag("quick");
 const SEEDS = opt("seeds", QUICK ? 2 : 6);
-const EPOCHS = opt("epochs", QUICK ? 6 : 20);
+const EPOCHS = opt("epochs", QUICK ? 8 : 22); // ≥ 8 so at least one 7-epoch season closes
 const STEP = 300;
 const PARAMS: Params = { ...DEFAULT_PARAMS, epochSlots: 9_000n };
 /** Scenario amounts are written in price units (plant_cost / 5 = 70 SKR at the default SKR price list). */
 const U = PARAMS.plantCost / 5n;
 
-type Scenario = { name: string; agents: number; farmer: boolean; whales: number; permitAgents: number; quantum?: boolean; neutral?: boolean };
+type Scenario = {
+  name: string; agents: number; farmer: boolean; whales: number; permitAgents: number; quantum?: boolean; neutral?: boolean;
+  /** skill mix for the `agents` (cycled); default all skilled */ skills?: Skill[];
+  /** novice newcomers joining at every epoch boundary */ newcomers?: number;
+  /** SKR (in U) the studio puts into the sponsor pool at launch */ sponsor?: bigint;
+};
 const SCENARIOS: Scenario[] = [
   { name: "baseline", agents: 12, farmer: false, whales: 0, permitAgents: 0 },
   { name: "self-farm attack", agents: 8, farmer: true, whales: 0, permitAgents: 0 },
@@ -48,13 +60,26 @@ const SCENARIOS: Scenario[] = [
   { name: "thin market", agents: 2, farmer: false, whales: 0, permitAgents: 0 },
   { name: "quantum worlds", agents: 10, farmer: false, whales: 0, permitAgents: 0, quantum: true },
   { name: "neutral + laws", agents: 12, farmer: false, whales: 0, permitAgents: 0, quantum: true, neutral: true },
+  { name: "sponsored", agents: 12, farmer: false, whales: 0, permitAgents: 0, sponsor: 20_000n },
+  { name: "sponsored farm", agents: 8, farmer: true, whales: 0, permitAgents: 0, sponsor: 20_000n },
+  { name: "living economy", agents: 12, farmer: false, whales: 1, permitAgents: 0, quantum: true, skills: ["novice", "skilled", "pro", "novice", "skilled", "pro"], newcomers: 2, sponsor: 20_000n },
 ];
+const NEWCOMER0 = 300n; // U — a newcomer brings ~21k SKR (≈ $400)
 const PERS: Personality[] = ["gardener", "expansionist", "speculator", "demiurge"];
 const fmt = (v: bigint) => (Number(v / (ONE / 100n)) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 });
 
 interface Result {
   scenario: string; seed: number; sunk: bigint; emitted: bigint; studio: bigint; worlds: number;
   farmerPnl?: bigint; withholdGap?: bigint; qStats?: string; agentMedianPnl: bigint; agentBestPnl: bigint; permitOverspend: number; failures: string[];
+  roles: string; season: string;
+}
+
+const median = (a: bigint[]) => (a.length ? a[Math.floor(a.length / 2)] : 0n);
+const sortB = (a: bigint[]) => [...a].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+function roleLine(name: string, pnls: bigint[]): string {
+  if (!pnls.length) return "";
+  const s = sortB(pnls); const win = s.filter((x) => x > 0n).length;
+  return `${name} n=${s.length} med ${fmt(median(s))} best ${fmt(s[s.length - 1])} в плюсе ${Math.round((100 * win) / s.length)}%`;
 }
 
 function wealth(m: GameModel, id: string): bigint {
@@ -75,6 +100,12 @@ function run(sc: Scenario, seed: number): Result {
   m.addPlayer("studio", 100_000n * U);
   for (const p of PHYSICS_PRESETS) m.registerModule("studio", p.name, p.birth, p.survive, p.royaltyBps, p);
   m.addPlayer("keeper", 0n);
+  // studio baseline before any world exists: world-creation fees are studio revenue too
+  // (and the season sweep takes 25% of them, so a later baseline would under-count)
+  // The studio's own genesis fees (10 preset laws) land in its treasury; 25% of them is swept
+  // into the season-1 prize fund at the first epoch — a launch marketing budget, not operating loss.
+  const genesisSeason = bpsFloor(m.treasury, SEASON_SHARE_BPS);
+  const studio0 = m.treasury + m.players.get("studio")!.wallet - genesisSeason;
   m.addPlayer("founder", 60_000n * U);
   const qMod = (n: string) => PHYSICS_PRESETS.findIndex((p) => p.name === n);
   const worldA = m.createRootWorld("founder", "A", sc.quantum ? qMod("Quantum Foam") : 0, 1_500, 8_000n * U).id;
@@ -102,13 +133,18 @@ function run(sc: Scenario, seed: number): Result {
 
   const agents: AIAgent[] = [];
   const start = new Map<string, bigint>();
+  const role = new Map<string, string>();
   for (let i = 0; i < sc.agents; i++) {
     const id = `ai-${i}`; m.addPlayer(id, 10_000n * U, true);
-    agents.push(new AIAgent(id, PERS[i % PERS.length], seed * 7919 + i)); start.set(id, 10_000n * U);
+    const skill = sc.skills ? sc.skills[i % sc.skills.length] : "skilled";
+    agents.push(new AIAgent(id, PERS[i % PERS.length], seed * 7919 + i, undefined, { skill })); start.set(id, 10_000n * U); role.set(id, skill);
   }
+  if (sc.sponsor) { m.addPlayer("sponsor", sc.sponsor * U); m.fundSponsorPool("sponsor", sc.sponsor * U); }
+  const sponsor0 = m.sponsorPool;
+  let newcomerSeq = 0;
   for (let i = 0; i < sc.whales; i++) {
     const id = `whale-${i}`; m.addPlayer(id, 150_000n * U, true);
-    agents.push(new AIAgent(id, "speculator", seed * 104_729 + i)); start.set(id, 150_000n * U);
+    agents.push(new AIAgent(id, "speculator", seed * 104_729 + i)); start.set(id, 150_000n * U); role.set(id, "whale");
   }
   const permitCaps: { owner: string; agent: string; cap: bigint }[] = [];
   for (let i = 0; i < sc.permitAgents; i++) {
@@ -146,7 +182,10 @@ function run(sc: Scenario, seed: number): Result {
     } catch (e) { failures.push(`I4 setup: ${(e as Error).message}`); }
   }
 
-  const studio0 = m.treasury + (m.players.get("studio")!.wallet);
+  const farmW = () => m.world(farmId);
+  const keeper0 = m.players.get("keeper")!.wallet;
+  const founder0 = wealth(m, "founder");
+  const prizeChecks: string[] = [];
   const pool0 = m.rewardPool, sunk0 = m.totalSunk;
   const totalSteps = Math.ceil((EPOCHS * Number(PARAMS.epochSlots)) / STEP);
   for (let s = 0; s < totalSteps; s++) {
@@ -155,6 +194,8 @@ function run(sc: Scenario, seed: number): Result {
     if (farmId) {
       try { m.fundWorld("farmer", farmId, 300n * U); } catch { /* broke */ }
       if (!m.canTick(farmId)) { try { m.tick("farmer", farmId); } catch { /* */ } }
+      // the farmer also harvests its own cells (season points) — the worst case for I3/I13
+      farmW().territories.forEach((t, i) => { if (t.holder === "farmer" && farmW().pending[i] > 0n) { try { m.collect("farmer", farmId, i); } catch { /* */ } } });
     }
     for (const a of agents) if (a.rng.next() < 0.6) { try { a.act(m); } catch (e) { failures.push(`agent threw: ${(e as Error).message}`); } }
     // twins act in lock-step on mirrored cells: they commit at the same moments
@@ -206,12 +247,30 @@ function run(sc: Scenario, seed: number): Result {
       if (w.parent && w.resonance >= 64) { try { m.breach(w.id); } catch { /* */ } }
     }
     if (m.canAdvanceEpoch()) {
+      // keeper (permissionless): put everyone with season points on the leaderboard before the epoch closes
+      for (const id of m.players.keys()) if (m.seasonPointsOf(id) > 0n) { try { m.seasonSubmit(id); } catch { /* */ } }
+      const season = m.seasonId;
       m.advanceEpoch();
+      if (m.seasonId !== season && m.lastSeason) {
+        const ls = m.lastSeason;
+        ls.top.forEach((e, r) => { if (e.player && ls.prizes[r] > bpsFloor(e.points, SEASON_PRIZE_CAP_BPS)) prizeChecks.push(`rank ${r + 1}`); });
+        for (let r = 0; r < SEASON_TOP; r++) { try { m.claimSeasonPrize(r); } catch { /* empty rank */ } }
+      }
       for (const w of m.worlds.values()) { try { m.claimWorldEpoch(w.id); } catch { /* */ } }
       if (farmId) { try { m.claimArchitect("farmer", farmId); } catch { /* */ } }
+      // newcomers: fresh novices arrive every epoch
+      for (let k = 0; k < (sc.newcomers ?? 0); k++) {
+        const id = `new-${newcomerSeq++}`; m.addPlayer(id, NEWCOMER0 * U, true);
+        agents.push(new AIAgent(id, PERS[newcomerSeq % PERS.length], seed * 6_151 + newcomerSeq, undefined, { skill: "novice" }));
+        start.set(id, NEWCOMER0 * U); role.set(id, "newcomer");
+      }
     }
     // I6
     assert(m.rewardPool >= 0n && m.rewardPool === pool0 + (m.totalSunk - sunk0) - m.totalEmitted, "I6 reward-pool ledger mismatch");
+    // I12 / I13
+    assert(m.sponsorPool >= 0n && m.sponsorPool === sponsor0 - m.totalSponsored, "I12 sponsor-pool ledger mismatch");
+    assert(m.totalSponsored <= m.totalSunk, "I12 sponsor paid more than worlds sank");
+    assert(m.seasonPool >= 0n && m.seasonPool === m.totalSeasonFunded - m.totalSeasonPaid, "I13 season-pool ledger mismatch");
     // I7
     for (const pc of permitCaps) {
       const p = m.permits.get(`${pc.owner}:${pc.agent}`);
@@ -265,11 +324,20 @@ function run(sc: Scenario, seed: number): Result {
       + (sc.neutral ? `; SWAP offers ${swapEv.filter((e) => /предлагает/.test(e.text)).length}, accepted ${swapEv.filter((e) => /принял/.test(e.text)).length}, exchanged ${swapEv.filter((e) => /обменялись/.test(e.text)).length}; AI laws ${aiLaws.length} (used by ${aiLaws.reduce((a, x) => a + x.worldsUsing, 0)} worlds, royalty ${fmt(aiLaws.reduce((a, x) => a + x.accrued + x.totalEarned, 0n))})` : "")
     : undefined;
 
+  for (const r of prizeChecks) failures.push(`I13 season prize above 25% of points (${r})`);
   const pnls = [...start.entries()].map(([id, s0]) => wealth(m, id) - s0).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const byRole = new Map<string, bigint[]>();
+  for (const [id, s0] of start) { const r = role.get(id) ?? "delegate"; if (!byRole.has(r)) byRole.set(r, []); byRole.get(r)!.push(wealth(m, id) - s0); }
+  const roles = [...byRole.entries()].map(([r, a]) => roleLine(r, a)).filter(Boolean).join(" | ")
+    + ` | keeper +${fmt(m.players.get("keeper")!.wallet - keeper0)} | founder ${fmt(wealth(m, "founder") - founder0)}`;
+  const ls = m.lastSeason;
+  const season = `сезоны: закрыто ${m.seasonId - 1}, фонд ${fmt(m.totalSeasonFunded)}, выплачено ${fmt(m.totalSeasonPaid)}`
+    + (ls && ls.top[0].player ? ` (1-е место ${ls.top[0].player}: очки ${fmt(ls.top[0].points)} → приз ${fmt(ls.prizes[0])})` : "")
+    + ` · спонсор: выплачено ${fmt(m.totalSponsored)} из ${fmt(sponsor0)}`;
   return {
     scenario: sc.name, seed, sunk: m.totalSunk, emitted: m.totalEmitted, studio, worlds: m.worlds.size,
     farmerPnl, withholdGap, qStats, agentMedianPnl: pnls.length ? pnls[Math.floor(pnls.length / 2)] : 0n, agentBestPnl: pnls.length ? pnls[pnls.length - 1] : 0n,
-    permitOverspend: failures.filter((f) => f.startsWith("I7")).length, failures,
+    permitOverspend: failures.filter((f) => f.startsWith("I7")).length, failures, roles, season,
   };
 }
 
@@ -288,6 +356,8 @@ for (const sc of SCENARIOS) {
       r.scenario.padEnd(18), String(seed).padStart(4), String(r.worlds).padStart(6), fmt(r.sunk).padStart(12), fmt(r.emitted).padStart(12),
       `${ratio.toFixed(1)}%`.padStart(9), fmt(r.studio).padStart(11), (r.farmerPnl === undefined ? "—" : fmt(r.farmerPnl)).padStart(12), fmt(r.agentMedianPnl).padStart(14), fmt(r.agentBestPnl).padStart(12),
     ].join("  "));
+    console.log(`   👥 ${r.roles}`);
+    console.log(`   🏆 ${r.season}`);
     if (r.qStats) console.log(`   ⚛ ${r.qStats}; withholder − honest = ${r.withholdGap === undefined ? "—" : fmt(r.withholdGap)} SKR`);
     const uniq = [...new Set(r.failures)];
     for (const f of uniq.slice(0, 5)) console.log(`   ✗ ${f}`);

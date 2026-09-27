@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import {
-  BREACH_RESONANCE, ONE, PATTERNS, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS, REBELLION_MIN_VOTES, REBELLION_THRESHOLD_BPS, Rng,
+  BREACH_RESONANCE, ONE, PATTERNS, SEASON_EPOCHS, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS, REBELLION_MIN_VOTES, REBELLION_THRESHOLD_BPS, Rng,
   cellsFromPattern, epochTax, isQuantum, patternFromCells, ruleString, scoreBlockPattern, splitTick, type MSwap, type MWorld, type Personality,
 } from "@recursia/sdk";
 import { fmtRcr, YOU, type Sandbox } from "./sandbox";
 import { youify } from "./lib/format";
 import { holderColor } from "./WorldCanvas";
 import { Art, Glyph, WorldIcon, type ArtName } from "./ui/Icon";
+import { SeasonCard, SponsorCard } from "./ui/Season";
 
 const toUnits = (s: string) => { const n = Number(s.replace(",", ".")); return Number.isFinite(n) && n >= 0 ? BigInt(Math.round(n * 1e6)) : 0n; };
 const fromUnits = (v: bigint) => (Number(v) / 1e6).toString();
@@ -457,6 +458,19 @@ export function WalletPanel({ sb, notify }: { sb: Sandbox; notify: (e: string | 
         {holdings.length === 0 && <div className="muted small">Пока нет. Выберите клетку на карте.</div>}
         {holdings.map(([w, i]) => <div key={w.id + i} className="agent-row"><span>{w.name} #{i}{w.territories[i].agent && <Art name="agent" size={16} className="inline-ico" title="ИИ-агент" />}</span><span className="muted small">{w.alive[i]} клеток · {fmtRcr(w.pending[i], 2)}</span></div>)}
       </div>
+      <SeasonCard
+        seasonId={m.seasonId} epochsLeft={m.seasonStartEpoch + SEASON_EPOCHS - m.curEpoch - 1} pool={m.seasonPool}
+        top={m.seasonTop.filter((e) => e.player).map((e) => ({ label: e.player, points: e.points, you: e.player === YOU }))}
+        myPoints={m.seasonPointsOf(YOU)}
+        submitBlocked={m.seasonPointsOf(YOU) === 0n ? "Сначала соберите награды с клеток — это и есть очки" : null}
+        onSubmit={() => notify(sb.act(() => { if (!m.seasonSubmit(YOU)) throw new Error("Очков пока мало для топ-10"); }), "Очки в таблице сезона")}
+        last={m.lastSeason && { id: m.lastSeason.id, rows: m.lastSeason.top.map((e, r) => ({ label: e.player, points: e.points, you: e.player === YOU, prize: m.lastSeason!.prizes[r], claimed: m.lastSeason!.claimed[r] })) }}
+        onClaim={(r) => notify(sb.act(() => m.claimSeasonPrize(r)), "Приз зачислен победителю")} claimBlocked={null}
+        fmt={(v) => fmtRcr(v, 0)}
+      />
+      <SponsorCard pool={m.sponsorPool} fmt={(v) => fmtRcr(v, 0)} parse={(s) => { const v = toUnits(s); return v > 0n ? v : null; }}
+        blockedWhy={(a) => (a === null ? "Введите сумму" : a > me.wallet ? "Недостаточно SKR" : null)}
+        onFund={(a) => notify(sb.act(() => m.fundSponsorPool(YOU, a)), "Спасибо! Живые миры получат больше")} />
     </div>
   );
 }
@@ -471,6 +485,8 @@ export function EconomyStrip({ sb }: { sb: Sandbox }) {
       <Stat icon={<Art name="coin" size={22} />} label="Выплачено игрокам" value={short(m.totalEmitted)} sub={`${m.params.emissionRateBps / 100}% пула за эпоху`} />
       <Stat icon={<Art name="energy" size={22} />} label="Пул наград" value={short(m.rewardPool)} />
       <Stat icon={<Glyph name="vault" size={18} className="violet" />} label="Студия" value={short(m.treasury)} sub={`${m.params.protocolBps / 100}% трат`} />
+      <Stat icon={<Glyph name="crown" size={18} className="gold" />} label={`Сезон ${m.seasonId}`} value={short(m.seasonPool)} sub="призовой фонд" />
+      <Stat icon={<Glyph name="sprout" size={18} className="mint" />} label="Спонсоры" value={short(m.sponsorPool)} sub="за живые клетки" />
       <Stat icon={<Art name="nested" size={22} />} label="Вселенных" value={`${m.worlds.size}`} sub={`глубина ${Math.max(...[...m.worlds.values()].map((w) => w.depth))}`} />
     </div>
   );
@@ -483,7 +499,7 @@ function Stat({ label, value, sub, icon }: { label: string; value: string; sub?:
 /** Chronicle: a painted icon per event kind (model + sandbox kinds). */
 const EVENT_ART: Record<string, ArtName> = {
   swap: "swap", quantum: "quantum", world: "nested", foreclose: "cell", acquire: "cell", rebellion: "rebel", liberated: "rebel",
-  module: "law", epoch: "coin", breach: "breach", agent: "agent", welcome: "logo", plant: "plant", energy: "energy",
+  module: "law", epoch: "coin", season: "coin", sponsor: "plant", breach: "breach", agent: "agent", welcome: "logo", plant: "plant", energy: "energy",
 };
 const eventArt = (kind: string, text: string): ArtName =>
   kind === "quantum" && /наблюд/i.test(text) ? "observe" : kind === "quantum" && /посадил|посадка/i.test(text) ? "plant" : EVENT_ART[kind] ?? "world";
