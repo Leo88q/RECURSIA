@@ -184,6 +184,9 @@ pub struct World {
     /// Superposition stakes held in the world vault (part of the solvency ledger).
     pub quantum_escrow: u64,
     pub superpositions: u16,
+    /// Neutral world: no architect, no architect fee, no rebellion, quantum
+    /// laws only; hosts quantum swaps between players.
+    pub neutral: bool,
 }
 
 impl World {
@@ -312,4 +315,27 @@ impl Superposition {
     pub fn is_entangled(&self) -> bool {
         self.world2 != Pubkey::default()
     }
+}
+
+/// Quantum SWAP between two players' territories in a neutral world: with
+/// probability `weight_bps` the two 8×8 blocks exchange their contents. The
+/// offerer pays `premium` to the acceptor for taking the other side.
+#[account]
+#[derive(InitSpace)]
+pub struct QuantumSwap {
+    pub version: u8,
+    pub bump: u8,
+    pub world: Pubkey,
+    pub offerer: Pubkey,
+    pub acceptor: Pubkey,
+    pub index_a: u8,
+    pub index_b: u8,
+    pub weight_bps: u16,
+    pub premium: u64,
+    pub bounty: u64,
+    pub created_slot: u64,
+    pub expiry_slot: u64,
+    pub accepted: bool,
+    pub target_slot: u64,
+    pub rearms: u8,
 }

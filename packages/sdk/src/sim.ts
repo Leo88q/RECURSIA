@@ -245,6 +245,15 @@ export function orBlock(grid: Grid, idx: number, pattern: bigint): void {
   }
 }
 
+/** Exchange the contents of two 8×8 blocks (quantum SWAP gate) — mirror of `sim::swap_blocks`. */
+export function swapBlocks(grid: Grid, a: number, b: number): void {
+  a %= TERRITORIES; b %= TERRITORIES;
+  if (a === b) return;
+  const pa = blockPattern(grid, a), pb = blockPattern(grid, b);
+  writeBlock(grid, a, pb);
+  writeBlock(grid, b, pa);
+}
+
 export function blockPattern(grid: Grid, idx: number): bigint {
   const shift = BigInt((idx % 8) * 8);
   const ty = Math.floor(idx / 8);

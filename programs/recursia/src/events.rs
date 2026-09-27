@@ -142,3 +142,50 @@ pub struct Decohered {
     pub burned: u64,
     pub bounty: u64,
 }
+
+#[event]
+pub struct SwapOffered {
+    pub world: Pubkey,
+    pub offerer: Pubkey,
+    pub acceptor: Pubkey,
+    pub index_a: u8,
+    pub index_b: u8,
+    pub weight_bps: u16,
+    pub premium: u64,
+}
+
+#[event]
+pub struct SwapAccepted {
+    pub world: Pubkey,
+    pub index_a: u8,
+    pub index_b: u8,
+    pub target_slot: u64,
+}
+
+#[event]
+pub struct SwapResolved {
+    pub world: Pubkey,
+    pub index_a: u8,
+    pub index_b: u8,
+    /// Blocks exchanged.
+    pub swapped: bool,
+    /// A territory changed hands meanwhile: no swap, premium refunded.
+    pub void: bool,
+    pub entropy: [u8; 32],
+    pub bounty: u64,
+}
+
+#[event]
+pub struct SwapRearmed {
+    pub world: Pubkey,
+    pub index_a: u8,
+    pub index_b: u8,
+    pub new_target_slot: u64,
+}
+
+#[event]
+pub struct SwapCancelled {
+    pub world: Pubkey,
+    pub index_a: u8,
+    pub index_b: u8,
+}

@@ -79,6 +79,19 @@ export class RecursiaIx {
     };
   }
 
+  /** Neutral quantum world: no architect, no fee, rebellion impossible; module must be quantum. */
+  createNeutralWorld(creator: PublicKey, rootIndex: bigint, module: PublicKey, name: string, initialEnergy: bigint) {
+    const p = this.pda;
+    const world = p.rootWorld(rootIndex);
+    return {
+      world,
+      ix: this.ix("create_neutral_world", [
+        S(creator, true), W(p.config()), W(this.mint), W(module), W(world), W(p.worldVault(world)),
+        W(ata(creator, this.mint)), W(p.treasury()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
+      ], (w) => w.bytes(encodeName(name)).u64(initialEnergy)),
+    };
+  }
+
   createChildWorld(architect: PublicKey, hostWorld: PublicKey, hostTerritory: number, module: PublicKey, feeBps: number, name: string, initialEnergy: bigint) {
     const p = this.pda;
     const world = p.childWorld(hostWorld, hostTerritory);
@@ -143,6 +156,44 @@ export class RecursiaIx {
     return this.ix("quantum_decohere", [
       S(caller), W(p.config()), W(this.mint), W(world), W(p.worldVault(world)), W(p.superposition(world, index)),
       W(owner), W(ata(caller, this.mint)), R(TOKEN_PROGRAM_ID),
+    ]);
+  }
+
+  // ------------------------------------------------------------ neutral worlds: quantum SWAP
+  /** Holder of `a` offers holder of `b` to exchange blocks with probability weightBps/10000. */
+  swapOffer(offerer: PublicKey, world: PublicKey, a: number, b: number, weightBps: number, premium: bigint) {
+    const p = this.pda;
+    return this.ix("swap_offer", [
+      S(offerer, true), W(p.config()), W(this.mint), W(world), W(p.worldVault(world)),
+      R(p.territory(world, a)), R(p.territory(world, b)), W(p.swap(world, a, b)), W(p.player(offerer)),
+      W(ata(offerer, this.mint)), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
+    ], (w) => w.u8(a).u8(b).u16(weightBps).u64(premium));
+  }
+
+  swapAccept(acceptor: PublicKey, world: PublicKey, a: number, b: number) {
+    const p = this.pda;
+    return this.ix("swap_accept", [
+      S(acceptor, true), R(p.config()), R(world), W(p.swap(world, a, b)), R(p.territory(world, b)),
+      W(p.player(acceptor)), R(SystemProgram.programId),
+    ]);
+  }
+
+  /** Permissionless crank after the target slot (resolver earns the bounty). */
+  swapResolve(resolver: PublicKey, world: PublicKey, a: number, b: number, offerer: PublicKey, acceptor: PublicKey) {
+    const p = this.pda;
+    return this.ix("swap_resolve", [
+      S(resolver), R(p.config()), R(this.mint), W(world), W(p.worldVault(world)), W(p.swap(world, a, b)), W(offerer),
+      R(p.territory(world, a)), R(p.territory(world, b)), W(p.player(offerer)), W(p.player(acceptor)), W(p.claims()),
+      W(ata(resolver, this.mint)), R(SYSVAR_SLOT_HASHES), R(TOKEN_PROGRAM_ID),
+    ]);
+  }
+
+  /** Offerer before acceptance, anyone after expiry. */
+  swapCancel(caller: PublicKey, world: PublicKey, a: number, b: number, offerer: PublicKey) {
+    const p = this.pda;
+    return this.ix("swap_cancel", [
+      S(caller), R(p.config()), R(this.mint), W(world), W(p.worldVault(world)), W(p.swap(world, a, b)), W(offerer),
+      W(p.player(offerer)), W(p.claims()), W(ata(caller, this.mint)), R(TOKEN_PROGRAM_ID),
     ]);
   }
 

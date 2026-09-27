@@ -333,3 +333,22 @@ pub fn block_count(grid: &sim::Grid, idx: usize) -> u16 {
     }
     c
 }
+
+/// Manual PDA check for a territory whose index comes from another account's
+/// field (Anchor's IDL seed resolver cannot express cross-account seeds).
+pub fn check_territory_pda(t: &Account<Territory>, world: &Pubkey, program_id: &Pubkey) -> Result<()> {
+    require_keys_eq!(t.world, *world, RecursiaError::Mismatch);
+    let expected = Pubkey::create_program_address(&[SEED_TERRITORY, world.as_ref(), &[t.index], &[t.bump]], program_id)
+        .map_err(|_| RecursiaError::Mismatch)?;
+    require_keys_eq!(expected, t.key(), RecursiaError::Mismatch);
+    Ok(())
+}
+
+/// Manual PDA check for a Player account of `owner`.
+pub fn check_player_pda(p: &Account<Player>, owner: &Pubkey, program_id: &Pubkey) -> Result<()> {
+    require_keys_eq!(p.owner, *owner, RecursiaError::Mismatch);
+    let expected = Pubkey::create_program_address(&[SEED_PLAYER, owner.as_ref(), &[p.bump]], program_id)
+        .map_err(|_| RecursiaError::Mismatch)?;
+    require_keys_eq!(expected, p.key(), RecursiaError::Mismatch);
+    Ok(())
+}

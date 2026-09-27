@@ -79,6 +79,10 @@ pub mod recursia {
     ) -> Result<()> {
         world::create_root_world(ctx, architect_fee_bps, name, initial_energy)
     }
+    /// Neutral quantum world: no architect, no fees, quantum laws only.
+    pub fn create_neutral_world(ctx: Context<CreateRootWorld>, name: [u8; 32], initial_energy: u64) -> Result<()> {
+        instructions::world::create_neutral_world(ctx, name, initial_energy)
+    }
     pub fn create_child_world(
         ctx: Context<CreateChildWorld>,
         host_index: u8,
@@ -194,5 +198,19 @@ pub mod recursia {
     }
     pub fn quantum_decohere(ctx: Context<QuantumDecohere>) -> Result<()> {
         instructions::quantum::quantum_decohere(ctx)
+    }
+
+    // ---- neutral worlds: quantum outcome exchange
+    pub fn swap_offer(ctx: Context<SwapOffer>, index_a: u8, index_b: u8, weight_bps: u16, premium: u64) -> Result<()> {
+        instructions::swap::swap_offer(ctx, index_a, index_b, weight_bps, premium)
+    }
+    pub fn swap_accept(ctx: Context<SwapAccept>) -> Result<()> {
+        instructions::swap::swap_accept(ctx)
+    }
+    pub fn swap_resolve(ctx: Context<SwapResolve>) -> Result<()> {
+        instructions::swap::swap_resolve(ctx)
+    }
+    pub fn swap_cancel(ctx: Context<SwapCancel>) -> Result<()> {
+        instructions::swap::swap_cancel(ctx)
     }
 }

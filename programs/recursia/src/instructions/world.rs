@@ -100,6 +100,25 @@ pub fn create_root_world(
     name: [u8; 32],
     initial_energy: u64,
 ) -> Result<()> {
+    create_root_inner(ctx, architect_fee_bps, name, initial_energy, false)
+}
+
+/// Neutral quantum world: nobody rules it. The creator pays the creation fee
+/// and seeds the energy but gets no architect rights or fees; rebellion is
+/// meaningless (it starts liberated); only quantum laws are accepted.
+pub fn create_neutral_world(ctx: Context<CreateRootWorld>, name: [u8; 32], initial_energy: u64) -> Result<()> {
+    let m = &ctx.accounts.module;
+    require!(m.q_amp > 0 && (m.q_birth | m.q_survive) != 0, RecursiaError::NotNeutral);
+    create_root_inner(ctx, 0, name, initial_energy, true)
+}
+
+fn create_root_inner(
+    ctx: Context<CreateRootWorld>,
+    architect_fee_bps: u16,
+    name: [u8; 32],
+    initial_energy: u64,
+    neutral: bool,
+) -> Result<()> {
     require_top_level()?;
     require_active(&ctx.accounts.config)?;
     validate_name(&name)?;
@@ -141,7 +160,7 @@ pub fn create_root_world(
         0,
         0,
         index,
-        ctx.accounts.architect.key(),
+        if neutral { Pubkey::default() } else { ctx.accounts.architect.key() },
         architect_fee_bps,
         &ctx.accounts.module,
         module_key,
@@ -150,6 +169,10 @@ pub fn create_root_world(
         epoch,
     );
     w.energy = initial_energy;
+    if neutral {
+        w.neutral = true;
+        w.liberated = true;
+    }
     emit!(WorldCreated {
         world: key,
         parent: Pubkey::default(),

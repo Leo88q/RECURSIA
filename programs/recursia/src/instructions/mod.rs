@@ -4,6 +4,7 @@ pub mod common;
 pub mod module;
 pub mod quantum;
 pub mod rebellion;
+pub mod swap;
 pub mod territory;
 pub mod world;
 
@@ -12,5 +13,6 @@ pub use agent::*;
 pub use module::*;
 pub use quantum::*;
 pub use rebellion::*;
+pub use swap::*;
 pub use territory::*;
 pub use world::*;

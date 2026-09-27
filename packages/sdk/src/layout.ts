@@ -115,6 +115,8 @@ export interface WorldAccount {
   prevClaimed: boolean; resonance: number; childCount: number; rebellionId: number; rebellionVotes: number;
   rebellionDeadline: bigint; lastRebellionSlot: bigint; liberated: boolean; totalBurned: bigint;
   qBirth: number; qSurvive: number; qAmp: number; entropy: Uint8Array; quantumEscrow: bigint; superpositions: number;
+  /** Neutral quantum world: no architect, SWAP market enabled. */
+  neutral: boolean;
 }
 
 export const decodeName = (b: Uint8Array) => new TextDecoder().decode(b.slice(0, b.indexOf(0) === -1 ? 32 : b.indexOf(0)));
@@ -146,6 +148,7 @@ export function decodeWorld(data: Uint8Array): WorldAccount {
   w.rebellionId = r.u32(); w.rebellionVotes = r.u8(); w.rebellionDeadline = r.u64(); w.lastRebellionSlot = r.u64();
   w.liberated = r.bool(); w.totalBurned = r.u64();
   w.qBirth = r.u16(); w.qSurvive = r.u16(); w.qAmp = r.u8(); w.entropy = r.bytes(32); w.quantumEscrow = r.u64(); w.superpositions = r.u16();
+  w.neutral = r.bool();
   return w as WorldAccount;
 }
 
@@ -187,7 +190,8 @@ export function decodePermit(data: Uint8Array): PermitAccount {
 }
 
 /** Byte size of World per InitSpace (used by tests to catch layout drift). */
-export const WORLD_SPACE = 8 + 4 + 32 + 1 + 8 + 32 + 2 + 32 + 2 + 2 + 32 + GRID * 8 + 8 * 4 + 8 * 4 + TERRITORIES * 2 + TERRITORIES * 8 + 8 + 8 + 8 + TERRITORIES * 4 + 8 + 8 + TERRITORIES * 4 + 1 + 2 + 2 + 4 + 1 + 8 + 8 + 1 + 8;
+export const WORLD_SPACE = 8 + 4 + 32 + 1 + 8 + 32 + 2 + 32 + 2 + 2 + 32 + GRID * 8 + 8 * 4 + 8 * 4 + TERRITORIES * 2 + TERRITORIES * 8 + 8 + 8 + 8 + TERRITORIES * 4 + 8 + 8 + TERRITORIES * 4 + 1 + 2 + 2 + 4 + 1 + 8 + 8 + 1 + 8
+  + 2 + 2 + 1 + 32 + 8 + 2 + 1;
 
 export interface SuperpositionAccount {
   owner: PublicKey; world: PublicKey; index: number; world2: PublicKey; index2: number; commitment: Uint8Array;
@@ -201,5 +205,18 @@ export function decodeSuperposition(data: Uint8Array): SuperpositionAccount {
     owner: r.pubkey(), world: r.pubkey(), index: r.u8(), world2: r.pubkey(), index2: r.u8(), commitment: r.bytes(32),
     commitSlot: r.u64(), targetSlot: r.u64(), observed: r.bool(), observedSlot: r.u64(), entropy: r.bytes(32),
     revealDeadline: r.u64(), stake: r.u64(), rearms: r.u8(),
+  };
+}
+
+export interface SwapAccount {
+  world: PublicKey; offerer: PublicKey; acceptor: PublicKey; indexA: number; indexB: number; weightBps: number;
+  premium: bigint; bounty: bigint; createdSlot: bigint; expirySlot: bigint; accepted: boolean; targetSlot: bigint; rearms: number;
+}
+export function decodeSwap(data: Uint8Array): SwapAccount {
+  const r = checkDisc(data, "QuantumSwap");
+  r.u8(); r.u8();
+  return {
+    world: r.pubkey(), offerer: r.pubkey(), acceptor: r.pubkey(), indexA: r.u8(), indexB: r.u8(), weightBps: r.u16(),
+    premium: r.u64(), bounty: r.u64(), createdSlot: r.u64(), expirySlot: r.u64(), accepted: r.bool(), targetSlot: r.u64(), rearms: r.u8(),
   };
 }

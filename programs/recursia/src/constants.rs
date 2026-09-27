@@ -94,3 +94,10 @@ pub const QUANTUM_REARM_BURN_BPS: u64 = 2_500;
 pub const TUNNEL_CHANCE_256: u8 = 16;
 /// SlotHashes sysvar keeps at most this many recent entries.
 pub const SLOT_HASHES_MAX: usize = 512;
+
+// ---------------------------------------------------------------- neutral worlds / quantum swap
+pub const SEED_SWAP: &[u8] = b"swap";
+/// Offer fee = plant_cost: 1/SWAP_BOUNTY_DIV goes to whoever resolves/cancels, rest burned.
+pub const SWAP_BOUNTY_DIV: u64 = 5;
+/// An unaccepted offer expires after this many slots (then anyone may cancel it).
+pub const SWAP_OFFER_TTL_SLOTS: u64 = 21_600;

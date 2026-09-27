@@ -221,3 +221,24 @@ describe("AI agents in a quantum world", () => {
     expect(m.circulating() + m.totalBurned).toBe(TOTAL_SUPPLY);
   });
 });
+
+describe("neutral-world SWAP", () => {
+  it("swapRoll matches the Rust vector", async () => {
+    const { swapRoll } = await import("../src/quantum.js");
+    const e = new Uint8Array(32).map((_, i) => i);
+    const s = new Uint8Array(32).map((_, i) => 255 - i);
+    expect(swapRoll(e, s)).toBe(7480);
+    expect(swapRoll(new Uint8Array(32), new Uint8Array(32))).toBe(6933);
+  });
+  it("swapBlocks is an involution that moves patterns intact", async () => {
+    const { swapBlocks, writeBlock, blockPattern } = await import("../src/sim.js");
+    const g = new BigUint64Array(64);
+    writeBlock(g, 10, 0x0000000000070204n);
+    writeBlock(g, 60, 0xffn);
+    swapBlocks(g, 10, 60);
+    expect(blockPattern(g, 60)).toBe(0x0000000000070204n);
+    expect(blockPattern(g, 10)).toBe(0xffn);
+    swapBlocks(g, 60, 10);
+    expect(blockPattern(g, 10)).toBe(0x0000000000070204n);
+  });
+});

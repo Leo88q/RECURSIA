@@ -207,6 +207,22 @@ pub fn or_block(grid: &mut Grid, idx: u8, pattern: u64) {
     }
 }
 
+/// Exchange the contents of two 8×8 blocks (quantum SWAP gate).
+pub fn swap_blocks(grid: &mut Grid, a: u8, b: u8) {
+    let (a, b) = (a as usize % TERRITORIES, b as usize % TERRITORIES);
+    if a == b {
+        return;
+    }
+    let (sa, sb) = ((a % 8) * 8, (b % 8) * 8);
+    let (ya, yb) = ((a / 8) * 8, (b / 8) * 8);
+    for r in 0..8 {
+        let ba = (grid[ya + r] >> sa) & 0xff;
+        let bb = (grid[yb + r] >> sb) & 0xff;
+        grid[ya + r] = (grid[ya + r] & !(0xffu64 << sa)) | (bb << sa);
+        grid[yb + r] = (grid[yb + r] & !(0xffu64 << sb)) | (ba << sb);
+    }
+}
+
 /// Serialize rows little-endian (canonical byte form used for hashing).
 pub fn to_bytes(grid: &Grid) -> [u8; GRID * 8] {
     let mut out = [0u8; GRID * 8];
@@ -422,6 +438,36 @@ mod tests {
         assert_eq!(c.iter().filter(|&&v| v == 64).count(), 63);
         write_block(&mut g, 9, GLIDER);
         assert_eq!(territory_counts(&g)[9], 5);
+    }
+
+    #[test]
+    fn swap_blocks_exchanges_exactly_two_blocks() {
+        let mut seed = 0x5eed_u64;
+        let mut g = [0u64; GRID];
+        for r in g.iter_mut() {
+            *r = xorshift(&mut seed);
+        }
+        let before = territory_counts(&g);
+        let orig = g;
+        swap_blocks(&mut g, 3, 58);
+        let after = territory_counts(&g);
+        assert_eq!(after[3], before[58]);
+        assert_eq!(after[58], before[3]);
+        for i in 0..TERRITORIES {
+            if i != 3 && i != 58 {
+                assert_eq!(after[i], before[i]);
+            }
+        }
+        swap_blocks(&mut g, 58, 3);
+        assert_eq!(g, orig, "swap is an involution");
+        swap_blocks(&mut g, 7, 7);
+        assert_eq!(g, orig);
+        let mut h = [0u64; GRID];
+        write_block(&mut h, 10, GLIDER);
+        swap_blocks(&mut h, 10, 11);
+        let mut e = [0u64; GRID];
+        write_block(&mut e, 11, GLIDER);
+        assert_eq!(h, e, "pattern moves intact");
     }
 
     /// Cross-implementation vectors produced by the TS engine.

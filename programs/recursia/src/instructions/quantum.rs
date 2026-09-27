@@ -29,13 +29,6 @@ use crate::quantum;
 use crate::sim;
 use crate::state::*;
 
-fn check_territory_pda(t: &Account<Territory>, world: &Pubkey, program_id: &Pubkey) -> Result<()> {
-    require_keys_eq!(t.world, *world, RecursiaError::Mismatch);
-    let expected = Pubkey::create_program_address(&[SEED_TERRITORY, world.as_ref(), &[t.index], &[t.bump]], program_id)
-        .map_err(|_| RecursiaError::Mismatch)?;
-    require_keys_eq!(expected, t.key(), RecursiaError::Mismatch);
-    Ok(())
-}
 
 // ---------------------------------------------------------------- commit
 

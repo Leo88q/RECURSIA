@@ -26,6 +26,7 @@ export class Pdas {
   permit(owner: PublicKey, agent: PublicKey) { return this.f([enc("permit"), owner.toBytes(), agent.toBytes()]); }
   permitVault(permit: PublicKey) { return this.f([enc("permit_vault"), permit.toBytes()]); }
   superposition(world: PublicKey, idx: number) { return this.f([enc("superposition"), world.toBytes(), Uint8Array.of(idx)]); }
+  swap(world: PublicKey, a: number, b: number) { return this.f([enc("swap"), world.toBytes(), Uint8Array.of(a), Uint8Array.of(b)]); }
   programData() { return PublicKey.findProgramAddressSync([this.programId.toBytes()], BPF_UPGRADEABLE_LOADER)[0]; }
 }
 

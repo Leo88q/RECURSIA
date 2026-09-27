@@ -10,6 +10,9 @@ export const QUANTUM_BOUNTY_DIV = 20n;
 export const QUANTUM_REARM_BURN_BPS = 2_500n;
 export const TUNNEL_CHANCE_256 = 16;
 export const SLOT_HASHES_MAX = 512;
+/** Neutral-world SWAP market. */
+export const SWAP_BOUNTY_DIV = 5n;
+export const SWAP_OFFER_TTL_SLOTS = 21_600;
 
 const enc = new TextEncoder();
 const cat = (...parts: Uint8Array[]) => {
@@ -98,4 +101,10 @@ export function randomSalt(): Uint8Array {
   const s = new Uint8Array(32);
   globalThis.crypto.getRandomValues(s);
   return s;
+}
+
+/** Mirror of `swap_roll`: H("recursia:swap", entropy, swapPda) → u32 LE % 10000. Swap happens iff roll < weightBps. */
+export function swapRoll(entropy: Uint8Array, swap: Uint8Array): number {
+  const r = hashv(enc.encode("recursia:swap"), entropy, swap);
+  return new DataView(r.buffer, r.byteOffset, 4).getUint32(0, true) % 10_000;
 }

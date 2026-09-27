@@ -88,6 +88,18 @@ pub enum RecursiaError {
     RevealWindowClosed,
     #[msg("Revealed state does not match the commitment")]
     CommitmentMismatch,
+    #[msg("Only allowed in a neutral quantum world")]
+    NotNeutral,
+    #[msg("Swap already accepted")]
+    SwapAccepted,
+    #[msg("Swap not accepted yet")]
+    SwapNotAccepted,
+    #[msg("Swap offer expired")]
+    SwapExpired,
+    #[msg("Swap offer still open")]
+    SwapOpen,
+    #[msg("Cannot swap with yourself")]
+    SelfSwap,
     #[msg("Superposition is still coherent")]
     StillCoherent,
     #[msg("Invalid amplitude / weight")]
