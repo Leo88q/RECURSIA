@@ -1,6 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
+import { PROGRAM_ID_STR } from "./constants.js";
 
-export const PROGRAM_ID = new PublicKey("2GrrTSyT4AG58XkEjtsV18dV8RPm6AZgQSjSxguCwCik");
+export const PROGRAM_ID = new PublicKey(PROGRAM_ID_STR);
 export const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 export const SYSVAR_SLOT_HASHES = new PublicKey("SysvarS1otHashes111111111111111111111111111");

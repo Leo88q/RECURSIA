@@ -1,4 +1,3 @@
-import { Buffer } from "buffer";
 // Bit-for-bit mirror of programs/recursia/src/sim.rs.
 import { sha256 } from "@noble/hashes/sha256";
 import { GRID, TERRITORIES } from "./constants.js";
@@ -272,7 +271,7 @@ export function toBytes(grid: Grid): Uint8Array {
 }
 
 export function stateHash(grid: Grid): string {
-  return Buffer.from(sha256(toBytes(grid))).toString("hex");
+  return Array.from(sha256(toBytes(grid)), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** Same derivation as `world::bigbang` on-chain (sha256 = Solana hashv). */

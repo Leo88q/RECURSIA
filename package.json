@@ -8,7 +8,7 @@
     "keeper"
   ],
   "scripts": {
-    "test": "npm -w packages/sdk test && npm -w keeper test",
+    "test": "npm -w packages/sdk test && npm -w keeper test && npm -w app test",
     "vectors": "npm -w packages/sdk run vectors",
     "econ": "npm -w packages/sdk run econ --",
     "build": "npm -w packages/sdk run build && npm -w app run build",

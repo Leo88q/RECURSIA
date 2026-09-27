@@ -1,0 +1,12 @@
+{
+  "name": "RECURSIA — вселенные внутри вселенных",
+  "short_name": "RECURSIA",
+  "description": "Клеточная эволюция на Solana: симуляция внутри симуляции.",
+  "lang": "ru",
+  "start_url": "/#/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#07060f",
+  "theme_color": "#07060f",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

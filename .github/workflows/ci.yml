@@ -141,5 +141,17 @@ jobs:
         run: scripts/ci-run.sh econ npm run econ -- --quick
       - name: Keeper tests
         run: scripts/ci-run.sh keeper npm -w keeper test
-      - name: Client build
+      - name: Client unit tests (money parsing, router, tx math, config, CSP)
+        run: scripts/ci-run.sh app-test npm -w app test
+      - name: Deploy configs in sync with app/security.mjs
+        run: scripts/ci-run.sh app-deploy npm -w app run check:deploy
+      - name: Client build (typecheck + production bundle)
         run: scripts/ci-run.sh app-build npm -w app run build
+      - name: Bundle budget, CSP meta, _headers, no source maps
+        run: scripts/ci-run.sh app-bundle npm -w app run check:bundle
+      - name: Build with custom RPC (CSP whitelists it)
+        env: { VITE_CLUSTER: mainnet-beta, VITE_RPC_URL: "https://rpc.example.com" }
+        run: |
+          npm -w app run build >/dev/null
+          grep -q "https://rpc.example.com wss://rpc.example.com" app/dist/_headers
+          grep -q "https://rpc.example.com" app/dist/index.html

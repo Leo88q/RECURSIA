@@ -4,6 +4,7 @@ import {
   cellsFromPattern, epochTax, isQuantum, patternFromCells, ruleString, scoreBlockPattern, splitTick, type MSwap, type MWorld, type Personality,
 } from "@recursia/sdk";
 import { fmtRcr, YOU, type Sandbox } from "./sandbox";
+import { youify } from "./lib/format";
 import { holderColor } from "./WorldCanvas";
 
 const toUnits = (s: string) => { const n = Number(s.replace(",", ".")); return Number.isFinite(n) && n >= 0 ? BigInt(Math.round(n * 1e6)) : 0n; };
@@ -37,7 +38,7 @@ export function WorldTree({ sb, current, onPick }: { sb: Sandbox; current: strin
 }
 
 // ------------------------------------------------------------------ pattern editor
-export function PatternEditor({ world, idx, onPlant, disabledReason }: { world: MWorld; idx: number; onPlant: (p: bigint) => void; disabledReason: string | null }) {
+export function PatternEditor({ world, idx, onPlant, disabledReason, cost = "5 RCR" }: { world: MWorld; idx: number; onPlant: (p: bigint) => void; disabledReason: string | null; cost?: string }) {
   const [cells, setCells] = useState<boolean[][]>(() => cellsFromPattern(PATTERNS.acorn));
   const pattern = patternFromCells(cells);
   const forecast = useMemo(() => quantumForecast(world, idx, pattern), [world, world.generation, idx, pattern]);
@@ -46,7 +47,7 @@ export function PatternEditor({ world, idx, onPlant, disabledReason }: { world: 
     <div className="pattern">
       <div className="pattern-grid">
         {cells.map((row, r) => row.map((v, c) => (
-          <button key={`${r}-${c}`} className={v ? "pc on" : "pc"} onClick={() => toggle(r, c)} aria-label={`клетка ${r},${c}`} />
+          <button key={`${r}-${c}`} className={v ? "pc on" : "pc"} onClick={() => toggle(r, c)} aria-label={`клетка ${r + 1},${c + 1}`} aria-pressed={v} />
         )))}
       </div>
       <div className="pattern-side">
@@ -60,7 +61,7 @@ export function PatternEditor({ world, idx, onPlant, disabledReason }: { world: 
           {forecast.lo !== forecast.hi && <div className="muted small">⚛ квантовый разброс: точное будущее не вычислимо до появления энтропии слота</div>}
         </div>
         <button className="btn primary" disabled={!!disabledReason} title={disabledReason ?? ""} onClick={() => onPlant(pattern)}>
-          Посадить жизнь · 5 RCR (сжигается)
+          Посадить жизнь · {cost} (сжигается)
         </button>
         {disabledReason && <div className="muted small">{disabledReason}</div>}
       </div>
@@ -217,7 +218,7 @@ export function SwapCard({ sb, world, idx, notify }: { sb: Sandbox; world: MWorl
   );
 }
 
-const PATTERN_NAMES: Record<string, string> = { glider: "глайдер", lwss: "корабль", rpentomino: "R-пентамино", block: "блок", acorn: "жёлудь", beacon: "маяк" };
+export const PATTERN_NAMES: Record<string, string> = { glider: "глайдер", lwss: "корабль", rpentomino: "R-пентамино", block: "блок", acorn: "жёлудь", beacon: "маяк" };
 
 // ------------------------------------------------------------------ territory
 export function TerritoryPanel({ sb, world, idx, onDescend, notify }: { sb: Sandbox; world: MWorld; idx: number; onDescend: (id: string) => void; notify: (e: string | null, ok?: string) => void }) {
@@ -483,9 +484,9 @@ export function Chronicle({ sb, worldId }: { sb: Sandbox; worldId: string }) {
   const [only, setOnly] = useState(false);
   const ev = sb.m.events.filter((e) => !only || e.world === worldId).slice(-60).reverse();
   return (
-    <div className="chronicle">
+    <section className="chronicle" aria-label="Хроники">
       <div className="chron-head"><span>Хроники мультивселенной</span><label className="small"><input type="checkbox" checked={only} onChange={(e) => setOnly(e.target.checked)} /> только этот мир</label></div>
-      <ul>{ev.map((e, i) => <li key={i} className={`ev ${e.kind}`}><span className="ev-slot">{e.slot}</span>{e.text}</li>)}</ul>
-    </div>
+      <ul aria-live="off">{ev.map((e, i) => <li key={i} className={`ev ${e.kind}`}><span className="ev-slot">{e.slot}</span>{youify(e.text, YOU)}</li>)}</ul>
+    </section>
   );
 }

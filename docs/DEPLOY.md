@@ -13,7 +13,7 @@
 ```bash
 solana-keygen new -o target/deploy/recursia-keypair.json
 anchor keys sync          # обновит declare_id! и Anchor.toml
-# затем обновите PROGRAM_ID в packages/sdk/src/pda.ts и пересоберите
+# затем обновите PROGRAM_ID_STR в packages/sdk/src/constants.ts (или задайте VITE_PROGRAM_ID для клиента)
 ```
 
 ## 2. Сборка и проверка
@@ -67,11 +67,63 @@ RPC_URL=... KEEPER_KEYPAIR=./keeper.json npm -w keeper start
 ```
 Keeper permissionless — запускать может кто угодно, несколько независимых keeper'ов повышают живучесть.
 
-## 9. Клиент
+## 9. Клиент (фронтенд)
+
+### Конфигурация
+Все переменные — **публичные** (попадают в JS-бандл), секретов в них быть не должно. Шаблон: `app/.env.example`.
+
+| Переменная | По умолчанию | Назначение |
+|---|---|---|
+| `VITE_CLUSTER` | `devnet` | `devnet` / `testnet` / `mainnet-beta` / `localnet` — подписи в UI, ссылки эксплорера |
+| `VITE_RPC_URL` | публичный RPC кластера | свой RPC для продакшена (Helius/Triton/…); только `https://` |
+| `VITE_WS_URL` | из RPC | отдельный websocket, если провайдер его требует |
+| `VITE_PROGRAM_ID` | `PROGRAM_ID_STR` из SDK | адрес вашей программы |
+| `VITE_MAX_PRIORITY_FEE` | `500000` | жёсткий потолок priority fee, µ-lamports/CU |
+
+Конфигурация валидируется при старте (`app/src/lib/config.ts`): http-RPC вне localnet, логин/пароль в URL,
+неверный base58 — клиент покажет экран ошибки вместо тихой поломки. RPC-ключ в URL виден всем:
+используйте провайдера с allow-list по домену (Origin) и лимитами.
+
+### Сборка
 ```bash
-VITE_RPC_URL=https://<ваш RPC> VITE_PROGRAM_ID=<PROGRAM_ID> npm -w app run build
+VITE_CLUSTER=mainnet-beta VITE_RPC_URL=https://<ваш RPC> VITE_PROGRAM_ID=<PROGRAM_ID> npm -w app run build
+npm -w app run check:bundle     # бюджет бандла, CSP-meta, _headers, отсутствие source maps
 ```
-Кастомный RPC автоматически попадает в CSP. Раздавайте `app/dist` со статического хостинга с HTTPS, HSTS, DNSSEC и registry lock на домене.
+Результат — статический `app/dist` (hash-роутинг `#/…`, поэтому серверные rewrite не нужны; работает и с IPFS/Arweave-зеркал).
+Первый экран (песочница) ≈ 115 KB gzip; кошелёк + web3 (≈ 150 KB gzip) грузятся лениво только в ончейн-режиме.
+
+### Заголовки безопасности
+Единый источник — `app/security.mjs` (CSP, HSTS, X-Frame-Options, Referrer-Policy, Permissions-Policy, COOP/CORP).
+Из него генерируются:
+- `<meta http-equiv="Content-Security-Policy">` в `index.html` (при сборке);
+- `dist/_headers` — Netlify / Cloudflare Pages подхватывают автоматически;
+- `app/vercel.json` — Vercel (Root Directory = `app`);
+- `app/deploy/nginx.conf` — nginx / Docker.
+
+`npm -w app run check:deploy` (в CI) падает, если закоммиченные `vercel.json`/`nginx.conf` разошлись с `security.mjs`.
+После смены политики: `node app/scripts/gen-deploy.mjs`. Кастомный `VITE_RPC_URL`/`VITE_WS_URL` автоматически
+добавляется в `connect-src` в `_headers` и meta; для Vercel со своим RPC перегенерируйте `vercel.json` с этими переменными.
+
+### Хостинг
+| Платформа | Как |
+|---|---|
+| Cloudflare Pages / Netlify | build `npm ci --ignore-scripts && npm -w app run build`, output `app/dist` (`_headers` уже внутри) |
+| Vercel | Root Directory `app`, настройки из `app/vercel.json` |
+| Docker | `docker build -f app/Dockerfile --build-arg VITE_CLUSTER=mainnet-beta --build-arg VITE_RPC_URL=https://… -t recursia-app .` → `docker run -p 8080:8080 recursia-app` (nginx без root, `/healthz`, CSP собирается под ваш RPC) |
+
+### Домен (обязательно для mainnet)
+DNSSEC, registry lock, CAA-записи, HSTS preload (`hstspreload.org`), отдельный домен без сторонних скриптов/аналитики.
+PROGRAM_ID публикуется в README и на сайте; кошелёк показывает вызываемую программу, превью транзакции — тоже.
+
+### Что делает клиент ради безопасности игрока
+- каждая транзакция: симуляция → превью (изменение RCR/SOL из post-state симуляции, CU, комиссия, список программ, логи) → подпись;
+- allow-list программ (RECURSIA, Compute Budget, ATA, System) — инструкции чужих программ отвергаются до симуляции;
+- свежий blockhash в момент подписи, ребродкаст до подтверждения или истечения `lastValidBlockHeight`;
+- приоритетная комиссия по перцентилю `getRecentPrioritizationFees` с жёстким потолком;
+- ошибки Anchor → понятные сообщения (`packages/sdk/src/errors.ts`, сверяются с `errors.rs` в тестах);
+- лимиты цены (slippage) зашиты в инструкции, а не в UI;
+- секреты суперпозиций только в браузере, экспорт/импорт с проверкой владельца;
+- нет автоподписи, нет сторонней телеметрии, нет `eval`/inline-скриптов.
 
 ## 10. Перед mainnet (чек-лист)
 - [ ] Внешний аудит программы (+ исправления, повторная проверка).
@@ -80,3 +132,4 @@ VITE_RPC_URL=https://<ваш RPC> VITE_PROGRAM_ID=<PROGRAM_ID> npm -w app run bu
 - [ ] Bug bounty (Immunefi или аналог).
 - [ ] Verified build опубликован, upgrade authority = multisig.
 - [ ] Мониторинг: алерты на `propose`, смену upgrade authority, аномальные выводы.
+- [ ] Фронтенд: свой RPC с allow-list домена, заголовки проверены (securityheaders.com), DNSSEC/registry lock/CAA, HSTS preload, базовые образы Docker закреплены по digest.

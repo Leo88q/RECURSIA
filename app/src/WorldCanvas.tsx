@@ -8,9 +8,9 @@ export function holderHue(holder: string): number {
   return Math.abs(h) % 360;
 }
 
-export function holderColor(holder: string | null, alpha = 1): string {
+export function holderColor(holder: string | null, alpha = 1, you: string = YOU): string {
   if (!holder) return `rgba(210, 220, 255, ${alpha})`;
-  if (holder === YOU || holder.startsWith("ваш-")) return `rgba(255, 214, 107, ${alpha})`;
+  if (holder === you || holder === YOU || holder.startsWith("ваш-")) return `rgba(255, 214, 107, ${alpha})`;
   return `hsla(${holderHue(holder)}, 85%, 66%, ${alpha})`;
 }
 
@@ -23,14 +23,21 @@ interface Props {
   zoomFrom: number | null;
   /** Territories currently in superposition (drawn as shimmering ψ frames). */
   superposed?: number[];
+  /** Holder id rendered as "you" (gold). Sandbox: "Вы"; live mode: wallet pubkey. */
+  youKey?: string;
 }
+
+const holderLabel = (h: string | null, you: string) => (!h ? "свободна" : h === you ? "ваша" : h.length > 20 ? `${h.slice(0, 4)}…${h.slice(-4)}` : h);
 
 const SIZE = 640;
 const CELL = SIZE / 64;
 
-export function WorldCanvas({ world, selected, onSelect, onDescend, frame, zoomFrom, superposed = [] }: Props) {
+const reducedMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+export function WorldCanvas({ world, selected, onSelect, onDescend, frame: rawFrame, zoomFrom, superposed = [], youKey = YOU }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [hover, setHover] = useState<number | null>(null);
+  const frame = reducedMotion ? 0 : rawFrame;
 
   useEffect(() => {
     const c = ref.current;
@@ -46,7 +53,7 @@ export function WorldCanvas({ world, selected, onSelect, onDescend, frame, zoomF
     world.territories.forEach((t, i) => {
       const tx = (i % 8) * 8 * CELL, ty = Math.floor(i / 8) * 8 * CELL;
       if (t.holder) {
-        ctx.fillStyle = holderColor(t.holder, t.holder === YOU ? 0.13 : 0.08);
+        ctx.fillStyle = holderColor(t.holder, t.holder === youKey ? 0.13 : 0.08, youKey);
         ctx.fillRect(tx, ty, 8 * CELL, 8 * CELL);
       }
     });
@@ -57,7 +64,7 @@ export function WorldCanvas({ world, selected, onSelect, onDescend, frame, zoomF
       for (let x = 0; x < 64; x++) {
         if (!getCell(world.grid, x, y)) continue;
         const idx = (y >> 3) * 8 + (x >> 3);
-        ctx.fillStyle = holderColor(owners[idx], 0.95);
+        ctx.fillStyle = holderColor(owners[idx], 0.95, youKey);
         ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
       }
     }
@@ -117,7 +124,7 @@ export function WorldCanvas({ world, selected, onSelect, onDescend, frame, zoomF
     };
     if (hover !== null && hover !== selected) box(hover, "rgba(255,255,255,0.35)", 1.5);
     if (selected !== null) box(selected, "rgba(255, 214, 107, 0.95)", 2.5);
-  }, [world, world.generation, selected, hover, frame, superposed.join(",")]);
+  }, [world, world.generation, selected, hover, frame, superposed.join(","), youKey]);
 
   const idxAt = (e: React.MouseEvent) => {
     const r = (e.target as HTMLCanvasElement).getBoundingClientRect();
@@ -125,6 +132,25 @@ export function WorldCanvas({ world, selected, onSelect, onDescend, frame, zoomF
     const y = Math.floor(((e.clientY - r.top) / r.height) * 8);
     return Math.max(0, Math.min(63, y * 8 + x));
   };
+
+  const onKey = (e: React.KeyboardEvent) => {
+    const cur = selected ?? hover ?? 27;
+    const x = cur % 8, y = Math.floor(cur / 8);
+    const move: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    if (move[e.key]) {
+      e.preventDefault();
+      const [dx, dy] = move[e.key];
+      const nx = Math.max(0, Math.min(7, x + dx)), ny = Math.max(0, Math.min(7, y + dy));
+      onSelect(ny * 8 + nx);
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      const t = world.territories[cur];
+      if (selected === cur && t.childWorld) onDescend(t.childWorld); else onSelect(cur);
+    }
+  };
+  const sel = selected !== null ? world.territories[selected] : null;
+  const label = `Карта мира «${world.name}», 8 на 8 клеток. Стрелки — выбор клетки, Enter — войти во вложенную вселенную.`
+    + (selected !== null && sel ? ` Выбрана клетка ${selected}: ${world.alive[selected]} живых, ${sel.holder ? (sel.holder === youKey ? "ваша" : "занята") : "свободна"}${sel.childWorld ? ", содержит вселенную" : ""}.` : "");
 
   const origin = zoomFrom !== null ? `${((zoomFrom % 8) + 0.5) * 12.5}% ${(Math.floor(zoomFrom / 8) + 0.5) * 12.5}%` : "50% 50%";
   return (
@@ -134,14 +160,18 @@ export function WorldCanvas({ world, selected, onSelect, onDescend, frame, zoomF
         ref={ref}
         className={zoomFrom !== null ? "world-canvas zoom-in" : "world-canvas"}
         style={{ transformOrigin: origin }}
+        tabIndex={0}
+        role="img"
+        aria-label={label}
+        onKeyDown={onKey}
         onMouseMove={(e) => setHover(idxAt(e))}
         onMouseLeave={() => setHover(null)}
         onClick={(e) => onSelect(idxAt(e))}
         onDoubleClick={(e) => { const t = world.territories[idxAt(e)]; if (t.childWorld) onDescend(t.childWorld); }}
       />
       {hover !== null && (
-        <div className="hover-tip">
-          #{hover} · {world.alive[hover]} клеток · {world.territories[hover].holder ?? "свободна"}
+        <div className="hover-tip" aria-hidden="true">
+          #{hover} · {world.alive[hover]} клеток · {holderLabel(world.territories[hover].holder, youKey)}
           {world.territories[hover].childWorld ? " · ⧉ вселенная (двойной клик)" : ""}
         </div>
       )}

@@ -4,6 +4,8 @@
 import { sha256 } from "@noble/hashes/sha256";
 import { PublicKey } from "@solana/web3.js";
 import { GRID, TERRITORIES, type Params } from "./constants.js";
+import { decodeName, encodeName } from "./names.js";
+export { decodeName, encodeName };
 
 export const accountDiscriminator = (name: string) => sha256(new TextEncoder().encode(`account:${name}`)).slice(0, 8);
 export const ixDiscriminator = (name: string) => sha256(new TextEncoder().encode(`global:${name}`)).slice(0, 8);
@@ -117,15 +119,6 @@ export interface WorldAccount {
   qBirth: number; qSurvive: number; qAmp: number; entropy: Uint8Array; quantumEscrow: bigint; superpositions: number;
   /** Neutral quantum world: no architect, SWAP market enabled. */
   neutral: boolean;
-}
-
-export const decodeName = (b: Uint8Array) => new TextDecoder().decode(b.slice(0, b.indexOf(0) === -1 ? 32 : b.indexOf(0)));
-export function encodeName(s: string): Uint8Array {
-  // strip invisible / control chars before encoding (#76)
-  const clean = s.replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, "");
-  const b = new TextEncoder().encode(clean);
-  if (b.length === 0 || b.length > 32) throw new Error("name must be 1..32 bytes");
-  const out = new Uint8Array(32); out.set(b); return out;
 }
 
 export function decodeWorld(data: Uint8Array): WorldAccount {

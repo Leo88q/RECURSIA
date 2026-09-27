@@ -8,3 +8,4 @@ export * from "./model.js";
 export * from "./agents.js";
 export * from "./quantum.js";
 export * from "./physics.js";
+export * from "./errors.js";

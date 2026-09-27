@@ -1,4 +1,6 @@
 // Mirrors programs/recursia/src/constants.rs — keep in sync (checked by tests).
+/** Program id as a plain string (no web3 import — keeps light bundles light). */
+export const PROGRAM_ID_STR = "2GrrTSyT4AG58XkEjtsV18dV8RPm6AZgQSjSxguCwCik";
 export const GRID = 64;
 export const TERRITORIES = 64;
 export const MAX_DEPTH = 7;

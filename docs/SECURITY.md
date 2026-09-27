@@ -160,12 +160,12 @@
 | SWAP: гонки и дубли | ✅🧪 | одна сделка на упорядоченную пару (PDA `init`); `swap_resolve`/`swap_cancel` закрывают аккаунт; премия — pull-платёж в `claims_vault` → `Player.claimable`; бонус резолвера из эскроу, не из воздуха |
 | Законы игроков | ✅🧪 | клиентская `lawError` зеркалит контракт (тест «lawError mirrors the contract»); роялти ≤ 5% и неизменяемо; модуль в модели собирается только из явных полей (регресс «наследование `accrued` родителя» пойман инвариантом claims в тесте) |
 | Fuzz / invariant тесты | 🧪/⚠️ | инварианты в модели + econ-sim + векторы Rust↔TS. **Trident-фаззинг самого Rust-кода не подключён** — рекомендуется перед мейннетом |
-| simulateTransaction-превью перед подписью | ✅ | `app/src/chain.tsx`: каждая транзакция симулируется, пользователю показываются логи/ошибка до подписи; keeper тоже симулирует |
-| CSP | ✅ | строгий CSP в prod-сборке (`app/vite.config.ts`), `object-src 'none'`, `frame-ancestors 'self'`; кастомный RPC добавляется в allow-list явно |
+| simulateTransaction-превью перед подписью | ✅ | `app/src/chain/tx.tsx`: симуляция → превью (изменение RCR/SOL из post-state симуляции, CU, комиссия, программы, логи, расшифрованная ошибка) → подпись со свежим blockhash; кнопка «Подписать» заблокирована при ошибке симуляции; покрыто компонентными тестами `app/test/tx.test.tsx`; keeper тоже симулирует |
+| CSP | ✅ | единый источник `app/security.mjs`: CSP без inline/eval-скриптов, `object-src 'none'`, `frame-ancestors 'none'`, `base-uri 'none'` + HSTS/XFO/Referrer/Permissions/COOP; meta в сборке, `_headers`, `vercel.json`, `nginx.conf` (CI проверяет синхронность); кастомный RPC попадает в `connect-src` автоматически |
 | Pinning npm, lockfile, запрет install-скриптов | ✅🧪 | `.npmrc`: `save-exact`, `ignore-scripts`; `npm ci`; `npm audit` в CI |
 | Supply chain @solana/web3.js 1.95.6/1.95.7 (бэкдор) | ✅🧪 | зафиксирована версия **1.99.0**; CI проверяет, что скомпрометированных версий нет в дереве |
 | Утечка ключей | ✅📋 | `.gitignore` для ключей и `.env`; keeper читает ключ из файла с проверкой прав 600, никогда не логирует |
-| DNS hijack фронтенда | 📋 | DNSSEC + registry lock, CAA; фронт не хранит секретов; на сайте опубликован PROGRAM_ID, кошелёк показывает, какую программу вызываем |
+| DNS hijack фронтенда | ✅/📋 | в клиенте: allow-list программ в пайплайне транзакций (чужие инструкции отвергаются), PROGRAM_ID в каждом превью, HSTS preload, CSP; операционно (📋): DNSSEC + registry lock, CAA, см. `docs/DEPLOY.md` §9 |
 | NFT как авторизация | ⚪ | авторизация только по подписи и PDA; NFT в игре нет |
 | NFT authorities | ⚪ | NFT нет |
 
@@ -179,7 +179,7 @@
 | Лимиты в контракте, а не в промпте | ✅ | `AgentPermit`: scope (plant/acquire), `max_spend_per_epoch`, `max_price`, `allowed_world`, срок ≤ 30 дней, отдельный vault; `charge_permit` в `P/instructions/common.rs` |
 | Confused deputy | ✅ | агент тратит **только** vault своего permit'а; территории записываются на владельца; вывести средства агент не может — только владелец (`withdraw_permit`/`revoke_permit`) |
 | Memory poisoning | ✅ | у агентов нет памяти вне ончейн-состояния; состояние каждый раз читается заново |
-| Auto-approve | ✅ | клиент никогда не подписывает сам: всегда превью + подтверждение в кошельке; keeper подписывает только инструкции из allow-list программ |
+| Auto-approve | ✅ | клиент никогда не подписывает сам: всегда превью + явный клик + подтверждение в кошельке (тест «nothing signed before the user clicks»); `autoConnect` лишь переподключает ранее выбранный кошелёк; keeper подписывает только инструкции из allow-list программ |
 | MCP tool poisoning | ⚪/📋 | проект не поставляет MCP-сервер; если появится — только read-only инструменты, транзакции подписываются человеком |
 | Скорость эксплуатации ИИ | ✅ | ущерб от скомпрометированного агента ограничен лимитом эпохи; пауза гейм-плея доступна multisig'у без timelock (но не двигает средства) |
 | ИИ-брендированные дрейнеры | 📋 | в UI и README: официальный домен, PROGRAM_ID, «мы никогда не просим seed-фразу»; приложение запрашивает только подпись транзакций своей программы |
