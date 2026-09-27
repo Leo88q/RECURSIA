@@ -3,6 +3,12 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "17 1 * * *" # nightly deep fuzz (runs on the default branch)
+  workflow_dispatch:
+    inputs:
+      fuzz_seeds: { description: "space-separated fuzz seeds (empty = derived from the date)", required: false, default: "" }
+      fuzz_steps: { description: "steps per fuzz walk", required: false, default: "1500" }
 
 permissions:
   contents: read
@@ -137,6 +143,12 @@ jobs:
         env: { REQUIRE_SO: "1", CHAIN_TRACE: "1", RUST_BACKTRACE: "1" }
         working-directory: tests/chain
         run: ../../scripts/ci-run.sh chain-test npx vitest run --pool=forks --no-file-parallelism
+      - name: Deep fuzz — fresh seeds, long walks (nightly / manual)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          FUZZ_SEEDS: ${{ github.event.inputs.fuzz_seeds }}
+          FUZZ_STEPS: ${{ github.event.inputs.fuzz_steps || '1500' }}
+        run: scripts/fuzz-nightly.sh
 
   so-blob:
     # Debug aid, only when the anchor job failed: publish the compiled program as an unreferenced git blob so a

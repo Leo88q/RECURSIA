@@ -1,7 +1,7 @@
 /** On-chain money invariants of the deployed program (shared by the lifecycle test and the fuzzer). */
 import { expect } from "vitest";
 import { PublicKey } from "@solana/web3.js";
-import { TOURNAMENT_TIERS } from "@recursia/sdk";
+import { TERRITORIES, TOURNAMENT_TIERS, decodeSuperposition, decodeSwap } from "@recursia/sdk";
 import type { Chain } from "./harness.js";
 
 export type Ledger = {
@@ -9,6 +9,8 @@ export type Ledger = {
   rewardFunded: bigint;
   players: PublicKey[];
   worlds: PublicKey[];
+  /** open swap PDAs' (world, a, b) — needed for the exact quantum-escrow check */
+  swaps?: { world: PublicKey; a: number; b: number }[];
 };
 
 export function checkInvariants(c: Chain, l: Ledger, step: string) {
@@ -34,6 +36,21 @@ export function checkInvariants(c: Chain, l: Ledger, step: string) {
     const a = c.world(w);
     const need = a.energy + a.rewardsReserved + a.deposits + a.architectAccrued + a.quantumEscrow;
     expect(c.bal(c.pda.worldVault(w)) >= need, `${step}: world vault solvent (${c.bal(c.pda.worldVault(w))} < ${need})`).toBe(true);
+    // EXACT sub-ledgers (not just ≥): tax deposits and quantum escrow are fully attributed
+    let deposits = 0n, escrow = 0n;
+    for (let i = 0; i < TERRITORIES; i++) {
+      const t = c.territory(w, i);
+      if (t && !t.holder.equals(PublicKey.default)) deposits += t.deposit;
+      const sp = c.account(c.pda.superposition(w, i), decodeSuperposition);
+      if (sp) escrow += sp.stake;
+    }
+    for (const s of l.swaps ?? []) {
+      if (!s.world.equals(w)) continue;
+      const sw = c.account(c.pda.swap(w, s.a, s.b), decodeSwap);
+      if (sw) escrow += sw.premium + sw.bounty;
+    }
+    expect(deposits, `${step}: world.deposits == Σ territory deposits`).toBe(a.deposits);
+    if (l.swaps) expect(escrow, `${step}: quantum escrow == Σ stakes + Σ swap escrow`).toBe(a.quantumEscrow);
     // reserved rewards == Σ pending of its territories
     const pending = a.territoryPending.reduce((x, y) => x + y, 0n);
     expect(pending, `${step}: Σ territory pending == rewards reserved`).toBe(a.rewardsReserved);
