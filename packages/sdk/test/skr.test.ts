@@ -46,8 +46,8 @@ describe("SKR economy (defaults mirror programs/recursia/src/state.rs)", () => {
     const poolBefore = m.rewardPool;
     m.advanceEpoch();
     const reward = m.claimWorldEpoch(w.id);
-    // capped at 90% of what this world paid INTO the pool (studio share never returns)
-    expect(reward).toBeLessThanOrEqual(w.sinkPrev * 9_000n / 10_000n);
+    // rebate ≤ 100% of what this world paid INTO the pool (+ efficiency ≤ 200% only for live owned cells)
+    expect(reward).toBeLessThanOrEqual(w.sinkPrev * 30_000n / 10_000n);
     expect(reward).toBeGreaterThan(0n);
     expect(m.rewardPool).toBe(poolBefore - reward);
     expect(m.circulating()).toBe(m.supply);

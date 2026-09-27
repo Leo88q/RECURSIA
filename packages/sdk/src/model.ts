@@ -7,10 +7,11 @@ import {
   BREACH_POPULATION, BREACH_RESONANCE, DEFAULT_PARAMS, MAX_ARCHITECT_FEE_BPS, MAX_DEPTH, MAX_PRICE, ONE,
   PLANT_COOLDOWN_TICKS, PRICE_CHANGE_COOLDOWN_SLOTS, REBELLION_COOLDOWN_SLOTS, REBELLION_MIN_VOTES,
   REBELLION_THRESHOLD_BPS, SEASON_EPOCHS, SEASON_RANK_BPS, SEASON_SHARE_BPS, SEASON_TOP, SKR_SUPPLY_APPROX,
-  SPONSOR_CAP_BPS, SPONSOR_RATE_BPS, TERRITORIES, type Params,
+  SPONSOR_CAP_BPS, SPONSOR_RATE_BPS, TERRITORIES, EFFICIENCY_CAP_BPS, EFFICIENCY_SHARE_BPS, TOURNAMENT_JOIN_EPOCHS,
+  TOURNAMENT_MAX_PLAYERS, TOURNAMENT_RAKE_BPS, TOURNAMENT_TIERS, TOURNAMENT_TOP, type Params,
 } from "./constants.js";
 import {
-  bpsFloor, distribute, epochTax, harbergerDue, leaderboardInsert, seasonPrize, splitSpend, splitTick, worldEmission, worldSponsor,
+  bpsFloor, distribute, epochTax, harbergerDue, leaderboardInsert, seasonPrize, tournamentPlaces, tournamentPrizes, splitSpend, splitTick, worldEmission, worldSponsor,
   type LeaderEntry,
 } from "./economy.js";
 import { bigbang, GLIDER, orBlock, population, stepNQ, swapBlocks, territoryCounts, writeBlock, type Grid } from "./sim.js";
@@ -60,6 +61,10 @@ export interface MPlayer {
   /** Season the points belong to; points = SKR collected from life (rewards + host tax). */
   seasonId: number; seasonPoints: bigint;
 }
+export interface MTournament {
+  seasonId: number; tier: number; entryFee: bigint; players: string[]; pot: bigint;
+  top: LeaderEntry<string>[]; settled: boolean; prizes: bigint[]; claimed: boolean[];
+}
 export interface MSeasonResult { id: number; top: LeaderEntry<string>[]; prizes: bigint[]; claimed: boolean[] }
 const emptyTop = (): LeaderEntry<string>[] => Array.from({ length: SEASON_TOP }, () => ({ player: "", points: 0n }));
 export interface MPermit { owner: string; agent: string; vault: bigint; maxSpendPerEpoch: bigint; maxPrice: bigint; spent: bigint; spendEpoch: number; expirySlot: number; scope: number }
@@ -85,6 +90,10 @@ export class GameModel {
   seasonPool = 0n; treasurySeen = 0n; seasonId = 1; seasonStartEpoch = 1; totalSeasonFunded = 0n; totalSeasonPaid = 0n;
   seasonTop: LeaderEntry<string>[] = emptyTop();
   lastSeason: MSeasonResult | null = null;
+  // efficiency share (Config.prev_eff_claimed) & tournaments
+  prevEffClaimed = 0n; totalEfficiency = 0n;
+  tournamentPool = 0n; totalTournamentFees = 0n; totalTournamentPaid = 0n;
+  tournaments = new Map<string, MTournament>();
   events: GameEvent[] = [];
   paused = false;
   superpositions = new Map<string, MSuperposition>();
@@ -330,7 +339,7 @@ export class GameModel {
     req(this.canAdvanceEpoch(), "epoch not over");
     const emission = this.curTotalSink === 0n ? 0n : bpsFloor(this.rewardPool, this.params.emissionRateBps);
     const sponsorBudget = this.curTotalScore === 0n || this.curTotalSink === 0n ? 0n : bpsFloor(this.sponsorPool, SPONSOR_RATE_BPS);
-    this.prevTotalSink = this.curTotalSink; this.prevEmission = emission; this.prevClaimed = 0n;
+    this.prevTotalSink = this.curTotalSink; this.prevEmission = emission; this.prevClaimed = 0n; this.prevEffClaimed = 0n;
     this.prevTotalScore = this.curTotalScore; this.prevSponsorBudget = sponsorBudget; this.prevSponsorClaimed = 0n; this.curTotalScore = 0n;
     this.curTotalSink = 0n; this.curEpoch++; this.epochStart = this.slot;
     // season share of new studio inflow (treasury → season pool)
@@ -344,7 +353,10 @@ export class GameModel {
     const w = this.world(id);
     this.rollEpoch(w);
     req(!w.prevClaimed && w.prevEpochId + 1 === this.curEpoch, "claim window");
-    const reward = worldEmission(this.prevEmission, this.prevTotalSink, w.sinkPrev, this.params.rebateCapBps, this.prevClaimed);
+    const effBudget = bpsFloor(this.prevEmission, EFFICIENCY_SHARE_BPS);
+    const rebate = worldEmission(this.prevEmission - effBudget, this.prevTotalSink, w.sinkPrev, this.params.rebateCapBps, this.prevClaimed);
+    const efficiency = worldSponsor(effBudget, this.prevTotalScore, w.scoreOwnedPrev, w.sinkPrev, EFFICIENCY_CAP_BPS, this.prevEffClaimed);
+    const reward = rebate + efficiency;
     const sponsor = worldSponsor(this.prevSponsorBudget, this.prevTotalScore, w.scoreOwnedPrev, w.sinkPrev, SPONSOR_CAP_BPS, this.prevSponsorClaimed);
     const total = reward + sponsor;
     req(total > 0n, "nothing to claim");
@@ -353,7 +365,7 @@ export class GameModel {
     const { shares, rest } = distribute(total, w.scoresPrev, owned);
     shares.forEach((s, i) => { if (s > 0n) { w.pending[i] += s; w.rewardsReserved += s; } });
     w.energy += rest;
-    this.prevClaimed += reward; this.totalEmitted += reward;
+    this.prevClaimed += rebate; this.prevEffClaimed += efficiency; this.totalEfficiency += efficiency; this.totalEmitted += reward;
     this.prevSponsorClaimed += sponsor; this.totalSponsored += sponsor;
     this.rewardPool -= reward; this.sponsorPool -= sponsor; w.vault += total;
     this.check();
@@ -361,6 +373,67 @@ export class GameModel {
   }
 
   // --------------------------------------------------------------- seasons
+  // ----------------------------------------------------------- tournaments
+  tournament(seasonId: number, tier: number): MTournament | undefined { return this.tournaments.get(`${seasonId}:${tier}`); }
+  canJoinTournament(id: string, tier: number): string | null {
+    if (tier < 0 || tier >= TOURNAMENT_TIERS.length) return "unknown tier";
+    if (this.curEpoch >= this.seasonStartEpoch + TOURNAMENT_JOIN_EPOCHS) return "registration closed";
+    const t = this.tournament(this.seasonId, tier);
+    if (t && t.players.length >= TOURNAMENT_MAX_PLAYERS) return "tournament full";
+    if (t && t.players.includes(id)) return "already joined";
+    const fee = t ? t.entryFee : this.params.plantCost * TOURNAMENT_TIERS[tier];
+    if (this.pl(id).wallet < fee) return "insufficient balance";
+    return null;
+  }
+  /** Mirror of `tournament_join`: fee → 10% treasury, 90% pot. */
+  joinTournament(id: string, tier: number) {
+    const why = this.canJoinTournament(id, tier); req(why === null, why ?? "");
+    const key = `${this.seasonId}:${tier}`;
+    let t = this.tournaments.get(key);
+    if (!t) {
+      t = { seasonId: this.seasonId, tier, entryFee: this.params.plantCost * TOURNAMENT_TIERS[tier], players: [], pot: 0n,
+        top: Array.from({ length: TOURNAMENT_TOP }, () => ({ player: "", points: 0n })), settled: false, prizes: [], claimed: [] };
+      this.tournaments.set(key, t);
+    }
+    const fee = t.entryFee, rake = bpsFloor(fee, TOURNAMENT_RAKE_BPS);
+    this.pl(id).wallet -= fee;
+    this.treasury += rake; t.pot += fee - rake; this.tournamentPool += fee - rake; this.totalTournamentFees += fee;
+    t.players.push(id);
+    this.log("tournament", `${id} вступил в турнир сезона ${t.seasonId} (взнос ${fmtT(fee)}, банк ${fmtT(t.pot)})`);
+    this.check();
+  }
+  /** Mirror of `tournament_submit` (permissionless). */
+  tournamentSubmit(id: string, tier: number): boolean {
+    const t = this.tournament(this.seasonId, tier);
+    req(t && t.players.includes(id), "not an entrant");
+    const p = this.pl(id);
+    req(p.seasonId === t.seasonId && p.seasonPoints > 0n, "no season points");
+    return leaderboardInsert(t.top, { player: id, points: p.seasonPoints }, (k) => k === "", (a, b) => a === b);
+  }
+  /** Mirror of `tournament_settle`: after the season closed; unpaid places → reward pool. */
+  settleTournament(seasonId: number, tier: number) {
+    const t = this.tournament(seasonId, tier);
+    req(t && this.seasonId > t.seasonId, "tournament running");
+    req(!t.settled, "already settled");
+    const filled = t.top.filter((e) => e.player && e.points > 0n).length;
+    const k = Math.min(tournamentPlaces(t.players.length), filled);
+    const { prizes, rest } = tournamentPrizes(t.pot, k);
+    t.prizes = prizes; t.claimed = prizes.map(() => false); t.settled = true;
+    t.pot -= rest; this.tournamentPool -= rest; this.rewardPool += rest; this.totalSunk += rest;
+    this.log("tournament", `Турнир сезона ${seasonId} подведён: ${k} призовых мест из ${t.players.length} участников`);
+    this.check();
+  }
+  claimTournamentPrize(seasonId: number, tier: number, rank: number): bigint {
+    const t = this.tournament(seasonId, tier);
+    req(t && t.settled && rank >= 0 && rank < TOURNAMENT_TOP && t.top[rank].player && !t.claimed[rank] && t.prizes[rank] > 0n, "no prize");
+    const amount = t.prizes[rank]; const p = this.pl(t.top[rank].player);
+    t.claimed[rank] = true; t.pot -= amount; this.tournamentPool -= amount;
+    p.claimable += amount; p.totalEarned += amount; this.claims += amount; this.totalTournamentPaid += amount;
+    this.log("tournament", `${p.id} получил приз турнира: ${rank + 1}-е место, ${fmtT(amount)}`);
+    this.check();
+    return amount;
+  }
+
   private closeSeason() {
     const prizes = this.seasonTop.map((e, r) => (e.player ? seasonPrize(this.seasonPool, SEASON_RANK_BPS[r], e.points) : 0n));
     this.lastSeason = { id: this.seasonId, top: this.seasonTop, prizes, claimed: prizes.map(() => false) };
@@ -891,7 +964,7 @@ export class GameModel {
   }
 
   circulating(): bigint {
-    let v = this.rewardPool + this.sponsorPool + this.seasonPool + this.treasury + this.claims + this.distribution;
+    let v = this.rewardPool + this.sponsorPool + this.seasonPool + this.tournamentPool + this.treasury + this.claims + this.distribution;
     for (const p of this.players.values()) v += p.wallet;
     for (const w of this.worlds.values()) v += w.vault;
     for (const p of this.permits.values()) v += p.vault;

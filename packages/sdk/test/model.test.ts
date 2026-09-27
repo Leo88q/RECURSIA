@@ -75,7 +75,12 @@ describe("game model", () => {
     m.advanceSlots(Number(P.epochSlots));
     m.advanceEpoch();
     const r = m.claimWorldEpoch(w.id);
-    expect(r <= w.sinkPrev * 9_000n / 10_000n).toBe(true);
+    // rebate ≤ 100% of the POOL part only; anything above is the efficiency
+    // share, paid solely for live cells on owned land and capped at 200%
+    expect(r - m.totalEfficiency <= w.sinkPrev).toBe(true);
+    expect(m.totalEfficiency <= w.sinkPrev * 2n).toBe(true);
+    // the studio's 20% never returns: burning is strictly net negative
+    expect(m.treasury > 0n).toBe(true);
     void before;
   });
 

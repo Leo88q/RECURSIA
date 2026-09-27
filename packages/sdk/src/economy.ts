@@ -1,5 +1,5 @@
 // Mirror of programs/recursia/src/math.rs (all bigint, floor division).
-import { BPS, SEASON_PRIZE_CAP_BPS, SEASON_TOP, TERRITORIES } from "./constants.js";
+import { BPS, SEASON_PRIZE_CAP_BPS, SEASON_TOP, TERRITORIES, TOURNAMENT_PAID_BPS, TOURNAMENT_TOP } from "./constants.js";
 
 export const bpsFloor = (amount: bigint, bps: number | bigint) => (amount * BigInt(bps)) / BPS;
 const divCeil = (a: bigint, b: bigint) => (a + b - 1n) / b;
@@ -51,6 +51,21 @@ export function seasonPrize(pool: bigint, rankBps: number, points: bigint): bigi
   const share = bpsFloor(pool, rankBps);
   const cap = bpsFloor(points, SEASON_PRIZE_CAP_BPS);
   return share < cap ? share : cap;
+}
+
+/** Tournament prizes (mirror of math::tournament_prizes): top k share the pot with weights k, k−1, …, 1. */
+export function tournamentPrizes(pot: bigint, k: number): { prizes: bigint[]; rest: bigint } {
+  const prizes = new Array<bigint>(TOURNAMENT_TOP).fill(0n);
+  k = Math.min(k, TOURNAMENT_TOP);
+  if (k <= 0 || pot === 0n) return { prizes, rest: pot };
+  const total = BigInt((k * (k + 1)) / 2);
+  let paid = 0n;
+  for (let r = 0; r < k; r++) { prizes[r] = (pot * BigInt(k - r)) / total; paid += prizes[r]; }
+  return { prizes, rest: pot - paid };
+}
+/** Paid places: ceil(players × 30%), ≤ TOURNAMENT_TOP (mirror of math::tournament_places). */
+export function tournamentPlaces(players: number): number {
+  return Math.min(Math.ceil((players * TOURNAMENT_PAID_BPS) / 10_000), TOURNAMENT_TOP);
 }
 
 export interface LeaderEntry<K> { player: K; points: bigint }
