@@ -14,7 +14,9 @@ export const KEEPER = "Хранитель";
 export const DEV = "Студия";
 
 // Accelerated time for the sandbox (min allowed epoch on-chain is ~1h).
-export const SANDBOX_PARAMS: Params = { ...DEFAULT_PARAMS, epochSlots: 9_000n, harbergerBps: 100 };
+// Time runs 24× faster than on-chain (epoch 9 000 vs 216 000 slots), so the law
+// registration fee is scaled by the same factor to keep the royalty payback period realistic.
+export const SANDBOX_PARAMS: Params = { ...DEFAULT_PARAMS, epochSlots: 9_000n, harbergerBps: 100, moduleRegisterFee: 250n * ONE };
 export const STEP_SLOTS = 160;
 
 const PERSONAS: Array<[Personality, string]> = [
