@@ -30,7 +30,8 @@ impl Rng {
     }
     fn bps(&mut self, max: u64) -> u64 {
         match self.next() % 4 {
-            0 => [0, 1, max.saturating_sub(1), max][(self.next() % 4) as usize],
+            // edge values, clamped: with max = 0 the table's `1` would exceed the bound
+            0 => [0, 1, max.saturating_sub(1), max][(self.next() % 4) as usize].min(max),
             _ => self.next() % (max + 1),
         }
     }
