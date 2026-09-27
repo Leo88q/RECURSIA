@@ -204,7 +204,9 @@ pub struct CreateChildWorld<'info> {
     pub host_territory: Box<Account<'info, Territory>>,
     #[account(
         init, payer = architect, space = 8 + World::INIT_SPACE,
-        seeds = [SEED_WORLD, host_world.key().as_ref(), &(host_index as u64).to_le_bytes()], bump
+        // 1-byte territory index: plain arg path so Anchor's IDL seed resolver can
+        // express it; cannot collide with root worlds (zero host key, 8-byte index).
+        seeds = [SEED_WORLD, host_world.key().as_ref(), &[host_index]], bump
     )]
     pub world: Box<Account<'info, World>>,
     #[account(

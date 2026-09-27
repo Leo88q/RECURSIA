@@ -18,7 +18,7 @@ export class Pdas {
   rewardPool() { return this.f([enc("reward_pool")]); }
   claims() { return this.f([enc("claims")]); }
   rootWorld(index: bigint | number) { return this.f([enc("world"), PublicKey.default.toBytes(), u64le(index)]); }
-  childWorld(host: PublicKey, territory: number) { return this.f([enc("world"), host.toBytes(), u64le(territory)]); }
+  childWorld(host: PublicKey, territory: number) { return this.f([enc("world"), host.toBytes(), Uint8Array.of(territory)]); }
   worldVault(world: PublicKey) { return this.f([enc("world_vault"), world.toBytes()]); }
   territory(world: PublicKey, idx: number) { return this.f([enc("territory"), world.toBytes(), Uint8Array.of(idx)]); }
   player(owner: PublicKey) { return this.f([enc("player"), owner.toBytes()]); }

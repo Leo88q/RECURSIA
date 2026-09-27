@@ -28,6 +28,7 @@ describe("layout & instructions", () => {
   it("pdas are deterministic", () => {
     const p = new Pdas();
     expect(p.rootWorld(0).equals(p.rootWorld(0n))).toBe(true);
-    expect(p.childWorld(PublicKey.default, 3).equals(p.rootWorld(3))).toBe(true); // same seed scheme by design
+    // child worlds use a 1-byte territory index → never collide with root worlds (8-byte index)
+    expect(p.childWorld(PublicKey.default, 3).equals(p.rootWorld(3))).toBe(false);
   });
 });
