@@ -30,6 +30,18 @@ export const SEASON_SHARE_BPS = 2_500;
 export const SEASON_PRIZE_CAP_BPS = 2_500;
 export const SEASON_TOP = 10;
 export const SEASON_RANK_BPS = [3_000, 2_000, 1_500, 1_000, 800, 600, 400, 300, 200, 200] as const;
+/** Share of each epoch's emission split by live cells on owned land across ALL worlds (skill redistribution). */
+export const EFFICIENCY_SHARE_BPS = 3_000;
+/** Per-world cap of the efficiency share: ≤ 200% of the world's own pool contribution. */
+export const EFFICIENCY_CAP_BPS = 20_000;
+/** Tournaments: 10% rake to the studio, top 30% of entrants paid (linear weights). */
+export const TOURNAMENT_RAKE_BPS = 1_000;
+export const TOURNAMENT_PAID_BPS = 3_000;
+/** Entry-fee tiers in units of plant_cost (700 and 7 000 SKR by default). */
+export const TOURNAMENT_TIERS = [2n, 20n] as const;
+export const TOURNAMENT_MAX_PLAYERS = 40;
+export const TOURNAMENT_TOP = 12;
+export const TOURNAMENT_JOIN_EPOCHS = 1;
 export const MAX_EMISSION_RATE_BPS = 2_000;
 export const MAX_ROYALTY_BPS = 500;
 export const MAX_ARCHITECT_FEE_BPS = 3_000;
@@ -75,7 +87,7 @@ export const DEFAULT_PARAMS: Params = {
   hostBps: 1_500,
   epochSlots: 216_000n,
   emissionRateBps: 1_000,
-  rebateCapBps: 9_000,
+  rebateCapBps: 10_000,
   harbergerBps: 50,
   minPrice: 700n * ONE,
   plantCost: 350n * ONE,

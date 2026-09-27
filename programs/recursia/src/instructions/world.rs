@@ -566,13 +566,27 @@ pub fn claim_world_epoch(ctx: Context<ClaimWorldEpoch>) -> Result<()> {
         !w.prev_claimed && w.prev_epoch_id.checked_add(1) == Some(config_ro.cur_epoch),
         RecursiaError::ClaimWindow
     );
-    let reward = math::world_emission(
-        config_ro.prev_emission,
+    // Emission = rebate part (by own contribution, ≤ rebate cap) +
+    // efficiency part (by live cells on owned land across all worlds,
+    // ≤ EFFICIENCY_CAP_BPS of own contribution): skill redistribution.
+    let eff_budget = math::bps_floor(config_ro.prev_emission, EFFICIENCY_SHARE_BPS)?;
+    let rebate_budget = math::sub(config_ro.prev_emission, eff_budget)?;
+    let rebate = math::world_emission(
+        rebate_budget,
         config_ro.prev_total_sink,
         w.sink_prev,
         config_ro.params.rebate_cap_bps,
         config_ro.prev_claimed,
     )?;
+    let efficiency = math::world_sponsor(
+        eff_budget,
+        config_ro.prev_total_score,
+        w.score_owned_prev,
+        w.sink_prev,
+        EFFICIENCY_CAP_BPS,
+        config_ro.prev_eff_claimed,
+    )?;
+    let reward = math::add(rebate, efficiency)?;
     let sponsor = math::world_sponsor(
         config_ro.prev_sponsor_budget,
         config_ro.prev_total_score,
@@ -596,7 +610,8 @@ pub fn claim_world_epoch(ctx: Context<ClaimWorldEpoch>) -> Result<()> {
     w.energy = math::add(w.energy, rest)?;
     let epoch = w.prev_epoch_id;
     let c = &mut ctx.accounts.config;
-    c.prev_claimed = math::add(c.prev_claimed, reward)?;
+    c.prev_claimed = math::add(c.prev_claimed, rebate)?;
+    c.prev_eff_claimed = math::add(c.prev_eff_claimed, efficiency)?;
     c.total_emitted = math::add(c.total_emitted, reward)?;
     c.prev_sponsor_claimed = math::add(c.prev_sponsor_claimed, sponsor)?;
     c.total_sponsored = math::add(c.total_sponsored, sponsor)?;

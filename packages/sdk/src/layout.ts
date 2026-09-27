@@ -3,7 +3,7 @@
 // Integrity: discriminators are verified on decode (type-confusion guard, #35).
 import { sha256 } from "@noble/hashes/sha256";
 import { PublicKey } from "@solana/web3.js";
-import { GRID, SEASON_TOP, TERRITORIES, type Params } from "./constants.js";
+import { GRID, SEASON_TOP, TOURNAMENT_TOP, TERRITORIES, type Params } from "./constants.js";
 import { decodeName, encodeName } from "./names.js";
 export { decodeName, encodeName };
 
@@ -96,6 +96,8 @@ export interface ConfigAccount {
   curTotalScore: bigint; prevTotalScore: bigint; prevSponsorBudget: bigint; prevSponsorClaimed: bigint; totalSponsored: bigint;
   /** Seasons: treasury part already split with the season pool, current season, lifetime stats. */
   treasurySeen: bigint; seasonId: bigint; seasonStartEpoch: bigint; totalSeasonFunded: bigint; totalSeasonPaid: bigint;
+  /** Efficiency share of the previous epoch's emission already claimed. */
+  prevEffClaimed: bigint;
 }
 
 export function decodeConfig(data: Uint8Array): ConfigAccount {
@@ -110,6 +112,7 @@ export function decodeConfig(data: Uint8Array): ConfigAccount {
     totalSunk: r.u64(), totalEmitted: r.u64(),
     ...(r.u8(), { curTotalScore: r.u64(), prevTotalScore: r.u64(), prevSponsorBudget: r.u64(), prevSponsorClaimed: r.u64(), totalSponsored: r.u64() }),
     ...(r.u8(), r.u8(), { treasurySeen: r.u64(), seasonId: r.u64(), seasonStartEpoch: r.u64(), totalSeasonFunded: r.u64(), totalSeasonPaid: r.u64() }),
+    prevEffClaimed: r.u64(),
   };
 }
 
@@ -191,6 +194,22 @@ export function decodeSeason(data: Uint8Array): SeasonAccount {
   return { top, lastId, lastTop, lastPrizes, lastClaimed: r.u16() };
 }
 export const SEASON_SPACE = 8 + 2 + SEASON_TOP * 40 + 8 + SEASON_TOP * 40 + SEASON_TOP * 8 + 2;
+
+export interface TournamentAccount {
+  seasonId: bigint; tier: number; entryFee: bigint; players: number; pot: bigint;
+  top: SeasonEntry[]; settled: boolean; prizes: bigint[]; claimed: number;
+}
+export function decodeTournament(data: Uint8Array): TournamentAccount {
+  const r = checkDisc(data, "Tournament");
+  r.u8(); r.u8();
+  const seasonId = r.u64(), tier = r.u8(), entryFee = r.u64(), players = r.u32(), pot = r.u64();
+  const top = Array.from({ length: TOURNAMENT_TOP }, () => ({ player: r.pubkey(), points: r.u64() }));
+  const settled = r.bool();
+  const prizes = Array.from({ length: TOURNAMENT_TOP }, () => r.u64());
+  return { seasonId, tier, entryFee, players, pot, top, settled, prizes, claimed: r.u16() };
+}
+export const TOURNAMENT_SPACE = 8 + 2 + 8 + 1 + 8 + 4 + 8 + TOURNAMENT_TOP * 40 + 1 + TOURNAMENT_TOP * 8 + 2;
+export const TOURNAMENT_ENTRY_SPACE = 8 + 2 + 32 + 32;
 
 export interface ModuleAccount { id: bigint; author: PublicKey; birth: number; survive: number; royaltyBps: number; name: string; accrued: bigint; totalEarned: bigint; worldsUsing: number; qBirth: number; qSurvive: number; qAmp: number }
 export function decodeModule(data: Uint8Array): ModuleAccount {

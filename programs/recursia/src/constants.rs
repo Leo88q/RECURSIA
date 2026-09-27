@@ -70,6 +70,28 @@ pub const SEASON_TOP: usize = 10;
 /// Prize split of the season pool by rank (sums to 100%).
 pub const SEASON_RANK_BPS: [u64; SEASON_TOP] = [3_000, 2_000, 1_500, 1_000, 800, 600, 400, 300, 200, 200];
 
+/// Efficiency share: this part of every epoch's emission is split by live-cell
+/// score on owned territories across ALL worlds (not by own spend), so better
+/// gardeners win money from worse ones — the skill redistribution that lets a
+/// real fraction of players end up net positive.
+pub const EFFICIENCY_SHARE_BPS: u64 = 3_000;
+/// Per-world cap of the efficiency share: ≤ 200% of its own pool contribution
+/// (a world that paid nothing gets nothing; bounds any single world's take).
+pub const EFFICIENCY_CAP_BPS: u64 = 20_000;
+
+/// Season tournaments: opt-in entry fee, 10% rake to the studio, the pot goes
+/// to the top 30% of entrants by season points (linear weights).
+pub const TOURNAMENT_RAKE_BPS: u64 = 1_000;
+pub const TOURNAMENT_PAID_BPS: u64 = 3_000;
+/// Entry-fee tiers in units of `params.plant_cost` (350 SKR by default →
+/// 700 SKR and 7 000 SKR).
+pub const TOURNAMENT_TIERS: [u64; 2] = [2, 20];
+pub const TOURNAMENT_MAX_PLAYERS: u32 = 40;
+/// = ceil(TOURNAMENT_MAX_PLAYERS × 30%)
+pub const TOURNAMENT_TOP: usize = 12;
+/// Joining is open only during the first epoch of a season (no late sniping).
+pub const TOURNAMENT_JOIN_EPOCHS: u64 = 1;
+
 // ---------------- rebellion / breach ----------------
 pub const REBELLION_THRESHOLD_BPS: u64 = 6_667;
 pub const REBELLION_MIN_VOTES: u8 = 8;
@@ -91,6 +113,9 @@ pub const SEED_CLAIMS: &[u8] = b"claims";
 pub const SEED_SPONSOR_POOL: &[u8] = b"sponsor_pool";
 pub const SEED_SEASON_POOL: &[u8] = b"season_pool";
 pub const SEED_SEASON: &[u8] = b"season";
+pub const SEED_TOURNAMENT: &[u8] = b"tournament";
+pub const SEED_TOURNAMENT_ENTRY: &[u8] = b"entry";
+pub const SEED_TOURNAMENT_POOL: &[u8] = b"tournament_pool";
 pub const SEED_WORLD: &[u8] = b"world";
 pub const SEED_WORLD_VAULT: &[u8] = b"world_vault";
 pub const SEED_TERRITORY: &[u8] = b"territory";

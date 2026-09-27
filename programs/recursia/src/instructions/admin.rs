@@ -298,6 +298,7 @@ pub fn advance_epoch(ctx: Context<AdvanceEpoch>) -> Result<()> {
     c.prev_total_sink = c.cur_total_sink;
     c.prev_emission = emission;
     c.prev_claimed = 0;
+    c.prev_eff_claimed = 0;
     c.cur_total_sink = 0;
     c.prev_total_score = c.cur_total_score;
     c.prev_sponsor_budget = sponsor_budget;

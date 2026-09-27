@@ -41,7 +41,7 @@ impl Params {
             host_bps: 1_500,
             epoch_slots: 216_000,
             emission_rate_bps: 1_000,
-            rebate_cap_bps: 9_000,
+            rebate_cap_bps: 10_000,
             harberger_bps: 50,
             min_price: 700 * ONE,
             plant_cost: 350 * ONE,
@@ -140,6 +140,8 @@ pub struct Config {
     pub season_start_epoch: u64,
     pub total_season_funded: u64,
     pub total_season_paid: u64,
+    /// Efficiency share of the previous epoch's emission already claimed.
+    pub prev_eff_claimed: u64,
 }
 
 #[account]
@@ -280,6 +282,37 @@ pub struct SeasonEntry {
 /// `Config::season_id`; `top` is its live top-10 (sorted, points desc).
 /// When a season closes its standings and fixed prizes move to `last_*`,
 /// claimable until the next season closes.
+/// Tournament of one season and one fee tier:
+/// PDA [SEED_TOURNAMENT, season_id, tier].
+#[account]
+#[derive(InitSpace)]
+pub struct Tournament {
+    pub version: u8,
+    pub bump: u8,
+    pub season_id: u64,
+    pub tier: u8,
+    pub entry_fee: u64,
+    pub players: u32,
+    /// Prize pot held in the tournament pool (entry fees minus rake).
+    pub pot: u64,
+    /// Live standings by season points (sorted desc, one entry per player).
+    pub top: [SeasonEntry; TOURNAMENT_TOP],
+    pub settled: bool,
+    pub prizes: [u64; TOURNAMENT_TOP],
+    /// Bit i set = prize of rank i already paid.
+    pub claimed: u16,
+}
+
+/// Proof of entry: PDA [SEED_TOURNAMENT_ENTRY, tournament, owner] (one per player).
+#[account]
+#[derive(InitSpace)]
+pub struct TournamentEntry {
+    pub version: u8,
+    pub bump: u8,
+    pub tournament: Pubkey,
+    pub owner: Pubkey,
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct Season {
@@ -431,5 +464,7 @@ mod tests {
         assert_eq!(8 + World::INIT_SPACE, 2022);
         assert_eq!(8 + Player::INIT_SPACE, 78);
         assert_eq!(8 + Season::INIT_SPACE, 900);
+        assert_eq!(8 + Tournament::INIT_SPACE, 618);
+        assert_eq!(8 + TournamentEntry::INIT_SPACE, 74);
     }
 }

@@ -32,11 +32,11 @@ pub struct SeasonSubmit<'info> {
 
 /// Insert / update `entry` in a points-desc top list. Existing entries keep
 /// their rank on ties (stable sort). Returns false if it did not qualify.
-pub fn leaderboard_insert(top: &mut [SeasonEntry; SEASON_TOP], entry: SeasonEntry) -> bool {
+pub fn leaderboard_insert(top: &mut [SeasonEntry], entry: SeasonEntry) -> bool {
     if let Some(pos) = top.iter().position(|e| e.player == entry.player) {
         top[pos].points = top[pos].points.max(entry.points);
     } else {
-        let last = SEASON_TOP - 1;
+        let last = top.len() - 1;
         if top[last].player != Pubkey::default() && top[last].points >= entry.points {
             return false;
         }

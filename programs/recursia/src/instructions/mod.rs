@@ -7,6 +7,7 @@ pub mod rebellion;
 pub mod season;
 pub mod swap;
 pub mod territory;
+pub mod tournament;
 pub mod world;
 
 pub use admin::*;
@@ -17,4 +18,5 @@ pub use rebellion::*;
 pub use season::*;
 pub use swap::*;
 pub use territory::*;
+pub use tournament::*;
 pub use world::*;

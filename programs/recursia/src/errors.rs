@@ -112,4 +112,12 @@ pub enum RecursiaError {
     NoPrize,
     #[msg("Treasury amount not yet split with the season pool")]
     TreasuryLocked,
+    #[msg("Tournament registration is closed")]
+    TournamentClosed,
+    #[msg("Tournament is full")]
+    TournamentFull,
+    #[msg("Tournament is still running")]
+    TournamentRunning,
+    #[msg("Unknown tournament tier")]
+    BadTier,
 }

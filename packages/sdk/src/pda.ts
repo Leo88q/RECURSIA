@@ -22,6 +22,9 @@ export class Pdas {
   sponsorPool() { return this.f([enc("sponsor_pool")]); }
   seasonPool() { return this.f([enc("season_pool")]); }
   season() { return this.f([enc("season")]); }
+  tournament(seasonId: bigint | number, tier: number) { return this.f([enc("tournament"), u64le(seasonId), Uint8Array.of(tier)]); }
+  tournamentEntry(tournament: PublicKey, owner: PublicKey) { return this.f([enc("entry"), tournament.toBytes(), owner.toBytes()]); }
+  tournamentPool() { return this.f([enc("tournament_pool")]); }
   rootWorld(index: bigint | number) { return this.f([enc("world"), PublicKey.default.toBytes(), u64le(index)]); }
   childWorld(host: PublicKey, territory: number) { return this.f([enc("world"), host.toBytes(), Uint8Array.of(territory)]); }
   worldVault(world: PublicKey) { return this.f([enc("world_vault"), world.toBytes()]); }

@@ -223,3 +223,28 @@ pub struct SeasonPrizePaid {
     pub player: Pubkey,
     pub amount: u64,
 }
+
+#[event]
+pub struct TournamentJoined {
+    pub tournament: Pubkey,
+    pub season: u64,
+    pub tier: u8,
+    pub player: Pubkey,
+    pub fee: u64,
+}
+
+#[event]
+pub struct TournamentSettled {
+    pub tournament: Pubkey,
+    pub winners: u8,
+    pub pot: u64,
+    pub returned: u64,
+}
+
+#[event]
+pub struct TournamentPrizePaid {
+    pub tournament: Pubkey,
+    pub rank: u8,
+    pub player: Pubkey,
+    pub amount: u64,
+}

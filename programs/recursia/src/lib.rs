@@ -224,4 +224,18 @@ pub mod recursia {
     pub fn claim_season_prize(ctx: Context<ClaimSeasonPrize>, rank: u8) -> Result<()> {
         instructions::season::claim_season_prize(ctx, rank)
     }
+
+    // ---- tournaments
+    pub fn tournament_join(ctx: Context<TournamentJoin>, season_id: u64, tier: u8) -> Result<()> {
+        instructions::tournament::tournament_join(ctx, season_id, tier)
+    }
+    pub fn tournament_submit(ctx: Context<TournamentSubmit>, season_id: u64, tier: u8) -> Result<()> {
+        instructions::tournament::tournament_submit(ctx, season_id, tier)
+    }
+    pub fn tournament_settle(ctx: Context<TournamentSettle>, season_id: u64, tier: u8) -> Result<()> {
+        instructions::tournament::tournament_settle(ctx, season_id, tier)
+    }
+    pub fn claim_tournament_prize(ctx: Context<ClaimTournamentPrize>, season_id: u64, tier: u8, rank: u8) -> Result<()> {
+        instructions::tournament::claim_tournament_prize(ctx, season_id, tier, rank)
+    }
 }

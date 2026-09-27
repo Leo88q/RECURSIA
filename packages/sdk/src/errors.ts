@@ -61,6 +61,10 @@ export const PROGRAM_ERRORS: ReadonlyArray<readonly [name: string, ru: string]> 
   ["NoSeasonPoints", "В этом сезоне у игрока ещё нет очков (соберите награды за жизнь)"],
   ["NoPrize", "Приз не выигран или уже выплачен"],
   ["TreasuryLocked", "Эта сумма казны ещё не разделена с призовым фондом сезона"],
+  ["TournamentClosed", "Регистрация на турнир закрыта"],
+  ["TournamentFull", "Турнир заполнен"],
+  ["TournamentRunning", "Турнир ещё идёт"],
+  ["BadTier", "Неизвестный уровень турнира"],
 ];
 
 const ANCHOR_FRAMEWORK: Record<number, string> = {

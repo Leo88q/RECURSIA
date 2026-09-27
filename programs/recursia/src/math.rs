@@ -3,7 +3,7 @@
 
 use anchor_lang::prelude::*;
 
-use crate::constants::{BPS, SEASON_PRIZE_CAP_BPS, TERRITORIES};
+use crate::constants::{BPS, SEASON_PRIZE_CAP_BPS, TERRITORIES, TOURNAMENT_PAID_BPS, TOURNAMENT_TOP};
 use crate::errors::RecursiaError;
 
 #[inline]
@@ -151,6 +151,30 @@ pub fn season_prize(pool: u64, rank_bps: u64, points: u64) -> Result<u64> {
     Ok(share.min(cap))
 }
 
+/// Tournament prizes: the top `k` places share `pot` with linear weights
+/// k, k−1, …, 1 (floored). Returns the prizes and the undistributed rest.
+pub fn tournament_prizes(pot: u64, k: usize) -> Result<([u64; TOURNAMENT_TOP], u64)> {
+    let mut prizes = [0u64; TOURNAMENT_TOP];
+    let k = k.min(TOURNAMENT_TOP);
+    if k == 0 || pot == 0 {
+        return Ok((prizes, pot));
+    }
+    let total_w = (k * (k + 1) / 2) as u128;
+    let mut paid = 0u64;
+    for (r, p) in prizes.iter_mut().enumerate().take(k) {
+        let w = (k - r) as u128;
+        *p = ((pot as u128) * w / total_w) as u64;
+        paid = add(paid, *p)?;
+    }
+    Ok((prizes, sub(pot, paid)?))
+}
+
+/// Paid places of a tournament: ceil(players × TOURNAMENT_PAID_BPS), ≤ TOP.
+pub fn tournament_places(players: u32) -> usize {
+    let p = (players as u64 * TOURNAMENT_PAID_BPS).div_ceil(BPS) as usize;
+    p.min(TOURNAMENT_TOP)
+}
+
 /// Distribute `amount` across territories by score. Returns per-territory
 /// shares (floored) plus the remainder (dust + unowned share), which the caller
 /// sends to world energy. Invariant: sum(shares) + rest == amount.
@@ -183,6 +207,25 @@ pub fn distribute(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tournament_prizes_linear_and_exact() {
+        let (p, rest) = super::tournament_prizes(600, 3).unwrap();
+        assert_eq!(&p[..4], &[300, 200, 100, 0]);
+        assert_eq!(rest, 0);
+        let (p, rest) = super::tournament_prizes(1_000, 3).unwrap();
+        assert_eq!(&p[..3], &[500, 333, 166]);
+        assert_eq!(rest, 1);
+        let (p, rest) = super::tournament_prizes(1_000, 0).unwrap();
+        assert_eq!(p, [0; super::TOURNAMENT_TOP]);
+        assert_eq!(rest, 1_000);
+        assert_eq!(super::tournament_places(0), 0);
+        assert_eq!(super::tournament_places(1), 1);
+        assert_eq!(super::tournament_places(10), 3);
+        assert_eq!(super::tournament_places(11), 4);
+        assert_eq!(super::tournament_places(40), 12);
+        assert_eq!(super::tournament_places(1_000), 12);
+    }
+
     use super::*;
 
     #[test]

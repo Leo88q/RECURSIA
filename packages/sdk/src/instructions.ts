@@ -82,6 +82,33 @@ export class RecursiaIx {
     return this.ix("claim_season_prize", [W(p.config()), R(this.mint), W(p.season()), W(p.player(winner)), W(p.seasonPool()), W(p.claims()), R(TOKEN_PROGRAM_ID)], (w) => w.u8(rank));
   }
 
+  // ------------------------------------------------------------ tournaments
+  /** Join the (season, tier) tournament: pays the entry fee (10% studio, 90% pot). */
+  tournamentJoin(owner: PublicKey, seasonId: bigint, tier: number) {
+    const p = this.pda; const t = p.tournament(seasonId, tier);
+    return this.ix("tournament_join", [
+      S(owner, true), R(p.config()), R(this.mint), W(t), W(p.tournamentEntry(t, owner)), W(p.tournamentPool()), W(ata(owner, this.mint)),
+      W(p.treasury()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
+    ], (w) => w.u64(seasonId).u8(tier));
+  }
+  /** Permissionless: put an entrant's season points on the tournament standings. */
+  tournamentSubmit(owner: PublicKey, seasonId: bigint, tier: number) {
+    const p = this.pda; const t = p.tournament(seasonId, tier);
+    return this.ix("tournament_submit", [R(p.config()), W(t), R(p.tournamentEntry(t, owner)), R(p.player(owner))], (w) => w.u64(seasonId).u8(tier));
+  }
+  /** Permissionless, after the season closed: fix the prizes (unpaid places → reward pool). */
+  tournamentSettle(seasonId: bigint, tier: number) {
+    const p = this.pda;
+    return this.ix("tournament_settle", [R(p.config()), R(this.mint), W(p.tournament(seasonId, tier)), W(p.tournamentPool()), W(p.rewardPool()), R(TOKEN_PROGRAM_ID)], (w) => w.u64(seasonId).u8(tier));
+  }
+  /** Permissionless: credit a settled prize to the winner's game balance. */
+  claimTournamentPrize(winner: PublicKey, seasonId: bigint, tier: number, rank: number) {
+    const p = this.pda;
+    return this.ix("claim_tournament_prize", [
+      R(p.config()), R(this.mint), W(p.tournament(seasonId, tier)), W(p.player(winner)), W(p.tournamentPool()), W(p.claims()), R(TOKEN_PROGRAM_ID),
+    ], (w) => w.u64(seasonId).u8(tier).u8(rank));
+  }
+
   // ------------------------------------------------------------ modules
   registerModule(author: PublicKey, moduleId: bigint, birth: number, survive: number, royaltyBps: number, name: string, q: { qBirth: number; qSurvive: number; qAmp: number } = { qBirth: 0, qSurvive: 0, qAmp: 0 }) {
     const p = this.pda;
