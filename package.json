@@ -5,7 +5,8 @@
   "workspaces": [
     "packages/sdk",
     "app",
-    "keeper"
+    "keeper",
+    "tests/chain"
   ],
   "scripts": {
     "test": "npm -w packages/sdk test && npm -w keeper test && npm -w app test",

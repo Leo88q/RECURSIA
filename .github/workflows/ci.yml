@@ -121,6 +121,9 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npx -w packages/sdk tsx scripts/check-idl.ts ../../target/idl/recursia.json
+      - name: Integration tests — compiled program in LiteSVM (checklist #54/#58)
+        env: { REQUIRE_SO: "1" }
+        run: scripts/ci-run.sh chain-test npm -w tests/chain test
       - uses: actions/upload-artifact@v4
         with:
           name: recursia-build
@@ -141,6 +144,8 @@ jobs:
         run: scripts/ci-run.sh sdk-tsc npm -w packages/sdk run build && scripts/ci-run.sh sdk-test npm -w packages/sdk test
       - name: Economic simulation (checklist #54/#58)
         run: scripts/ci-run.sh econ npm run econ -- --quick
+      - name: Chain-test harness self-test + typecheck (program tests run in the Anchor job)
+        run: scripts/ci-run.sh chain-harness bash -c "npm -w tests/chain run typecheck && npm -w tests/chain test"
       - name: Keeper tests
         run: scripts/ci-run.sh keeper npm -w keeper test
       - name: Client unit tests (money parsing, router, tx math, config, CSP)

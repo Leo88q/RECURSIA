@@ -133,7 +133,7 @@ pub fn tournament_submit(ctx: Context<TournamentSubmit>, _season_id: u64, _tier:
 #[derive(Accounts)]
 #[instruction(season_id: u64, tier: u8)]
 pub struct TournamentSettle<'info> {
-    #[account(seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
+    #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
     pub mint: Box<Account<'info, Mint>>,
     #[account(mut, seeds = [SEED_TOURNAMENT, &season_id.to_le_bytes(), &[tier]], bump = tournament.bump)]
@@ -148,9 +148,8 @@ pub struct TournamentSettle<'info> {
 /// Permissionless, after the season closed: fix the prizes. Allowed while
 /// paused (settlement must never get stuck).
 pub fn tournament_settle(ctx: Context<TournamentSettle>, _season_id: u64, _tier: u8) -> Result<()> {
-    let c = &ctx.accounts.config;
     let t = &mut ctx.accounts.tournament;
-    require!(c.season_id > t.season_id, RecursiaError::TournamentRunning);
+    require!(ctx.accounts.config.season_id > t.season_id, RecursiaError::TournamentRunning);
     require!(!t.settled, RecursiaError::TournamentClosed);
     let filled = t.top.iter().filter(|e| e.player != Pubkey::default() && e.points > 0).count();
     let k = math::tournament_places(t.players).min(filled);
@@ -159,7 +158,10 @@ pub fn tournament_settle(ctx: Context<TournamentSettle>, _season_id: u64, _tier:
     t.settled = true;
     t.pot = math::sub(t.pot, rest)?;
     let pot = t.pot;
-    let bump = c.bump;
+    // the unplayed part is a pool inflow like any other (keeps the ledger
+    // reward_pool == funded + total_sunk − total_emitted exact)
+    record_pool_inflow(&mut ctx.accounts.config, rest)?;
+    let bump = ctx.accounts.config.bump;
     vault_transfer(
         &ctx.accounts.token_program.to_account_info(),
         &ctx.accounts.mint.to_account_info(),

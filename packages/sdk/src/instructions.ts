@@ -99,7 +99,7 @@ export class RecursiaIx {
   /** Permissionless, after the season closed: fix the prizes (unpaid places → reward pool). */
   tournamentSettle(seasonId: bigint, tier: number) {
     const p = this.pda;
-    return this.ix("tournament_settle", [R(p.config()), R(this.mint), W(p.tournament(seasonId, tier)), W(p.tournamentPool()), W(p.rewardPool()), R(TOKEN_PROGRAM_ID)], (w) => w.u64(seasonId).u8(tier));
+    return this.ix("tournament_settle", [W(p.config()), R(this.mint), W(p.tournament(seasonId, tier)), W(p.tournamentPool()), W(p.rewardPool()), R(TOKEN_PROGRAM_ID)], (w) => w.u64(seasonId).u8(tier));
   }
   /** Permissionless: credit a settled prize to the winner's game balance. */
   claimTournamentPrize(winner: PublicKey, seasonId: bigint, tier: number, rank: number) {
