@@ -29,9 +29,10 @@ import {
 import bs58 from "bs58";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID, PROGRAM_ID, RecursiaIx, SKR_MINT, accountDiscriminator,
+  ORAO_VRF_ID, oraoNetworkState, oraoRandomnessPda, oraoState, oraoTreasury, type OraoState,
   decodeConfig, decodeSeason, decodeTournament, decodeSuperposition, decodeSwap, decodeTerritory, decodeWorld,
 } from "@recursia/sdk";
-import { DEFAULT_LIMITS, crankIncome, plan, type Snapshot } from "./plan.js";
+import { DEFAULT_LIMITS, crankIncome, plan, seedHex, type Snapshot } from "./plan.js";
 import { toInstruction } from "./ix.js";
 
 const args = new Set(process.argv.slice(2));
@@ -62,7 +63,8 @@ function loadKeypair(path: string): Keypair {
   return Keypair.fromSecretKey(Uint8Array.from(raw));
 }
 
-const ALLOWED_PROGRAMS = new Set([programId.toBase58(), ComputeBudgetProgram.programId.toBase58(), ASSOCIATED_TOKEN_PROGRAM_ID.toBase58()]);
+// ORAO VRF: the keeper creates randomness requests for measurable positions (it pays a small SOL fee).
+const ALLOWED_PROGRAMS = new Set([programId.toBase58(), ComputeBudgetProgram.programId.toBase58(), ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(), ORAO_VRF_ID.toBase58()]);
 
 async function snapshot(conn: Connection, rx: RecursiaIx): Promise<Snapshot> {
   const disc = (n: string) => ({ memcmp: { offset: 0, bytes: bs58.encode(accountDiscriminator(n)) } });
@@ -78,15 +80,33 @@ async function snapshot(conn: Connection, rx: RecursiaIx): Promise<Snapshot> {
   ]);
   if (!cfgInfo || !cfgInfo.owner.equals(programId)) throw new Error("config account missing or not owned by program");
   const safe = <T>(f: () => T) => { try { return f(); } catch { return null; } };
+  const decodedSps = sps.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeSuperposition(account.data)); return acc ? [{ key: pubkey, acc }] : []; });
+  const decodedSwaps = swaps.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeSwap(account.data)); return acc ? [{ key: pubkey, acc }] : []; });
+  // ORAO VRF state of every measurable position (seed fixed on-chain at commit / accept)
+  const seeds = [
+    ...decodedSps.filter(({ acc }) => !acc.observed && BigInt(slot) > acc.targetSlot).map(({ acc }) => acc.entropy),
+    ...decodedSwaps.filter(({ acc }) => acc.accepted && BigInt(slot) > acc.targetSlot).map(({ acc }) => acc.vrfSeed),
+  ];
+  const vrf = new Map<string, OraoState["state"]>();
+  let oraoTreasuryKey: PublicKey | undefined;
+  if (seeds.length) {
+    const [infos, ns] = await Promise.all([
+      conn.getMultipleAccountsInfo(seeds.map((sd) => oraoRandomnessPda(sd)), "confirmed"),
+      conn.getAccountInfo(oraoNetworkState(), "confirmed"),
+    ]);
+    seeds.forEach((sd, i) => vrf.set(seedHex(sd), oraoState(infos[i] ? { owner: infos[i]!.owner, data: infos[i]!.data } : null, sd).state));
+    if (ns && ns.owner.equals(ORAO_VRF_ID)) oraoTreasuryKey = safe(() => oraoTreasury(ns.data)) ?? undefined;
+  }
   return {
     slot: BigInt(slot),
+    vrf, oraoTreasury: oraoTreasuryKey,
     config: decodeConfig(cfgInfo.data),
     worlds: worlds.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeWorld(account.data)); return acc ? [{ key: pubkey, acc }] : []; }),
     territories: territories.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeTerritory(account.data)); return acc ? [{ key: pubkey, acc }] : []; }),
-    superpositions: sps.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeSuperposition(account.data)); return acc ? [{ key: pubkey, acc }] : []; }),
+    superpositions: decodedSps,
     season: seasonInfo && seasonInfo.owner.equals(programId) ? safe(() => decodeSeason(seasonInfo.data)) ?? undefined : undefined,
     tournaments: tours.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeTournament(account.data)); return acc ? [{ key: pubkey, acc }] : []; }),
-    swaps: swaps.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeSwap(account.data)); return acc ? [{ key: pubkey, acc }] : []; }),
+    swaps: decodedSwaps,
   };
 }
 

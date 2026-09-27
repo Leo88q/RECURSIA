@@ -120,4 +120,6 @@ pub enum RecursiaError {
     TournamentRunning,
     #[msg("Unknown tournament tier")]
     BadTier,
+    #[msg("VRF randomness is not fulfilled yet (request it at the ORAO PDA for this seed)")]
+    VrfPending,
 }

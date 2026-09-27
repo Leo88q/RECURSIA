@@ -1,14 +1,16 @@
 //! Quantum layer — pure functions (no accounts), mirrored in
 //! `packages/sdk/src/quantum.ts` and cross-checked by shared vectors.
 //!
-//! Entropy source: the `SlotHashes` sysvar entry for a slot that was FIXED IN
-//! ADVANCE (by the tick schedule or by the commit). Whoever submits the
-//! transaction cannot choose it: the outcome is the same no matter who cranks
-//! or when, as long as the entry is still inside the 512-slot window.
-//! Residual bias: the leader of that exact slot could try to grind its block
-//! hash. That is acceptable for game-level stakes; a VRF (ORAO/Switchboard)
-//! can replace `slot_hash_lookup` without touching the rest (see SECURITY.md).
+//! Entropy sources:
+//!  * Measurements with money at stake (superposition collapse, SWAP) use the
+//!    ORAO VRF (checklist #21): the request seed is fixed when the position is
+//!    opened and includes the latest slot hash at that moment, so nobody can
+//!    pre-request randomness for a seed and open the position only if it is
+//!    favourable; a block leader can't reroll by skipping a slot either.
+//!  * Quantum *ticks* (physics noise, no single tick carries a stake) use the
+//!    `SlotHashes` entry of a slot FIXED IN ADVANCE by the tick schedule.
 
+use anchor_lang::prelude::Pubkey;
 use anchor_lang::solana_program::hash::hashv;
 
 use crate::constants::SLOT_HASHES_MAX;
@@ -68,6 +70,60 @@ pub fn slot_hash_lookup(data: &[u8], target: u64) -> Option<SlotHashLookup> {
     }
     let (s, h) = entry(data, lo)?;
     Some(SlotHashLookup::Found { slot: s, hash: h })
+}
+
+// ------------------------------------------------------------------ ORAO VRF
+
+/// ORAO VRF program (same id on mainnet-beta and devnet).
+pub const ORAO_VRF_ID: Pubkey = Pubkey::new_from_array([
+    7, 71, 177, 26, 250, 145, 180, 209, 249, 34, 242, 123, 14, 186, 193, 218, 178, 59, 33, 41, 164, 190, 243, 79, 50,
+    164, 123, 88, 245, 206, 252, 120,
+]);
+/// PDA seed of an ORAO randomness request: `[ORAO_RANDOMNESS_SEED, seed]`.
+pub const ORAO_RANDOMNESS_SEED: &[u8] = b"orao-vrf-randomness-request";
+/// Anchor discriminator of ORAO's `RandomnessV2` account = sha256("account:RandomnessV2")[..8].
+pub const ORAO_RANDOMNESS_V2_DISC: [u8; 8] = [139, 239, 184, 215, 227, 86, 191, 226];
+
+/// The most recent entry of the raw `SlotHashes` sysvar (hash of the previous slot).
+pub fn latest_slot_hash(data: &[u8]) -> Option<[u8; 32]> {
+    let mut l = [0u8; 8];
+    l.copy_from_slice(data.get(..8)?);
+    if u64::from_le_bytes(l) == 0 {
+        return None;
+    }
+    entry(data, 0).map(|(_, h)| h)
+}
+
+/// VRF request seed of a superposition: bound to the world, the cell, the
+/// commitment and the latest slot hash at commit time (unknown in advance).
+pub fn vrf_seed_superposition(world: &[u8; 32], index: u8, commitment: &[u8; 32], recent: &[u8; 32]) -> [u8; 32] {
+    hashv(&[b"recursia/vrf/psi/v1", world, &[index], commitment, recent]).to_bytes()
+}
+
+/// VRF request seed of an accepted SWAP (fixed at acceptance).
+pub fn vrf_seed_swap(swap: &[u8; 32], recent: &[u8; 32], accept_slot: u64) -> [u8; 32] {
+    hashv(&[b"recursia/vrf/swap/v1", swap, recent, &accept_slot.to_le_bytes()]).to_bytes()
+}
+
+/// Randomness of a FULFILLED ORAO `RandomnessV2` account whose seed is `seed`.
+/// Layout: [8 disc][1 tag: 0 Pending | 1 Fulfilled][client 32][seed 32][randomness 64].
+/// `None` while pending, for a foreign account type, or for another seed.
+pub fn orao_fulfilled(data: &[u8], seed: &[u8; 32]) -> Option<[u8; 64]> {
+    if data.get(..8)? != ORAO_RANDOMNESS_V2_DISC || *data.get(8)? != 1 || data.get(41..73)? != seed {
+        return None;
+    }
+    let mut r = [0u8; 64];
+    r.copy_from_slice(data.get(73..137)?);
+    // an all-zero value is never a valid ed25519-derived output
+    if r.iter().all(|b| *b == 0) {
+        return None;
+    }
+    Some(r)
+}
+
+/// Measurement entropy derived from VRF output (domain-separated).
+pub fn entropy_from_vrf(randomness: &[u8; 64]) -> [u8; 32] {
+    hashv(&[b"recursia/vrf/entropy/v1", randomness]).to_bytes()
 }
 
 /// Per-tick quantum seed: bound to the scheduled slot hash, the world and the
@@ -138,6 +194,57 @@ pub fn neighbour(idx: u8, dir: u8) -> u8 {
         _ => ((x + 7) % 8, y),
     };
     ny * 8 + nx
+}
+
+#[cfg(test)]
+mod vrf_tests {
+    use super::*;
+
+    fn fulfilled(seed: &[u8; 32], r: u8) -> Vec<u8> {
+        let mut d = ORAO_RANDOMNESS_V2_DISC.to_vec();
+        d.push(1);
+        d.extend_from_slice(&[9u8; 32]);
+        d.extend_from_slice(seed);
+        d.extend_from_slice(&[r; 64]);
+        d.resize(8 + 1 + 32 + 32 + 4 + 96 * 7, 0); // allocated as PENDING_SIZE
+        d
+    }
+
+    #[test]
+    fn orao_parsing_accepts_only_fulfilled_matching_seed() {
+        let seed = [3u8; 32];
+        assert_eq!(orao_fulfilled(&fulfilled(&seed, 7), &seed), Some([7u8; 64]));
+        assert_eq!(orao_fulfilled(&fulfilled(&seed, 7), &[4u8; 32]), None, "other seed");
+        let mut pending = fulfilled(&seed, 7);
+        pending[8] = 0;
+        assert_eq!(orao_fulfilled(&pending, &seed), None, "pending");
+        let mut foreign = fulfilled(&seed, 7);
+        foreign[0] ^= 1;
+        assert_eq!(orao_fulfilled(&foreign, &seed), None, "foreign account type");
+        assert_eq!(orao_fulfilled(&fulfilled(&seed, 0), &seed), None, "zero randomness");
+        assert_eq!(orao_fulfilled(&fulfilled(&seed, 7)[..100], &seed), None, "truncated");
+    }
+
+    #[test]
+    fn seeds_are_domain_separated_and_bound_to_inputs() {
+        let (w, c, h) = ([1u8; 32], [2u8; 32], [5u8; 32]);
+        let a = vrf_seed_superposition(&w, 1, &c, &h);
+        assert_ne!(a, vrf_seed_superposition(&w, 2, &c, &h));
+        assert_ne!(a, vrf_seed_superposition(&w, 1, &c, &[6u8; 32]));
+        assert_ne!(vrf_seed_swap(&w, &h, 10), vrf_seed_swap(&w, &h, 11));
+        assert_ne!(entropy_from_vrf(&[1u8; 64]), entropy_from_vrf(&[2u8; 64]));
+    }
+
+    #[test]
+    fn latest_slot_hash_reads_the_first_entry() {
+        let mut d = 2u64.to_le_bytes().to_vec();
+        d.extend_from_slice(&100u64.to_le_bytes());
+        d.extend_from_slice(&[8u8; 32]);
+        d.extend_from_slice(&99u64.to_le_bytes());
+        d.extend_from_slice(&[7u8; 32]);
+        assert_eq!(latest_slot_hash(&d), Some([8u8; 32]));
+        assert_eq!(latest_slot_hash(&0u64.to_le_bytes()), None);
+    }
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@ import { bigbang, getCell, quantumMask, step, stepNQ, type Grid, type Quantum } 
 import { collapse, commitment, neighbour, quantumRuleError, slotHashLookup, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS, SWAP_OFFER_TTL_SLOTS } from "../src/quantum.js";
 import { blockPattern as blockPatternOf } from "../src/sim.js";
 import { Rng } from "../src/agents.js";
+import { entropyFromVrf } from "../src/vrf.js";
 
 // ---------------------------------------------------------------- engine
 function naiveStepQ(g: Grid, b: number, s: number, q: Quantum, gen: bigint): Grid {
@@ -162,15 +163,39 @@ describe("quantum game model", () => {
     expect(() => m.quantumCollapse("bob", w.id, 5, A, B, 5_000, salt)).toThrow(/no superposition/);
   });
 
-  it("late observation re-arms and burns 25% (no stale-hash grinding)", () => {
+  it("VRF: the outcome is fixed at commit — observing late changes nothing, no penalty", () => {
+    const { m, w } = setup();
+    m.quantumCommit("bob", w.id, 5, m.commitFor("bob", w.id, 5, A, B, 5_000, salt));
+    const sp = m.superposition(w.id, 5)!;
+    const expected = entropyFromVrf(m.vrfAnswer(sp.vrfSeed)!);
+    const s0 = sp.stake;
+    m.advanceSlots(QUANTUM_DELAY_SLOTS + 5_000); // far past the old 512-slot SlotHashes window
+    expect(m.quantumObserve("keeper", w.id, 5)).toBe("observed");
+    expect(sp.entropy).toEqual(expected);
+    expect(sp.stake).toBe(s0 - s0 / 20n); // only the observer bounty
+  });
+
+  it("VRF: oracle outage blocks the measurement without penalising anyone", () => {
     const { m, w } = setup();
     m.quantumCommit("bob", w.id, 5, m.commitFor("bob", w.id, 5, A, B, 5_000, salt));
     const s0 = m.superposition(w.id, 5)!.stake;
-    m.advanceSlots(QUANTUM_DELAY_SLOTS + 600);
-    expect(m.quantumObserve("keeper", w.id, 5)).toBe("rearmed");
-    expect(m.superposition(w.id, 5)!.stake).toBe(s0 - s0 / 4n);
     m.advanceSlots(QUANTUM_DELAY_SLOTS + 1);
+    m.vrfOnline = false;
+    expect(m.canObserve(w.id, 5)).toBe("vrf pending");
+    expect(() => m.quantumObserve("keeper", w.id, 5)).toThrow(/vrf pending/);
+    expect(m.superposition(w.id, 5)!.stake).toBe(s0);
+    m.vrfOnline = true;
     expect(m.quantumObserve("keeper", w.id, 5)).toBe("observed");
+  });
+
+  it("VRF: the seed depends on the commit slot (can't be pre-requested for a future commit)", () => {
+    const a = setup(), b = setup();
+    a.m.advanceSlots(100);
+    b.m.advanceSlots(100);
+    a.m.quantumCommit("bob", a.w.id, 5, a.m.commitFor("bob", a.w.id, 5, A, B, 5_000, salt));
+    b.m.advanceSlots(1);
+    b.m.quantumCommit("bob", b.w.id, 5, b.m.commitFor("bob", b.w.id, 5, A, B, 5_000, salt));
+    expect(a.m.superposition(a.w.id, 5)!.vrfSeed).not.toEqual(b.m.superposition(b.w.id, 5)!.vrfSeed);
   });
 
   it("territory sold mid-superposition: grid untouched, owner still refunded", () => {

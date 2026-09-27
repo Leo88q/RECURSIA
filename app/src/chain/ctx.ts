@@ -1,4 +1,4 @@
-import type { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import type { Connection, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import type { ConfigAccount, MWorld, RecursiaIx, WorldAccount } from "@recursia/sdk";
 import type { Keyed, MyData, ProgramData, WorldDetail } from "./data";
 import type { TxRequest, TxResult } from "./tx";
@@ -6,6 +6,7 @@ import type { TxRequest, TxResult } from "./tx";
 /** Everything a live-mode panel needs, passed down explicitly (no hidden globals). */
 export interface ChainCtx {
   rx: RecursiaIx;
+  connection: Connection;
   programId: PublicKey;
   config: ConfigAccount;
   data: ProgramData;

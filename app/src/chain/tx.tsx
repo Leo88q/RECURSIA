@@ -10,7 +10,7 @@ import { createContext, useCallback, useContext, useRef, useState, type ReactNod
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { ComputeBudgetProgram, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
 import bs58 from "bs58";
-import { ASSOCIATED_TOKEN_PROGRAM_ID, ata, explainTxError } from "@recursia/sdk";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, ata, explainTxError, ORAO_VRF_ID } from "@recursia/sdk";
 import { CONFIG, explorerUrl } from "../lib/config";
 import { MINT } from "./mint";
 import { formatAmount, lamportsToSol, shortAddr } from "../lib/format";
@@ -40,6 +40,7 @@ const ALLOWED_PROGRAMS = new Map<string, string>([
   [ComputeBudgetProgram.programId.toBase58(), "Compute Budget"],
   [ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(), "Associated Token"],
   [SystemProgram.programId.toBase58(), "System"],
+  [ORAO_VRF_ID.toBase58(), "ORAO VRF (оракул случайности)"],
 ]);
 
 const TxCtx = createContext<((r: TxRequest) => Promise<TxResult>) | null>(null);

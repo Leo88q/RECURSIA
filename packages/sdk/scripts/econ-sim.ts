@@ -154,7 +154,7 @@ function run(sc: Scenario, seed: number): Result {
     }
   });
   const GOOD = 0x0000_1824_2418_0000n, BAD = 0n;
-  let qCommits = 0, qCollapses = 0, qDecoheres = 0, qRearms = 0;
+  let qCommits = 0, qCollapses = 0, qDecoheres = 0;
   const restore = new Set<number>();
 
   const agents: AIAgent[] = [];
@@ -309,7 +309,7 @@ function run(sc: Scenario, seed: number): Result {
     }
     // keeper: measure & clean up (bounty = stake/20)
     for (const sp of [...m.superpositions.values()]) {
-      if (m.canObserve(sp.world, sp.index) === null) { if (m.quantumObserve("keeper", sp.world, sp.index) === "rearmed") qRearms++; }
+      if (m.canObserve(sp.world, sp.index) === null) { m.quantumObserve("keeper", sp.world, sp.index); }
       else if (m.canDecohere(sp.world, sp.index) === null) { m.quantumDecohere("keeper", sp.world, sp.index); qDecoheres++; }
     }
     for (const w of m.worlds.values()) {
@@ -416,7 +416,7 @@ function run(sc: Scenario, seed: number): Result {
   const swapEv = m.events.filter((e) => e.kind === "swap");
   const aiLaws = m.modules.filter((x) => x.author !== "studio");
   const qStats = sc.quantum
-    ? `ψ commits ${allCommits} (twins ${qCommits}), collapses ${allCollapses} (twins ${qCollapses}), decohered ${qDecoheres}, re-armed ${qRearms}`
+    ? `ψ commits ${allCommits} (twins ${qCommits}), collapses ${allCollapses} (twins ${qCollapses}), decohered ${qDecoheres}`
       + (sc.neutral ? `; SWAP offers ${swapEv.filter((e) => /предлагает/.test(e.text)).length}, accepted ${swapEv.filter((e) => /принял/.test(e.text)).length}, exchanged ${swapEv.filter((e) => /обменялись/.test(e.text)).length}; AI laws ${aiLaws.length} (used by ${aiLaws.reduce((a, x) => a + x.worldsUsing, 0)} worlds, royalty ${fmt(aiLaws.reduce((a, x) => a + x.accrued + x.totalEarned, 0n))})` : "")
     : undefined;
 

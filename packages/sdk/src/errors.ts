@@ -65,6 +65,7 @@ export const PROGRAM_ERRORS: ReadonlyArray<readonly [name: string, ru: string]> 
   ["TournamentFull", "Турнир заполнен"],
   ["TournamentRunning", "Турнир ещё идёт"],
   ["BadTier", "Неизвестный уровень турнира"],
+  ["VrfPending", "Оракул случайности (ORAO VRF) ещё не ответил — запросите и подождите несколько секунд"],
 ];
 
 const ANCHOR_FRAMEWORK: Record<number, string> = {

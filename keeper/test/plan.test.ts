@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { DEFAULT_PARAMS, PROGRAM_ID, RecursiaIx, TERRITORIES, type ConfigAccount, type SuperpositionAccount, type SwapAccount, type TerritoryAccount, type WorldAccount } from "@recursia/sdk";
-import { claimable, plan, seasonPrizes, tournamentActions, type Snapshot } from "../src/plan.js";
+import { DEFAULT_PARAMS, ORAO_VRF_ID, oraoRandomnessPda, PROGRAM_ID, RecursiaIx, TERRITORIES, type ConfigAccount, type SuperpositionAccount, type SwapAccount, type TerritoryAccount, type WorldAccount } from "@recursia/sdk";
+import { claimable, plan, seasonPrizes, seedHex, tournamentActions, type Snapshot } from "../src/plan.js";
 import { toInstruction } from "../src/ix.js";
 
 const P = DEFAULT_PARAMS;
@@ -112,12 +112,35 @@ describe("keeper planner", () => {
       sp({ index: 4, observed: true, revealDeadline: 1_100_000n }), // owner may still reveal
       sp({ index: 5, targetSlot: 1_000_060n, stake: 10n }), // dust stake: no bounty
     ];
-    const q = plan(snap({ superpositions: sps })).filter((a) => a.kind.startsWith("quantum"));
+    const vrf = new Map([[seedHex(new Uint8Array(32)), "fulfilled" as const]]);
+    const q = plan(snap({ superpositions: sps, vrf })).filter((a) => a.kind.startsWith("quantum"));
     expect(q.map((a) => `${a.kind}:${"index" in a ? a.index : ""}`)).toEqual(["quantum_decohere:3", "quantum_observe:1"]);
-    const paused = plan(snap({ config: cfg({ paused: true }), superpositions: sps }));
+    const paused = plan(snap({ config: cfg({ paused: true }), superpositions: sps, vrf }));
     expect(paused.map((a) => a.kind)).toEqual(["quantum_observe"]);
     const rx = new RecursiaIx(PROGRAM_ID);
     for (const a of q) expect(toInstruction(rx, key(), a).keys.filter((k) => k.isSigner)).toHaveLength(1);
+  });
+  it("VRF liveness: requests missing randomness, waits while pending, measures when fulfilled, never slashes unobserved", () => {
+    const seed = new Uint8Array(32).fill(9);
+    const s = (st?: "missing" | "pending" | "fulfilled", treasury: PublicKey | null = key()) => snap({
+      superpositions: [{ key: key(), acc: {
+        owner: key(), world: key(), index: 7, world2: PublicKey.default, index2: 0, commitment: new Uint8Array(32).fill(1),
+        commitSlot: 0n, targetSlot: 1n, observed: false, observedSlot: 0n, entropy: seed, // far past any reveal window
+        revealDeadline: 0n, stake: 20_000_000n, rearms: 0,
+      } }],
+      vrf: st ? new Map([[seedHex(seed), st]]) : new Map(), oraoTreasury: treasury ?? undefined,
+    });
+    const kinds = (x: ReturnType<typeof snap>) => plan(x).filter((a) => a.kind.startsWith("quantum") || a.kind === "vrf_request").map((a) => a.kind);
+    expect(kinds(s())).toEqual(["vrf_request"]);
+    expect(kinds(s("missing", null))).toEqual([]); // ORAO config unreadable: don't guess the treasury
+    expect(kinds(s("pending"))).toEqual([]);
+    expect(kinds(s("fulfilled"))).toEqual(["quantum_observe"]);
+    const req = plan(s()).find((a) => a.kind === "vrf_request")!;
+    const ix = toInstruction(new RecursiaIx(PROGRAM_ID), key(), req);
+    expect(ix.programId.equals(ORAO_VRF_ID)).toBe(true);
+    expect(ix.keys[3].pubkey.equals(oraoRandomnessPda(seed))).toBe(true);
+    const obs = plan(s("fulfilled")).find((a) => a.kind === "quantum_observe")!;
+    expect(toInstruction(new RecursiaIx(PROGRAM_ID), key(), obs).keys[7].pubkey.equals(oraoRandomnessPda(seed))).toBe(true);
   });
   it("resolves accepted swaps after the target slot, cancels expired offers (also while paused)", () => {
     const w = key();
@@ -125,7 +148,7 @@ describe("keeper planner", () => {
       key: key(),
       acc: {
         world: w, offerer: key(), acceptor: key(), indexA: 1, indexB: 2, weightBps: 5_000, premium: 0n, bounty: 200_000n,
-        createdSlot: 0n, expirySlot: 1_200_000n, accepted: false, targetSlot: 0n, rearms: 0, ...o,
+        createdSlot: 0n, expirySlot: 1_200_000n, accepted: false, targetSlot: 0n, rearms: 0, vrfSeed: new Uint8Array(32).fill(7), ...o,
       },
     });
     const swaps = [
@@ -135,9 +158,10 @@ describe("keeper planner", () => {
       sw({ indexA: 4 }), // open offer
       sw({ indexA: 5, accepted: true, targetSlot: 1_000_050n, bounty: 0n }), // nothing to earn
     ];
-    const got = plan(snap({ swaps })).filter((a) => a.kind.startsWith("swap"));
+    const vrf = new Map([[seedHex(new Uint8Array(32).fill(7)), "fulfilled" as const]]);
+    const got = plan(snap({ swaps, vrf })).filter((a) => a.kind.startsWith("swap"));
     expect(got.map((a) => `${a.kind}:${"a" in a ? a.a : ""}`)).toEqual(["swap_cancel:3", "swap_resolve:1"]);
-    expect(plan(snap({ config: cfg({ paused: true }), swaps })).map((a) => a.kind)).toEqual(["swap_cancel", "swap_resolve"]);
+    expect(plan(snap({ config: cfg({ paused: true }), swaps, vrf })).map((a) => a.kind)).toEqual(["swap_cancel", "swap_resolve"]);
     const rx = new RecursiaIx(PROGRAM_ID);
     for (const a of got) expect(toInstruction(rx, key(), a).keys.filter((k) => k.isSigner)).toHaveLength(1);
   });

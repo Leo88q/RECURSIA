@@ -7,10 +7,11 @@
  * conditions, so a stale snapshot can only cause a failed simulation, never a
  * wrong state transition (checklist #17 race conditions, #28 keeper trust).
  */
+import { Buffer } from "buffer";
 import type { PublicKey } from "@solana/web3.js";
 import {
-  BREACH_RESONANCE, harbergerDue, QUANTUM_BOUNTY_DIV, QUANTUM_REVEAL_SLOTS,
-  type ConfigAccount, type SeasonAccount, type TournamentAccount, type SuperpositionAccount, type SwapAccount, type TerritoryAccount, type WorldAccount,
+  BREACH_RESONANCE, harbergerDue, oraoRandomnessPda, QUANTUM_BOUNTY_DIV,
+  type ConfigAccount, type OraoState, type SeasonAccount, type TournamentAccount, type SuperpositionAccount, type SwapAccount, type TerritoryAccount, type WorldAccount,
 } from "@recursia/sdk";
 
 export interface Snapshot {
@@ -22,6 +23,10 @@ export interface Snapshot {
   swaps?: { key: PublicKey; acc: SwapAccount }[];
   season?: SeasonAccount;
   tournaments?: { key: PublicKey; acc: TournamentAccount }[];
+  /** ORAO VRF request state per seed (hex) for measurable superpositions / accepted SWAPs. */
+  vrf?: Map<string, OraoState["state"]>;
+  /** ORAO treasury (from its NetworkState) — needed to create requests. */
+  oraoTreasury?: PublicKey;
 }
 
 export type Action =
@@ -33,9 +38,10 @@ export type Action =
   | { kind: "settle"; world: PublicKey; index: number; holder: PublicKey }
   | { kind: "breach"; child: PublicKey; host: PublicKey }
   | { kind: "tick"; world: PublicKey; module: PublicKey; host: PublicKey | null }
-  | { kind: "quantum_observe"; world: PublicKey; index: number }
+  | { kind: "vrf_request"; seed: Uint8Array; treasury: PublicKey }
+  | { kind: "quantum_observe"; world: PublicKey; index: number; vrf: PublicKey }
   | { kind: "quantum_decohere"; world: PublicKey; index: number; owner: PublicKey }
-  | { kind: "swap_resolve"; world: PublicKey; a: number; b: number; offerer: PublicKey; acceptor: PublicKey }
+  | { kind: "swap_resolve"; world: PublicKey; a: number; b: number; offerer: PublicKey; acceptor: PublicKey; vrf: PublicKey }
   | { kind: "swap_cancel"; world: PublicKey; a: number; b: number; offerer: PublicKey };
 
 export interface PlanLimits {
@@ -50,20 +56,29 @@ export interface PlanLimits {
 }
 export const DEFAULT_LIMITS: PlanLimits = { maxTicks: 24, maxSettles: 16, minTicksOfEnergy: 1n, maxQuantum: 16 };
 
+export const seedHex = (seed: Uint8Array) => Buffer.from(seed).toString("hex");
+
 /**
  * Quantum measurements. `observe` is allowed even while paused (settlement,
  * like withdrawals); `decohere` only when unpaused. Earliest target first.
+ * VRF liveness: if nobody has asked ORAO for a measurable seed yet, the keeper
+ * asks (the answer depends only on the seed); once fulfilled it measures.
  */
 export function planQuantum(s: Snapshot, limits: PlanLimits = DEFAULT_LIMITS): Action[] {
   const out: Action[] = [];
+  const vrfStep = (seed: Uint8Array, measure: (vrf: PublicKey) => Action) => {
+    const st = s.vrf?.get(seedHex(seed)) ?? "missing";
+    if (st === "fulfilled") out.push(measure(oraoRandomnessPda(seed)));
+    else if (st === "missing" && s.oraoTreasury) out.push({ kind: "vrf_request", seed, treasury: s.oraoTreasury });
+    // "pending": ORAO is answering; "invalid": someone squatted nothing — PDA is fixed, just wait
+  };
   const sps = [...(s.superpositions ?? [])].sort((a, b) => (a.acc.targetSlot < b.acc.targetSlot ? -1 : 1));
   for (const { acc } of sps) {
     if (out.length >= limits.maxQuantum) break;
     if (acc.stake / QUANTUM_BOUNTY_DIV === 0n) continue; // nothing to earn, let the owner do it
     if (!acc.observed && s.slot > acc.targetSlot) {
-      if (s.slot > acc.targetSlot + BigInt(QUANTUM_REVEAL_SLOTS) && !s.config.paused) {
-        out.push({ kind: "quantum_decohere", world: acc.world, index: acc.index, owner: acc.owner });
-      } else out.push({ kind: "quantum_observe", world: acc.world, index: acc.index });
+      // while unobserved, `entropy` holds the VRF seed fixed at commit
+      vrfStep(acc.entropy, (vrf) => ({ kind: "quantum_observe", world: acc.world, index: acc.index, vrf }));
     } else if (acc.observed && s.slot > acc.revealDeadline && !s.config.paused) {
       out.push({ kind: "quantum_decohere", world: acc.world, index: acc.index, owner: acc.owner });
     }
@@ -75,7 +90,7 @@ export function planQuantum(s: Snapshot, limits: PlanLimits = DEFAULT_LIMITS): A
     if (out.length >= limits.maxQuantum) break;
     if (acc.bounty === 0n) continue;
     if (acc.accepted && s.slot > acc.targetSlot) {
-      out.push({ kind: "swap_resolve", world: acc.world, a: acc.indexA, b: acc.indexB, offerer: acc.offerer, acceptor: acc.acceptor });
+      vrfStep(acc.vrfSeed, (vrf) => ({ kind: "swap_resolve", world: acc.world, a: acc.indexA, b: acc.indexB, offerer: acc.offerer, acceptor: acc.acceptor, vrf }));
     } else if (!acc.accepted && s.slot > acc.expirySlot) {
       out.push({ kind: "swap_cancel", world: acc.world, a: acc.indexA, b: acc.indexB, offerer: acc.offerer });
     }

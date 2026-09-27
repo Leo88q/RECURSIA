@@ -22,8 +22,8 @@ describe("layout & instructions", () => {
     expect(ix.seasonSubmit(k).keys).toHaveLength(3);
     expect(ix.claimSeasonPrize(k, 0).keys).toHaveLength(7);
     expect(ix.tick(k, k, k).keys).toHaveLength(14);
-    expect(ix.quantumCommit(k, k, 1, new Uint8Array(32).fill(1)).keys).toHaveLength(14);
-    expect(ix.quantumObserve(k, k, 1).keys).toHaveLength(10);
+    expect(ix.quantumCommit(k, k, 1, new Uint8Array(32).fill(1)).keys).toHaveLength(15);
+    expect(ix.quantumObserve(k, k, 1, k).keys).toHaveLength(10);
     expect(ix.quantumCollapse(k, k, 1, 1n, 2n, 5000, new Uint8Array(32)).keys).toHaveLength(11);
     expect(ix.quantumDecohere(k, k, 1, k).keys).toHaveLength(10);
     expect(ix.plant(k, k, 1, 1n).keys).toHaveLength(9);

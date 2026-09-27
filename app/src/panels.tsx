@@ -118,7 +118,6 @@ export function QuantumCard({ sb, world, idx, notify }: { sb: Sandbox; world: MW
           <dt>Состояние</dt><dd>{sp.observed ? "наблюдали — волновая функция зафиксирована" : left > 0 ? `ждёт энтропии слота ${sp.targetSlot} (${left} сл.)` : "готова к измерению"}</dd>
           <dt>Ставка</dt><dd>{fmtRcr(sp.stake, 2)} <span className="muted">(вернётся при коллапсе)</span></dd>
           {sp.world2 && <><dt>Запутана с</dt><dd>{m.world(sp.world2).name} #{sp.index2}</dd></>}
-          {sp.rearms > 0 && <><dt>Перевзводов</dt><dd>{sp.rearms}</dd></>}
         </dl>
         {sp.observed && preview && secret && (
           <p className="small">
@@ -166,7 +165,7 @@ function SwapRow({ sb, s, notify }: { sb: Sandbox; s: MSwap; notify: (e: string 
   const m = sb.m; const w = m.world(s.world);
   const gap = w.alive[s.indexB] - w.alive[s.indexA];
   const state = s.accepted
-    ? (m.slot > s.targetSlot ? "измеряется…" : `ждёт хеша слота ${s.targetSlot} (${s.targetSlot - m.slot} сл.)`)
+    ? (m.slot > s.targetSlot ? "ждёт ответа ORAO VRF…" : `измерение после слота ${s.targetSlot} (${s.targetSlot - m.slot} сл.)`)
     : m.slot > s.expirySlot ? "истекло" : `открыто ещё ${s.expirySlot - m.slot} сл.`;
   return (
     <div className="swap-row">

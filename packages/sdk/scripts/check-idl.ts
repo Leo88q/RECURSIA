@@ -50,13 +50,13 @@ const built: Record<string, TransactionInstruction> = {
   agent_plant: x.agentPlant(a, b, c, 1, 1n),
   agent_acquire: x.agentAcquire(a, b, c, 1, k(), 1n, 1n, 1n),
   quantum_commit: x.quantumCommit(a, b, 1, new Uint8Array(32).fill(1), { world: c, index: 2 }),
-  quantum_observe: x.quantumObserve(a, b, 1),
+  quantum_observe: x.quantumObserve(a, b, 1, k()),
   quantum_collapse: x.quantumCollapse(a, b, 1, 1n, 2n, 5_000, new Uint8Array(32), { world: c, index: 2 }),
   quantum_decohere: x.quantumDecohere(a, b, 1, c),
   create_neutral_world: x.createNeutralWorld(a, 0n, b, "N", 0n).ix,
   swap_offer: x.swapOffer(a, b, 1, 2, 5_000, 1n),
   swap_accept: x.swapAccept(a, b, 1, 2),
-  swap_resolve: x.swapResolve(a, b, 1, 2, c, k()),
+  swap_resolve: x.swapResolve(a, b, 1, 2, c, k(), k()),
   swap_cancel: x.swapCancel(a, b, 1, 2, c),
 };
 

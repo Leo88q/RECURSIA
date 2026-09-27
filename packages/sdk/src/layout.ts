@@ -247,12 +247,14 @@ export function decodeSuperposition(data: Uint8Array): SuperpositionAccount {
 export interface SwapAccount {
   world: PublicKey; offerer: PublicKey; acceptor: PublicKey; indexA: number; indexB: number; weightBps: number;
   premium: bigint; bounty: bigint; createdSlot: bigint; expirySlot: bigint; accepted: boolean; targetSlot: bigint; rearms: number;
+  /** ORAO VRF request seed fixed at acceptance (zeros before). */
+  vrfSeed: Uint8Array;
 }
 export function decodeSwap(data: Uint8Array): SwapAccount {
   const r = checkDisc(data, "QuantumSwap");
   r.u8(); r.u8();
   return {
     world: r.pubkey(), offerer: r.pubkey(), acceptor: r.pubkey(), indexA: r.u8(), indexB: r.u8(), weightBps: r.u16(),
-    premium: r.u64(), bounty: r.u64(), createdSlot: r.u64(), expirySlot: r.u64(), accepted: r.bool(), targetSlot: r.u64(), rearms: r.u8(),
+    premium: r.u64(), bounty: r.u64(), createdSlot: r.u64(), expirySlot: r.u64(), accepted: r.bool(), targetSlot: r.u64(), rearms: r.u8(), vrfSeed: r.bytes(32),
   };
 }

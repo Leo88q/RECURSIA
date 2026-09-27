@@ -420,6 +420,8 @@ pub struct QuantumSwap {
     pub accepted: bool,
     pub target_slot: u64,
     pub rearms: u8,
+    /// ORAO VRF request seed, fixed at acceptance (zero before).
+    pub vrf_seed: [u8; 32],
 }
 
 #[cfg(test)]

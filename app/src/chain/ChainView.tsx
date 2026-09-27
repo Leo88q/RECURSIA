@@ -95,7 +95,7 @@ export function ChainView({ route, go }: { route: Extract<Route, { page: "chain"
     </div>
   );
 
-  const c: ChainCtx = { rx, programId, config: data.config, data, my, me, cur, model, detail, slot: data.slot, run, withAta, openWorld, selectCell };
+  const c: ChainCtx = { rx, connection, programId, config: data.config, data, my, me, cur, model, detail, slot: data.slot, run, withAta, openWorld, selectCell };
 
   if (route.page === "chain-lab") return <ErrorBoundary label="chain-lab"><ChainLab c={c} /></ErrorBoundary>;
 

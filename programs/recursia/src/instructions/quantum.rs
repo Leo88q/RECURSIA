@@ -6,16 +6,17 @@
 //!     front-running). Plant cost is spent now (studio share + reward pool); a stake is escrowed in the
 //!     world vault. Optionally entangles a territory in ANOTHER world.
 //!  2. `quantum_observe` — permissionless after `target_slot`. Fixes the entropy
-//!     to the hash of the slot scheduled at commit time (the observer cannot
-//!     choose it) and pays the observer a bounty. If the scheduled entry fell
-//!     out of the SlotHashes window, the measurement is re-armed and part of
-//!     the stake goes to the reward pool (the owner cannot "wait out" a bad outcome).
+//!     from the ORAO VRF answer to the seed fixed at commit (salted with the
+//!     latest slot hash of the commit slot, so it could not be requested in
+//!     advance); the observer cannot choose it and gets a bounty. Anyone may
+//!     create the ORAO request for that seed — the answer doesn't depend on who
+//!     asks or when, so the owner cannot "wait out" a bad outcome either.
 //!  3. `quantum_collapse` — the owner reveals; the state collapses into A or B
 //!     (entangled partner gets the other one), may tunnel into a neighbour
 //!     block; the remaining stake is refunded.
-//!  4. `quantum_decohere` — permissionless after the reveal window: remaining
-//!     stake goes to the reward pool (bounty to the caller). Withholding a bad outcome
-//!     therefore always costs the stake.
+//!  4. `quantum_decohere` — permissionless once an OBSERVED superposition's reveal
+//!     window has passed: remaining stake goes to the reward pool (bounty to the
+//!     caller). Withholding a bad outcome therefore always costs the stake.
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
@@ -67,6 +68,10 @@ pub struct QuantumCommit<'info> {
     /// Player reward pool (SKR). Receives the non-studio part of every spend.
     #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
     pub reward_pool: Box<Account<'info, TokenAccount>>,
+    /// CHECK: address-pinned SlotHashes sysvar; only its newest entry is read
+    /// (it salts the VRF seed so randomness can't be requested before the position exists).
+    #[account(address = anchor_lang::solana_program::sysvar::slot_hashes::ID @ RecursiaError::SlotHashes)]
+    pub slot_hashes: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
@@ -127,6 +132,10 @@ pub fn quantum_commit(ctx: Context<QuantumCommit>, index: u8, commitment: [u8; 3
         w.superpositions = w.superpositions.saturating_add(1);
     }
     let target_slot = slot.checked_add(QUANTUM_DELAY_SLOTS).ok_or(RecursiaError::MathOverflow)?;
+    let recent = {
+        let data = ctx.accounts.slot_hashes.try_borrow_data()?;
+        quantum::latest_slot_hash(&data).ok_or(RecursiaError::SlotHashes)?
+    };
     let sp = &mut ctx.accounts.superposition;
     sp.version = ACCOUNT_VERSION;
     sp.bump = ctx.bumps.superposition;
@@ -140,6 +149,8 @@ pub fn quantum_commit(ctx: Context<QuantumCommit>, index: u8, commitment: [u8; 3
     sp.target_slot = target_slot;
     sp.observed = false;
     sp.stake = stake;
+    // until observation `entropy` holds the VRF request seed (replaced by the entropy on observe)
+    sp.entropy = quantum::vrf_seed_superposition(&world_key.to_bytes(), index, &commitment, &recent);
 
     // ---- interactions
     let tp = ctx.accounts.token_program.to_account_info();
@@ -177,9 +188,10 @@ pub struct QuantumObserve<'info> {
     pub superposition: Box<Account<'info, Superposition>>,
     #[account(mut, token::mint = mint)]
     pub observer_token: Box<Account<'info, TokenAccount>>,
-    /// CHECK: address-pinned SlotHashes sysvar, parsed with bounds checks.
-    #[account(address = anchor_lang::solana_program::sysvar::slot_hashes::ID @ RecursiaError::SlotHashes)]
-    pub slot_hashes: UncheckedAccount<'info>,
+    /// CHECK: ORAO VRF randomness account. Validated in the handler: address ==
+    /// ORAO PDA of the seed fixed when the position was opened, owner == ORAO,
+    /// state == Fulfilled with that seed (`quantum::orao_fulfilled`).
+    pub vrf_request: UncheckedAccount<'info>,
     /// Player reward pool (SKR). Receives the non-studio part of every spend.
     #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
     pub reward_pool: Box<Account<'info, TokenAccount>>,
@@ -192,10 +204,8 @@ pub fn quantum_observe(ctx: Context<QuantumObserve>) -> Result<()> {
     let sp_ro = &ctx.accounts.superposition;
     require!(!sp_ro.observed, RecursiaError::AlreadyObserved);
     require!(slot > sp_ro.target_slot, RecursiaError::NotMeasurable);
-    let lookup = {
-        let data = ctx.accounts.slot_hashes.try_borrow_data()?;
-        quantum::slot_hash_lookup(&data, sp_ro.target_slot).ok_or(RecursiaError::SlotHashes)?
-    };
+    let randomness = read_vrf(&ctx.accounts.vrf_request, &sp_ro.entropy)?;
+    let hash = quantum::entropy_from_vrf(&randomness);
     let world_key = ctx.accounts.world.key();
     let index = sp_ro.index;
     let bump = ctx.accounts.config.bump;
@@ -204,39 +214,19 @@ pub fn quantum_observe(ctx: Context<QuantumObserve>) -> Result<()> {
     let vault = ctx.accounts.world_vault.to_account_info();
     let cfg = ctx.accounts.config.to_account_info();
 
-    match lookup {
-        quantum::SlotHashLookup::Found { slot: measured, hash } => {
-            let bounty = ctx.accounts.superposition.stake / QUANTUM_BOUNTY_DIV;
-            {
-                let sp = &mut ctx.accounts.superposition;
-                sp.observed = true;
-                sp.observed_slot = slot;
-                sp.entropy = hash;
-                sp.reveal_deadline = slot.checked_add(QUANTUM_REVEAL_SLOTS).ok_or(RecursiaError::MathOverflow)?;
-                sp.stake = math::sub(sp.stake, bounty)?;
-                let w = &mut ctx.accounts.world;
-                w.quantum_escrow = math::sub(w.quantum_escrow, bounty)?;
-            }
-            vault_transfer(&tp, &mint, &vault, &ctx.accounts.observer_token.to_account_info(), &cfg, bump, bounty)?;
-            emit!(Observed { world: world_key, index, observer: ctx.accounts.observer.key(), measured_slot: measured, entropy: hash, bounty });
-        }
-        quantum::SlotHashLookup::Expired { .. } => {
-            let penalty = math::bps_floor(ctx.accounts.superposition.stake, QUANTUM_REARM_PENALTY_BPS)?;
-            let new_target = slot.checked_add(QUANTUM_DELAY_SLOTS).ok_or(RecursiaError::MathOverflow)?;
-            {
-                let sp = &mut ctx.accounts.superposition;
-                sp.stake = math::sub(sp.stake, penalty)?;
-                sp.target_slot = new_target;
-                sp.rearms = sp.rearms.saturating_add(1);
-                let w = &mut ctx.accounts.world;
-                w.quantum_escrow = math::sub(w.quantum_escrow, penalty)?;
-                record_pool_inflow(&mut ctx.accounts.config, penalty)?;
-            }
-            vault_transfer(&tp, &mint, &vault, &ctx.accounts.reward_pool.to_account_info(), &cfg, bump, penalty)?;
-            emit!(Rearmed { world: world_key, index, new_target_slot: new_target, penalty });
-        }
-        quantum::SlotHashLookup::NotYet { .. } => return err!(RecursiaError::NotMeasurable),
+    let bounty = ctx.accounts.superposition.stake / QUANTUM_BOUNTY_DIV;
+    {
+        let sp = &mut ctx.accounts.superposition;
+        sp.observed = true;
+        sp.observed_slot = slot;
+        sp.entropy = hash;
+        sp.reveal_deadline = slot.checked_add(QUANTUM_REVEAL_SLOTS).ok_or(RecursiaError::MathOverflow)?;
+        sp.stake = math::sub(sp.stake, bounty)?;
+        let w = &mut ctx.accounts.world;
+        w.quantum_escrow = math::sub(w.quantum_escrow, bounty)?;
     }
+    vault_transfer(&tp, &mint, &vault, &ctx.accounts.observer_token.to_account_info(), &cfg, bump, bounty)?;
+    emit!(Observed { world: world_key, index, observer: ctx.accounts.observer.key(), measured_slot: slot, entropy: hash, bounty });
     ctx.accounts.world_vault.reload()?;
     assert_world_solvent(&ctx.accounts.world, ctx.accounts.world_vault.amount)?;
     Ok(())
@@ -390,12 +380,12 @@ pub fn quantum_decohere(ctx: Context<QuantumDecohere>) -> Result<()> {
     require_active(&ctx.accounts.config)?;
     let slot = Clock::get()?.slot;
     let sp = Superposition::clone(&ctx.accounts.superposition);
-    let expired = if sp.observed {
-        slot > sp.reveal_deadline
-    } else {
-        slot > sp.target_slot.saturating_add(QUANTUM_REVEAL_SLOTS)
-    };
-    require!(expired, RecursiaError::StillCoherent);
+    // Only an OBSERVED superposition whose owner didn't reveal in time can be
+    // decohered. An unobserved one is waiting for the VRF: its outcome is already
+    // fixed by the seed and becomes public the moment ORAO answers (anyone then
+    // observes for the bounty), so the owner can't hide it — and an oracle outage
+    // must never burn a player's stake.
+    require!(sp.observed && slot > sp.reveal_deadline, RecursiaError::StillCoherent);
     let bounty = sp.stake / QUANTUM_BOUNTY_DIV;
     let penalty = math::sub(sp.stake, bounty)?;
     {

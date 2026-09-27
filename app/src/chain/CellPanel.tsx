@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import {
   PATTERNS, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS, REBELLION_MIN_VOTES, collapse, commitment, epochTax, randomSalt,
-  type SuperpositionAccount,
+  type SuperpositionAccount, type SwapAccount,
 } from "@recursia/sdk";
 import { PatternEditor, PATTERN_NAMES } from "../panels";
 import { rcr, shortAddr, slotsToHuman, toInput } from "../lib/format";
@@ -10,6 +10,7 @@ import { exportSecret, importSecret, loadSecret, removeSecret, saveSecret } from
 import { AmountField, Address, amountOf, Skeleton } from "../ui/fields";
 import { useToast } from "../ui/Toast";
 import { blocked, type ChainCtx } from "./ctx";
+import { useVrf, VrfAction } from "./vrf";
 import { CreateWorldButton } from "./CreateWorld";
 import { Art, Glyph } from "../ui/Icon";
 
@@ -177,19 +178,22 @@ function SuperpositionCard({ c, idx, sp }: { c: ChainCtx; idx: number; sp: Super
   const pv = sp.observed && secret ? collapse(sp.entropy, sp.commitment, secret.w) : null;
   const slot = BigInt(c.slot);
   const measurable = !sp.observed && slot > sp.targetSlot;
-  const decoherable = sp.observed ? slot > sp.revealDeadline : slot > sp.targetSlot + BigInt(QUANTUM_REVEAL_SLOTS);
+  // an unobserved superposition waits for the oracle and is never slashed
+  const decoherable = sp.observed && slot > sp.revealDeadline;
+  const vrf = useVrf(c.connection, measurable ? sp.entropy : null); // unobserved: entropy = VRF seed
   const ent = sp.world2.equals(PublicKey.default) ? null : { world: sp.world2, index: sp.index2 };
   return (
     <div className="card quantum-card">
       <div className="card-title"><Art name="quantum" size={20} />Суперпозиция {isOwner ? "(ваша)" : `(${shortAddr(sp.owner.toBase58())})`}</div>
       <dl className="kv">
-        <dt>Состояние</dt><dd>{sp.observed ? `наблюдали, раскрыть до слота ${sp.revealDeadline}` : measurable ? "готова к наблюдению" : `ждёт слота ${sp.targetSlot}`}</dd>
+        <dt>Состояние</dt><dd>{sp.observed ? `наблюдали, раскрыть до слота ${sp.revealDeadline}` : measurable ? "готова к наблюдению (ORAO VRF)" : `ждёт слота ${sp.targetSlot}`}</dd>
         <dt>Залог</dt><dd>{rcr(sp.stake)}</dd>
         {sp.observed && !decoherable && <><dt>Осталось</dt><dd>{slotsToHuman(sp.revealDeadline - slot)}</dd></>}
       </dl>
       {pv && <div className="small">Исход: ветвь <b>{pv.branchA ? "A" : "B"}</b>{pv.tunnel ? <> + <Art name="energy" size={16} /> туннелирование</> : ""}</div>}
       <div className="row-wrap">
-        {measurable && <button className="btn" disabled={!!blocked(c, { paused: false })} onClick={() => c.run({ title: "Наблюдение", lines: ["Фиксирует энтропию слота для суперпозиции", `Награда наблюдателя: ${rcr(sp.stake / 20n)}`], ixs: c.withAta([c.rx.quantumObserve(me!, k, idx)]) })}><Art name="observe" size={19} /> Наблюдать · +{rcr(sp.stake / 20n)}</button>}
+        {measurable && <VrfAction c={c} v={vrf} title="Наблюдение" lines={["Фиксирует энтропию из подписанного ответа ORAO VRF", `Награда наблюдателя: ${rcr(sp.stake / 20n)}`]}
+          measure={(pda) => c.withAta([c.rx.quantumObserve(me!, k, idx, pda)])} label={<><Art name="observe" size={19} /> Наблюдать · +{rcr(sp.stake / 20n)}</>} />}
         {isOwner && secret && sp.observed && !decoherable && <button className="btn portal" onClick={async () => {
           const r = await c.run({ title: "Коллапс волновой функции", lines: [`Раскрытие коммита клетки #${idx}`, `Возврат залога ${rcr(sp.stake)}`], ixs: c.withAta([c.rx.quantumCollapse(me!, k, idx, secret.a, secret.b, secret.w, secret.salt, ent)]), successText: "Волновая функция коллапсировала" });
           if (r.ok) removeSecret(k.toBase58(), idx, me!.toBase58());
@@ -251,23 +255,28 @@ function SwapCard({ c, idx }: { c: ChainCtx; idx: number }) {
         </>
       )}
       {!canOffer && related.length === 0 && <div className="muted small">{!me ? "Подключите кошелёк" : t.holder === me.toBase58() ? "Выберите чужую клетку, чтобы предложить обмен" : myBlocks.length === 0 ? "Нужна своя клетка в этом мире" : "Клетка свободна"}</div>}
-      {related.map(({ key, acc: s }) => {
+      {related.map(({ key, acc: s }) => <SwapRow key={key.toBase58()} c={c} s={s} />)}
+    </div>
+  );
+}
+
+function SwapRow({ c, s }: { c: ChainCtx; s: SwapAccount }) {
+  const me = c.me, k = c.cur!.key;
         const slot = BigInt(c.slot);
+        const vrf = useVrf(c.connection, s.accepted && slot > s.targetSlot ? s.vrfSeed : null);
         const expired = !s.accepted && slot > s.expirySlot;
         return (
-          <div key={key.toBase58()} className="swap-row small">
+          <div className="swap-row small">
             <div>#{s.indexA} ⇄ #{s.indexB} · p={s.weightBps / 100}% · премия {rcr(s.premium)}</div>
             <div className="muted">{s.accepted ? (slot > s.targetSlot ? "готов к разрешению" : `ждёт слота ${s.targetSlot}`) : expired ? "истекло" : `открыто ${slotsToHuman(s.expirySlot - slot)}`}</div>
             <div className="row-wrap">
-              {me && !s.accepted && !expired && s.acceptor.equals(me) && <button className="btn portal" onClick={() => c.run({ title: "Принять SWAP", lines: [`#${s.indexA} ⇄ #${s.indexB} с вероятностью ${s.weightBps / 100}%`, `Премия ${rcr(s.premium)} поступит вам при разрешении`, `Исход решит хеш слота через ${QUANTUM_DELAY_SLOTS} слотов`], ixs: [c.rx.swapAccept(me, k, s.indexA, s.indexB)] })}>Принять · +{rcr(s.premium)}</button>}
-              {me && s.accepted && slot > s.targetSlot && <button className="btn" onClick={() => c.run({ title: "Разрешить SWAP", lines: ["Измерение по SlotHashes", `Награда: ${rcr(s.bounty)}`], ixs: c.withAta([c.rx.swapResolve(me, k, s.indexA, s.indexB, s.offerer, s.acceptor)]) })}>Разрешить · +{rcr(s.bounty)}</button>}
+              {me && !s.accepted && !expired && s.acceptor.equals(me) && <button className="btn portal" onClick={() => c.run({ title: "Принять SWAP", lines: [`#${s.indexA} ⇄ #${s.indexB} с вероятностью ${s.weightBps / 100}%`, `Премия ${rcr(s.premium)} поступит вам при разрешении`, `Исход решит ORAO VRF по сиду, зафиксированному в момент принятия (через ${QUANTUM_DELAY_SLOTS} слотов)`], ixs: [c.rx.swapAccept(me, k, s.indexA, s.indexB)] })}>Принять · +{rcr(s.premium)}</button>}
+              {me && s.accepted && slot > s.targetSlot && <VrfAction c={c} v={vrf} title="Разрешить SWAP" lines={["Измерение по ответу ORAO VRF", `Награда: ${rcr(s.bounty)}`]}
+                measure={(pda) => c.withAta([c.rx.swapResolve(me, k, s.indexA, s.indexB, s.offerer, s.acceptor, pda)])} label={<>Разрешить · +{rcr(s.bounty)}</>} />}
               {me && !s.accepted && (s.offerer.equals(me) || expired) && <button className="btn" onClick={() => c.run({ title: "Отменить SWAP", lines: [`Премия ${rcr(s.premium)} вернётся предложившему`, ...(expired && !s.offerer.equals(me) ? [`Ваша награда: ${rcr(s.bounty)}`] : [])], ixs: c.withAta([c.rx.swapCancel(me, k, s.indexA, s.indexB, s.offerer)]) })}>Отменить</button>}
             </div>
           </div>
         );
-      })}
-    </div>
-  );
 }
 
 function RebellionCard({ c, idx }: { c: ChainCtx; idx: number }) {

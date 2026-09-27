@@ -3,17 +3,16 @@
 //!  1. `swap_offer`   — holder of block A offers holder of block B a SWAP with
 //!     probability `w`. Pays a premium (escrowed) + an offer fee (= plant_cost:
 //!     4/5 is a player spend — studio share + reward pool, 1/5 escrowed as the resolver bounty).
-//!  2. `swap_accept`  — holder of B accepts; the measurement slot is fixed NOW
-//!     (`slot + QUANTUM_DELAY_SLOTS`), before its hash exists.
-//!  3. `swap_resolve` — permissionless after the target slot. roll =
-//!     H("recursia:swap", slot_hash, swap) → with probability w the two blocks
+//!  2. `swap_accept`  — holder of B accepts; the VRF seed is fixed NOW (salted
+//!     with the latest slot hash, so nobody could have requested it earlier).
+//!  3. `swap_resolve` — permissionless after the target slot, once ORAO has
+//!     answered the seed. roll = H("recursia:swap", entropy(VRF), swap) → with probability w the two blocks
 //!     exchange contents (all life inside moves). Premium → acceptor (paid for
 //!     taking the risk, whatever the outcome). Once accepted the swap is
 //!     BINDING on the blocks, not on the people: if a block changes hands in
 //!     the meantime the new holder inherits the pending swap (it is public
 //!     state). A "void if holder changed" rule would let the losing side read
 //!     the target hash and void the bet by buying its own block from an alt.
-//!     If the target fell out of SlotHashes the measurement is re-armed.
 //!  4. `swap_cancel`  — offerer before acceptance, anyone after expiry.
 //!
 //! No hidden information is involved (everything is public), so there is no
@@ -171,6 +170,10 @@ pub struct SwapAccept<'info> {
         seeds = [SEED_PLAYER, acceptor.key().as_ref()], bump
     )]
     pub acceptor_player: Box<Account<'info, Player>>,
+    /// CHECK: address-pinned SlotHashes sysvar; only its newest entry is read
+    /// (it salts the VRF seed so randomness can't be requested before the position exists).
+    #[account(address = anchor_lang::solana_program::sysvar::slot_hashes::ID @ RecursiaError::SlotHashes)]
+    pub slot_hashes: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -198,9 +201,15 @@ pub fn swap_accept(ctx: Context<SwapAccept>) -> Result<()> {
         }
     }
     let target = slot.checked_add(QUANTUM_DELAY_SLOTS).ok_or(RecursiaError::MathOverflow)?;
+    let recent = {
+        let data = ctx.accounts.slot_hashes.try_borrow_data()?;
+        quantum::latest_slot_hash(&data).ok_or(RecursiaError::SlotHashes)?
+    };
+    let swap_key = ctx.accounts.swap.key();
     let s = &mut ctx.accounts.swap;
     s.accepted = true;
     s.target_slot = target;
+    s.vrf_seed = quantum::vrf_seed_swap(&swap_key.to_bytes(), &recent, slot);
     emit!(SwapAccepted { world: s.world, index_a: s.index_a, index_b: s.index_b, target_slot: target });
     Ok(())
 }
@@ -231,9 +240,10 @@ pub struct SwapResolve<'info> {
     pub claims_vault: Box<Account<'info, TokenAccount>>,
     #[account(mut, token::mint = mint)]
     pub resolver_token: Box<Account<'info, TokenAccount>>,
-    /// CHECK: address-pinned SlotHashes sysvar, parsed with bounds checks.
-    #[account(address = anchor_lang::solana_program::sysvar::slot_hashes::ID @ RecursiaError::SlotHashes)]
-    pub slot_hashes: UncheckedAccount<'info>,
+    /// CHECK: ORAO VRF randomness account. Validated in the handler: address ==
+    /// ORAO PDA of the seed fixed when the position was opened, owner == ORAO,
+    /// state == Fulfilled with that seed (`quantum::orao_fulfilled`).
+    pub vrf_request: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -248,23 +258,7 @@ pub fn swap_resolve(ctx: Context<SwapResolve>) -> Result<()> {
     require!(s.accepted, RecursiaError::SwapNotAccepted);
     require!(slot > s.target_slot, RecursiaError::NotMeasurable);
     check_player_pda(&ctx.accounts.acceptor_player, &s.acceptor, ctx.program_id)?;
-    let lookup = {
-        let data = ctx.accounts.slot_hashes.try_borrow_data()?;
-        quantum::slot_hash_lookup(&data, s.target_slot).ok_or(RecursiaError::SlotHashes)?
-    };
-    let entropy = match lookup {
-        quantum::SlotHashLookup::Found { hash, .. } => hash,
-        quantum::SlotHashLookup::NotYet { .. } => return err!(RecursiaError::NotMeasurable),
-        quantum::SlotHashLookup::Expired { .. } => {
-            // Nobody settled within the SlotHashes window: pick a fresh future slot.
-            let new_target = slot.checked_add(QUANTUM_DELAY_SLOTS).ok_or(RecursiaError::MathOverflow)?;
-            let sw = &mut ctx.accounts.swap;
-            sw.target_slot = new_target;
-            sw.rearms = sw.rearms.saturating_add(1);
-            emit!(SwapRearmed { world: world_key, index_a: s.index_a, index_b: s.index_b, new_target_slot: new_target });
-            return Ok(());
-        }
-    };
+    let entropy = quantum::entropy_from_vrf(&read_vrf(&ctx.accounts.vrf_request, &s.vrf_seed)?);
 
     // ---- effects
     let swapped = swap_roll(&entropy, &swap_key) < s.weight_bps as u32;

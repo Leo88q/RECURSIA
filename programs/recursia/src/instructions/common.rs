@@ -357,3 +357,16 @@ pub fn check_player_pda(p: &Account<Player>, owner: &Pubkey, program_id: &Pubkey
     require_keys_eq!(expected, p.key(), RecursiaError::Mismatch);
     Ok(())
 }
+
+/// Read a FULFILLED ORAO VRF answer for `seed` (checklist #21).
+/// The account must sit at the ORAO PDA of exactly this seed and be owned by
+/// ORAO — a look-alike account from any other program or for any other seed is
+/// rejected, so the caller can't choose the randomness.
+pub fn read_vrf(acc: &AccountInfo, seed: &[u8; 32]) -> Result<[u8; 64]> {
+    let (expected, _) =
+        Pubkey::find_program_address(&[crate::quantum::ORAO_RANDOMNESS_SEED, seed], &crate::quantum::ORAO_VRF_ID);
+    require_keys_eq!(*acc.key, expected, RecursiaError::Mismatch);
+    require_keys_eq!(*acc.owner, crate::quantum::ORAO_VRF_ID, RecursiaError::VrfPending);
+    let data = acc.try_borrow_data()?;
+    crate::quantum::orao_fulfilled(&data, seed).ok_or_else(|| error!(RecursiaError::VrfPending))
+}

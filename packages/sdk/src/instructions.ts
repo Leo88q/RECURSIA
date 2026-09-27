@@ -182,16 +182,19 @@ export class RecursiaIx {
       S(holder, true), W(p.config()), R(this.mint), W(world), W(p.worldVault(world)), W(p.territory(world, index)),
       W(p.superposition(world, index)), W(ata(holder, this.mint)),
       this.opt(entangle?.world), this.opt(entangle ? p.territory(entangle.world, entangle.index) : null),
-      W(p.treasury()), W(p.rewardPool()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
+      W(p.treasury()), W(p.rewardPool()), R(SYSVAR_SLOT_HASHES), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
     ], (w) => w.u8(index).bytes(commitment));
   }
 
-  /** Permissionless measurement (keeper earns stake/20). */
-  quantumObserve(observer: PublicKey, world: PublicKey, index: number) {
+  /**
+   * Permissionless measurement (keeper earns stake/20). `vrfRequest` = ORAO PDA of the
+   * superposition's seed (`oraoRandomnessPda(sp.entropy)` while not observed); it must be fulfilled.
+   */
+  quantumObserve(observer: PublicKey, world: PublicKey, index: number, vrfRequest: PublicKey) {
     const p = this.pda;
     return this.ix("quantum_observe", [
       S(observer), W(p.config()), R(this.mint), W(world), W(p.worldVault(world)), W(p.superposition(world, index)),
-      W(ata(observer, this.mint)), R(SYSVAR_SLOT_HASHES), W(p.rewardPool()), R(TOKEN_PROGRAM_ID),
+      W(ata(observer, this.mint)), R(vrfRequest), W(p.rewardPool()), R(TOKEN_PROGRAM_ID),
     ]);
   }
 
@@ -229,17 +232,17 @@ export class RecursiaIx {
     const p = this.pda;
     return this.ix("swap_accept", [
       S(acceptor, true), R(p.config()), R(world), W(p.swap(world, a, b)), R(p.territory(world, a)), R(p.territory(world, b)),
-      W(p.player(acceptor)), R(SystemProgram.programId),
+      W(p.player(acceptor)), R(SYSVAR_SLOT_HASHES), R(SystemProgram.programId),
     ]);
   }
 
-  /** Permissionless crank after the target slot (resolver earns the bounty). */
-  swapResolve(resolver: PublicKey, world: PublicKey, a: number, b: number, offerer: PublicKey, acceptor: PublicKey) {
+  /** Permissionless crank after the target slot once ORAO answered `oraoRandomnessPda(swap.vrfSeed)` (resolver earns the bounty). */
+  swapResolve(resolver: PublicKey, world: PublicKey, a: number, b: number, offerer: PublicKey, acceptor: PublicKey, vrfRequest: PublicKey) {
     const p = this.pda;
     return this.ix("swap_resolve", [
       S(resolver), R(p.config()), R(this.mint), W(world), W(p.worldVault(world)), W(p.swap(world, a, b)), W(offerer),
       W(p.player(acceptor)), W(p.claims()),
-      W(ata(resolver, this.mint)), R(SYSVAR_SLOT_HASHES), R(TOKEN_PROGRAM_ID),
+      W(ata(resolver, this.mint)), R(vrfRequest), R(TOKEN_PROGRAM_ID),
     ]);
   }
 

@@ -16,9 +16,10 @@ import {
 } from "./economy.js";
 import { bigbang, GLIDER, orBlock, population, stepNQ, swapBlocks, territoryCounts, writeBlock, type Grid } from "./sim.js";
 import { sha256 } from "@noble/hashes/sha256";
+import { entropyFromVrf, vrfSeedSuperposition, vrfSeedSwap } from "./vrf.js";
 import {
   collapse as qCollapse, commitment as qCommitment, neighbour, quantumRuleError, quantumSeed,
-  QUANTUM_BOUNTY_DIV, QUANTUM_DELAY_SLOTS, QUANTUM_REARM_PENALTY_BPS, QUANTUM_REVEAL_SLOTS, QUANTUM_STAKE_MULT, SLOT_HASHES_MAX,
+  QUANTUM_BOUNTY_DIV, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS, QUANTUM_STAKE_MULT,
   SWAP_BOUNTY_DIV, SWAP_OFFER_TTL_SLOTS, swapRoll,
 } from "./quantum.js";
 
@@ -35,6 +36,8 @@ export interface MSuperposition {
   owner: string; world: string; index: number; world2: string | null; index2: number; commitment: Uint8Array;
   commitSlot: number; targetSlot: number; observed: boolean; observedSlot: number; entropy: Uint8Array | null;
   revealDeadline: number; stake: bigint; rearms: number;
+  /** ORAO VRF request seed fixed at commit (salted with the latest slot hash). */
+  vrfSeed: Uint8Array;
 }
 export interface MWorld {
   id: string; name: string; parent: string | null; parentTerritory: number; depth: number; architect: string | null; architectFeeBps: number;
@@ -54,7 +57,7 @@ export interface MWorld {
 /** Probabilistic block exchange in a neutral world (mirror of the `QuantumSwap` account). */
 export interface MSwap {
   key: string; world: string; offerer: string; acceptor: string; indexA: number; indexB: number; weightBps: number;
-  premium: bigint; bounty: bigint; createdSlot: number; expirySlot: number; accepted: boolean; targetSlot: number; rearms: number;
+  premium: bigint; bounty: bigint; createdSlot: number; expirySlot: number; accepted: boolean; targetSlot: number; rearms: number; vrfSeed: Uint8Array | null;
 }
 export interface MPlayer {
   id: string; wallet: bigint; claimable: bigint; totalEarned: bigint; isAgent: boolean; spentFees: bigint;
@@ -720,6 +723,13 @@ export class GameModel {
   slotHash(slot: number): Uint8Array {
     return sha256(new Uint8Array([...new TextEncoder().encode("recursia:slot"), ...this.chainSalt, ...u64le(Math.max(0, slot))]));
   }
+  /** Simulated ORAO VRF: deterministic 64-byte answer per seed; `vrfOnline = false` models an oracle outage. */
+  vrfOnline = true;
+  vrfAnswer(seed: Uint8Array): Uint8Array | null {
+    if (!this.vrfOnline) return null;
+    const pre = new Uint8Array([...new TextEncoder().encode("recursia:orao-sim"), ...this.chainSalt, ...seed]);
+    return new Uint8Array([...sha256(new Uint8Array([...pre, 0])), ...sha256(new Uint8Array([...pre, 1]))]);
+  }
   superposition(worldId: string, idx: number) { return this.superpositions.get(`${worldId}:${idx}`); }
   quantumStake(entangled: boolean) { return this.params.plantCost * QUANTUM_STAKE_MULT * (entangled ? 2n : 1n); }
   /** Client helper: the commitment exactly as the program computes it. */
@@ -762,6 +772,7 @@ export class GameModel {
       owner: holder, world: worldId, index: idx, world2: entangle?.world ?? null, index2: entangle?.index ?? 0, commitment: commitment.slice(),
       commitSlot: this.slot, targetSlot: this.slot + QUANTUM_DELAY_SLOTS, observed: false, observedSlot: 0, entropy: null,
       revealDeadline: 0, stake, rearms: 0,
+      vrfSeed: vrfSeedSuperposition(w.key, idx, commitment, this.slotHash(this.slot - 1)),
     });
     this.log("quantum", `${holder} посадил клетку #${idx} мира «${w.name}» в суперпозицию${entangle ? ` (запутана с «${this.world(entangle.world).name}» #${entangle.index})` : ""}`, worldId);
     this.check();
@@ -772,24 +783,17 @@ export class GameModel {
     if (!sp) return "no superposition";
     if (sp.observed) return "already observed";
     if (this.slot <= sp.targetSlot) return "not measurable yet";
+    if (!this.vrfAnswer(sp.vrfSeed)) return "vrf pending";
     return null;
   }
 
-  /** Returns "observed" | "rearmed". Works while paused (settlement). */
-  quantumObserve(observer: string, worldId: string, idx: number): "observed" | "rearmed" {
+  /** Works while paused (settlement). Entropy = ORAO VRF answer to the seed fixed at commit. */
+  quantumObserve(observer: string, worldId: string, idx: number): "observed" {
     const why = this.canObserve(worldId, idx); req(!why, why ?? "");
     const sp = this.superposition(worldId, idx)!; const w = this.world(worldId);
     this.pl(observer);
-    if (this.slot - sp.targetSlot >= SLOT_HASHES_MAX) {
-      const penalty = (sp.stake * QUANTUM_REARM_PENALTY_BPS) / 10_000n;
-      sp.stake -= penalty; w.quantumEscrow -= penalty; w.vault -= penalty; this.sink(null, penalty, 0);
-      sp.targetSlot = this.slot + QUANTUM_DELAY_SLOTS; sp.rearms++;
-      this.log("quantum", `Измерение клетки #${idx} «${w.name}» просрочено — перевзведено, штраф ${fmtT(penalty)} ушёл в пул наград`, worldId);
-      this.check();
-      return "rearmed";
-    }
     const bounty = sp.stake / QUANTUM_BOUNTY_DIV;
-    sp.observed = true; sp.observedSlot = this.slot; sp.entropy = this.slotHash(sp.targetSlot);
+    sp.observed = true; sp.observedSlot = this.slot; sp.entropy = entropyFromVrf(this.vrfAnswer(sp.vrfSeed)!);
     sp.revealDeadline = this.slot + QUANTUM_REVEAL_SLOTS;
     sp.stake -= bounty; w.quantumEscrow -= bounty; w.vault -= bounty; this.pl(observer).wallet += bounty;
     this.log("quantum", `👁 ${observer} наблюдал клетку #${idx} «${w.name}»: волновая функция зафиксирована`, worldId);
@@ -837,8 +841,8 @@ export class GameModel {
     const sp = this.superposition(worldId, idx);
     if (!sp) return "no superposition";
     if (this.paused) return "paused";
-    const expired = sp.observed ? this.slot > sp.revealDeadline : this.slot > sp.targetSlot + QUANTUM_REVEAL_SLOTS;
-    return expired ? null : "still coherent";
+    // unobserved = waiting for the VRF (outcome already fixed, can't be hidden): never slashed
+    return sp.observed && this.slot > sp.revealDeadline ? null : "still coherent";
   }
 
   quantumDecohere(caller: string, worldId: string, idx: number) {
@@ -884,7 +888,7 @@ export class GameModel {
     w.quantumEscrow += premium + bounty; w.vault += premium + bounty;
     const s: MSwap = {
       key: this.swapKey(worldId, a, b), world: worldId, offerer, acceptor: w.territories[b].holder!, indexA: a, indexB: b, weightBps,
-      premium, bounty, createdSlot: this.slot, expirySlot: this.slot + SWAP_OFFER_TTL_SLOTS, accepted: false, targetSlot: 0, rearms: 0,
+      premium, bounty, createdSlot: this.slot, expirySlot: this.slot + SWAP_OFFER_TTL_SLOTS, accepted: false, targetSlot: 0, rearms: 0, vrfSeed: null,
     };
     this.swaps.set(s.key, s);
     this.log("swap", `${offerer} предлагает ${s.acceptor} квантовый SWAP #${a}⇄#${b} в «${w.name}» (p=${(weightBps / 100).toFixed(0)}%, премия ${fmtT(premium)})`, worldId);
@@ -908,7 +912,8 @@ export class GameModel {
     const why = this.canSwapAccept(acceptor, worldId, a, b); req(!why, why ?? "");
     const s = this.swap(worldId, a, b)!;
     s.accepted = true; s.targetSlot = this.slot + QUANTUM_DELAY_SLOTS;
-    this.log("swap", `${acceptor} принял SWAP #${a}⇄#${b}: исход решит хеш слота ${s.targetSlot}`, worldId);
+    s.vrfSeed = vrfSeedSwap(idBytes(`swap:${s.key}`), this.slotHash(this.slot - 1), BigInt(this.slot));
+    this.log("swap", `${acceptor} принял SWAP #${a}⇄#${b}: исход решит оракул случайности (VRF)`, worldId);
   }
 
   canSwapResolve(worldId: string, a: number, b: number): string | null {
@@ -916,21 +921,17 @@ export class GameModel {
     if (!s) return "no offer";
     if (!s.accepted) return "not accepted";
     if (this.slot <= s.targetSlot) return "not measurable yet";
+    if (!s.vrfSeed || !this.vrfAnswer(s.vrfSeed)) return "vrf pending";
     return null;
   }
 
   /** Permissionless (works while paused). Returns the outcome. */
-  swapResolve(resolver: string, worldId: string, a: number, b: number): "swapped" | "stayed" | "rearmed" {
+  swapResolve(resolver: string, worldId: string, a: number, b: number): "swapped" | "stayed" {
     const why = this.canSwapResolve(worldId, a, b); req(!why, why ?? "");
     const s = this.swap(worldId, a, b)!; const w = this.world(worldId);
     this.pl(resolver);
-    if (this.slot - s.targetSlot >= SLOT_HASHES_MAX) {
-      s.targetSlot = this.slot + QUANTUM_DELAY_SLOTS; s.rearms++;
-      this.log("swap", `SWAP #${a}⇄#${b}: измерение просрочено — перевзведено`, worldId);
-      return "rearmed";
-    }
     // Binding on the blocks: a holder change after acceptance does not void it.
-    const roll = swapRoll(this.slotHash(s.targetSlot), idBytes(`swap:${s.key}`));
+    const roll = swapRoll(entropyFromVrf(this.vrfAnswer(s.vrfSeed!)!), idBytes(`swap:${s.key}`));
     const swapped = roll < s.weightBps;
     if (swapped) { swapBlocks(w.grid, a, b); w.alive = territoryCounts(w.grid); }
     w.quantumEscrow -= s.premium + s.bounty; w.vault -= s.premium + s.bounty;
