@@ -183,17 +183,20 @@ describe("keeper planner", () => {
     const winner = key();
     const e = (player: PublicKey, points: bigint) => ({ player, points });
     const top = [e(winner, 100n), ...Array.from({ length: 11 }, () => e(PublicKey.default, 0n))];
-    const base = { entryFee: 700n, players: 3, top, prizes: new Array(12).fill(0n), claimed: 0 };
+    const payer = key();
+    const base = { entryFee: 700n, players: 3, top, prizes: new Array(12).fill(0n), claimed: 0, payer };
     const t = (o: object) => ({ key: key(), acc: { ...base, seasonId: 1n, tier: 0, pot: 1890n, settled: false, ...o } });
     const running = t({ seasonId: 2n });
     const open = t({});
     const settled = t({ tier: 1, settled: true, prizes: [1890n, ...new Array(11).fill(0n)] });
-    const paid = t({ seasonId: 0n, settled: true, prizes: [5n, ...new Array(11).fill(0n)], claimed: 1 });
+    const paid = t({ seasonId: 0n, settled: true, prizes: [5n, ...new Array(11).fill(0n)], claimed: 1, pot: 0n });
     const acts = tournamentActions([running, open, settled, paid], 2n);
     expect(acts).toEqual([
       { kind: "tournament_settle", seasonId: 1n, tier: 0 },
       { kind: "claim_tournament_prize", winner, seasonId: 1n, tier: 1, rank: 0 },
+      { kind: "close_tournament", seasonId: 0n, tier: 0, payer },
     ]);
+    expect(toInstruction(new RecursiaIx(PROGRAM_ID, key()), key(), acts[2]).keys[1].pubkey.equals(payer)).toBe(true);
     const rx = new RecursiaIx(PROGRAM_ID, key());
     expect(toInstruction(rx, key(), acts[0]).keys).toHaveLength(6);
     expect(toInstruction(rx, key(), acts[1]).keys).toHaveLength(7);

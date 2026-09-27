@@ -108,6 +108,15 @@ export class RecursiaIx {
       R(p.config()), R(this.mint), W(p.tournament(seasonId, tier)), W(p.player(winner)), W(p.tournamentPool()), W(p.claims()), R(TOKEN_PROGRAM_ID),
     ], (w) => w.u64(seasonId).u8(tier).u8(rank));
   }
+  /** Owner: reclaim the entry's rent once the tournament is settled. */
+  closeTournamentEntry(owner: PublicKey, seasonId: bigint, tier: number) {
+    const p = this.pda; const t = p.tournament(seasonId, tier);
+    return this.ix("close_tournament_entry", [S(owner, true), R(t), W(p.tournamentEntry(t, owner))], (w) => w.u64(seasonId).u8(tier));
+  }
+  /** Permissionless: once every prize is paid, close the tournament; the rent goes to its `payer`. */
+  closeTournament(seasonId: bigint, tier: number, payer: PublicKey) {
+    return this.ix("close_tournament", [W(this.pda.tournament(seasonId, tier)), W(payer)], (w) => w.u64(seasonId).u8(tier));
+  }
 
   // ------------------------------------------------------------ modules
   registerModule(author: PublicKey, moduleId: bigint, birth: number, survive: number, royaltyBps: number, name: string, q: { qBirth: number; qSurvive: number; qAmp: number } = { qBirth: 0, qSurvive: 0, qAmp: 0 }) {

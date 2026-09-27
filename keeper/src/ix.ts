@@ -14,6 +14,7 @@ export function toInstruction(rx: RecursiaIx, cranker: PublicKey, a: Action): Tr
     case "breach": return rx.breach(a.child, a.host);
     case "tick": return rx.tick(cranker, a.world, a.module, a.host);
     case "vrf_request": return oraoRequestIx(cranker, a.seed, a.treasury);
+    case "close_tournament": return rx.closeTournament(a.seasonId, a.tier, a.payer);
     case "quantum_observe": return rx.quantumObserve(cranker, a.world, a.index, a.vrf);
     case "quantum_decohere": return rx.quantumDecohere(cranker, a.world, a.index, a.owner);
     case "swap_resolve": return rx.swapResolve(cranker, a.world, a.a, a.b, a.offerer, a.acceptor, a.vrf);

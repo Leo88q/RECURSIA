@@ -83,6 +83,41 @@ function TournamentSection({ c }: { c: ChainCtx }) {
   );
 }
 
+/** Rent of a 74-byte TournamentEntry: (74 + 128) × 3480 × 2 lamports. */
+const ENTRY_RENT = (74 + 128) * 3480 * 2;
+
+/** Entries of settled (or already closed) tournaments: the owner can take the SOL rent back. */
+export function reclaimableEntries(c: Pick<ChainCtx, "rx" | "config" | "data">, entries: Set<string>): { seasonId: bigint; tier: number }[] {
+  const out: { seasonId: bigint; tier: number }[] = [];
+  for (const tk of entries) {
+    const t = c.data.tournaments.find((x) => x.key.toBase58() === tk);
+    if (t) { if (t.acc.settled) out.push({ seasonId: t.acc.seasonId, tier: t.acc.tier }); continue; }
+    // tournament account already closed (only possible after settlement): recover (season, tier) from the PDA
+    search: for (let s = 1n; s < c.config.seasonId; s++) {
+      for (let tier = 0; tier < TOURNAMENT_TIERS.length; tier++) {
+        if (c.rx.pda.tournament(s, tier).toBase58() === tk) { out.push({ seasonId: s, tier }); break search; }
+      }
+    }
+  }
+  return out;
+}
+
+function RentRefund({ c }: { c: ChainCtx }) {
+  const me = c.me!;
+  const list = reclaimableEntries(c, c.my.tournamentEntries).slice(0, 8); // a few per transaction
+  if (list.length === 0) return null;
+  return (
+    <div className="card">
+      <div className="card-title"><Glyph name="vault" size={17} />Аренда турниров</div>
+      <p className="small muted">Турниры, в которых вы участвовали, завершены: записи участия больше не нужны, их аренду можно вернуть.</p>
+      <button className="btn" onClick={() => c.run({
+        title: "Возврат аренды", lines: [`Закрыть записей: ${list.length}`, `Вернётся ≈ ${lamportsToSol(ENTRY_RENT * list.length)} SOL на ваш кошелёк`],
+        ixs: list.map((e) => c.rx.closeTournamentEntry(me, e.seasonId, e.tier)), successText: "Аренда возвращена",
+      }).then(() => c.my.refresh())}>Вернуть ≈ {lamportsToSol(ENTRY_RENT * list.length)} SOL</button>
+    </div>
+  );
+}
+
 export function WalletPanel({ c }: { c: ChainCtx }) {
   const { me, my, rx } = c;
   const [amt, setAmt] = useState("");
@@ -131,6 +166,7 @@ export function WalletPanel({ c }: { c: ChainCtx }) {
       )}
       <SeasonSection c={c} />
       <TournamentSection c={c} />
+      <RentRefund c={c} />
       <div className="card">
         <div className="card-title"><Art name="cell" size={20} />Ваши клетки</div>
         {my.holdings.length === 0 && <div className="muted small">Пока нет. Выберите свободную клетку на карте.</div>}

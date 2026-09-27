@@ -13,6 +13,10 @@
 //!   not paid and their share returns to the reward pool. Sybil entries only
 //!   add fees to the pot: each wallet pays the fee, the score is real play.
 //! * `claim_tournament_prize` (permissionless) credits the winner's balance.
+//! * Rent comes back: `close_tournament_entry` (owner, once settled — the entry
+//!   is never read again and an old season can't be re-joined, so there is no
+//!   revival) and `close_tournament` (anyone, once every prize is paid; the
+//!   rent goes to the recorded `payer`, the first entrant).
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
@@ -70,6 +74,7 @@ pub fn tournament_join(ctx: Context<TournamentJoin>, season_id: u64, tier: u8) -
         t.bump = ctx.bumps.tournament;
         t.season_id = season_id;
         t.tier = tier;
+        t.payer = ctx.accounts.owner.key();
         t.entry_fee = c
             .params
             .plant_cost
@@ -223,5 +228,62 @@ pub fn claim_tournament_prize(ctx: Context<ClaimTournamentPrize>, _season_id: u6
         amount,
     )?;
     emit!(TournamentPrizePaid { tournament: ctx.accounts.tournament.key(), rank, player: e.player, amount });
+    Ok(())
+}
+
+#[derive(Accounts)]
+#[instruction(season_id: u64, tier: u8)]
+pub struct CloseTournamentEntry<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    /// CHECK: the tournament PDA (address fixed by the seeds). Either still
+    /// open — then it must be a settled `Tournament` owned by this program —
+    /// or already closed (only `close_tournament` can close it, after settlement).
+    #[account(seeds = [SEED_TOURNAMENT, &season_id.to_le_bytes(), &[tier]], bump)]
+    pub tournament: UncheckedAccount<'info>,
+    #[account(
+        mut, close = owner, has_one = owner,
+        seeds = [SEED_TOURNAMENT_ENTRY, tournament.key().as_ref(), owner.key().as_ref()], bump = entry.bump,
+        constraint = entry.tournament == tournament.key() @ RecursiaError::Mismatch
+    )]
+    pub entry: Box<Account<'info, TournamentEntry>>,
+}
+
+/// Owner reclaims the entry's rent once the tournament is settled.
+/// Allowed while paused (it only returns the owner's own SOL).
+pub fn close_tournament_entry(ctx: Context<CloseTournamentEntry>, _season_id: u64, _tier: u8) -> Result<()> {
+    let ti = ctx.accounts.tournament.to_account_info();
+    if *ti.owner != anchor_lang::system_program::ID {
+        require_keys_eq!(*ti.owner, crate::ID, RecursiaError::Mismatch);
+        let data = ti.try_borrow_data()?;
+        let t = Tournament::try_deserialize(&mut &data[..])?;
+        require!(t.settled, RecursiaError::TournamentRunning);
+    }
+    emit!(TournamentRentReturned { account: ctx.accounts.entry.key(), to: ctx.accounts.owner.key() });
+    Ok(())
+}
+
+#[derive(Accounts)]
+#[instruction(season_id: u64, tier: u8)]
+pub struct CloseTournament<'info> {
+    #[account(
+        mut, close = payer, has_one = payer,
+        seeds = [SEED_TOURNAMENT, &season_id.to_le_bytes(), &[tier]], bump = tournament.bump
+    )]
+    pub tournament: Box<Account<'info, Tournament>>,
+    /// CHECK: receives the rent; must be the recorded payer (`has_one`).
+    #[account(mut)]
+    pub payer: UncheckedAccount<'info>,
+}
+
+/// Permissionless cleanup once the tournament is settled and every prize is
+/// paid (pot == 0): the rent goes back to whoever paid it. Unclaimed prizes
+/// block it, but claiming is permissionless too — prizes only ever go to the
+/// winners' own balances.
+pub fn close_tournament(ctx: Context<CloseTournament>, _season_id: u64, _tier: u8) -> Result<()> {
+    let t = &ctx.accounts.tournament;
+    require!(t.settled, RecursiaError::TournamentRunning);
+    require!(t.pot == 0, RecursiaError::PrizesUnclaimed);
+    emit!(TournamentRentReturned { account: t.key(), to: t.payer });
     Ok(())
 }

@@ -18,6 +18,8 @@ const built: Record<string, TransactionInstruction> = {
   tournament_submit: x.tournamentSubmit(a, 1n, 0),
   tournament_settle: x.tournamentSettle(1n, 0),
   claim_tournament_prize: x.claimTournamentPrize(a, 1n, 0, 0),
+  close_tournament_entry: x.closeTournamentEntry(a, 1n, 0),
+  close_tournament: x.closeTournament(1n, 0, a),
   propose: x.propose(a, { kind: "SetAdmin", admin: b }),
   cancel: x.cancel(a),
   execute: x.execute(a, 1n, b),

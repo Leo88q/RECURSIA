@@ -248,3 +248,10 @@ pub struct TournamentPrizePaid {
     pub player: Pubkey,
     pub amount: u64,
 }
+
+/// A tournament account (entry or the tournament itself) was closed; its rent went to `to`.
+#[event]
+pub struct TournamentRentReturned {
+    pub account: Pubkey,
+    pub to: Pubkey,
+}

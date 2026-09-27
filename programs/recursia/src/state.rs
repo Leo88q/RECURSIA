@@ -301,6 +301,8 @@ pub struct Tournament {
     pub prizes: [u64; TOURNAMENT_TOP],
     /// Bit i set = prize of rank i already paid.
     pub claimed: u16,
+    /// Who paid the account's rent (the first entrant) — refunded by `close_tournament`.
+    pub payer: Pubkey,
 }
 
 /// Proof of entry: PDA [SEED_TOURNAMENT_ENTRY, tournament, owner] (one per player).
@@ -466,7 +468,7 @@ mod tests {
         assert_eq!(8 + World::INIT_SPACE, 2022);
         assert_eq!(8 + Player::INIT_SPACE, 78);
         assert_eq!(8 + Season::INIT_SPACE, 900);
-        assert_eq!(8 + Tournament::INIT_SPACE, 618);
+        assert_eq!(8 + Tournament::INIT_SPACE, 650);
         assert_eq!(8 + TournamentEntry::INIT_SPACE, 74);
     }
 }

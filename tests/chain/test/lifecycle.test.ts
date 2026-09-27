@@ -105,6 +105,9 @@ run("season lifecycle on the real program (LiteSVM)", () => {
     c.expectFail(/AlreadyInUse|custom program error/, [c.rx.tournamentJoin(bob.publicKey, 1n, 0)], [bob]);
     c.expectFail("BadTier", [c.rx.tournamentJoin(mallory.publicKey, 1n, 7)], [mallory]);
     c.expectFail("TournamentClosed", [c.rx.tournamentJoin(mallory.publicKey, 2n, 0)], [mallory]);
+    expect(c.tournament(1n, 0)!.payer.equals(bob.publicKey)).toBe(true); // first entrant paid the rent
+    c.expectFail("TournamentRunning", [c.rx.closeTournamentEntry(bob.publicKey, 1n, 0)], [bob]); // entry still needed
+    c.expectFail("TournamentRunning", [c.rx.closeTournament(1n, 0, bob.publicKey)], [mallory]);
     invariants("join");
   });
 
@@ -199,6 +202,37 @@ run("season lifecycle on the real program (LiteSVM)", () => {
     expect(c.player(winner)!.claimable - before).toBe(t.prizes[0]);
     c.expectFail("NoPrize", [c.rx.claimTournamentPrize(winner, 1n, 0, 0)], [mallory]);
     invariants("claim prize");
+  });
+
+  it("rent refund: entries and the tournament close only after settlement, rent to the right wallet, no revival", () => {
+    const lamports = (k: PublicKey) => BigInt(c.svm.getBalance(k) ?? 0n);
+    const rentOf = (k: PublicKey) => BigInt(c.svm.getAccount(k)?.lamports ?? 0);
+    const t = c.tournament(1n, 0)!;
+    const tKey = c.pda.tournament(1n, 0);
+    // mallory can't close bob's entry to herself
+    const steal = c.rx.closeTournamentEntry(mallory.publicKey, 1n, 0);
+    steal.keys[2] = { ...steal.keys[2], pubkey: c.pda.tournamentEntry(tKey, bob.publicKey) };
+    c.expectFail(/ConstraintSeeds|ConstraintHasOne|Mismatch/, [steal], [mallory]);
+    // bob reclaims his entry rent (tournament still open, but settled)
+    const bobEntry = c.pda.tournamentEntry(tKey, bob.publicKey);
+    const r1 = rentOf(bobEntry); const b0 = lamports(bob.publicKey);
+    c.send([c.rx.closeTournamentEntry(bob.publicKey, 1n, 0)], [bob]);
+    expect(c.svm.getAccount(bobEntry)?.lamports ?? 0).toBe(0);
+    expect(lamports(bob.publicKey) - b0).toBeGreaterThan(r1 - 20_000n);
+    // unpaid prizes block the tournament close; claiming is permissionless, then it closes
+    const unpaid = t.prizes.some((p, r) => p > 0n && (t.claimed & (1 << r)) === 0);
+    if (unpaid) c.expectFail("PrizesUnclaimed", [c.rx.closeTournament(1n, 0, bob.publicKey)], [mallory]);
+    t.prizes.forEach((p, r) => { if (p > 0n && (t.claimed & (1 << r)) === 0) c.send([c.rx.claimTournamentPrize(t.top[r].player, 1n, 0, r)], [mallory]); });
+    c.expectFail(/ConstraintHasOne/, [c.rx.closeTournament(1n, 0, mallory.publicKey)], [mallory]); // rent can't be redirected
+    const r2 = rentOf(tKey); const b1 = lamports(bob.publicKey);
+    c.send([c.rx.closeTournament(1n, 0, bob.publicKey)], [mallory]);
+    expect(lamports(bob.publicKey) - b1).toBe(r2); // mallory paid the fee, bob got the whole rent
+    expect(c.tournament(1n, 0)).toBeNull();
+    // carol's entry is still closable after the tournament account is gone
+    c.send([c.rx.closeTournamentEntry(carol.publicKey, 1n, 0)], [carol]);
+    // revival: the old season's tournament can't be re-created
+    c.expectFail("TournamentClosed", [c.rx.tournamentJoin(mallory.publicKey, 1n, 0)], [mallory]);
+    invariants("rent refund");
   });
 
   it("season prizes are claimable and conserve money", () => {

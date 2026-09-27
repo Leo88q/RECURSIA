@@ -241,4 +241,10 @@ pub mod recursia {
     pub fn claim_tournament_prize(ctx: Context<ClaimTournamentPrize>, season_id: u64, tier: u8, rank: u8) -> Result<()> {
         instructions::tournament::claim_tournament_prize(ctx, season_id, tier, rank)
     }
+    pub fn close_tournament_entry(ctx: Context<CloseTournamentEntry>, season_id: u64, tier: u8) -> Result<()> {
+        instructions::tournament::close_tournament_entry(ctx, season_id, tier)
+    }
+    pub fn close_tournament(ctx: Context<CloseTournament>, season_id: u64, tier: u8) -> Result<()> {
+        instructions::tournament::close_tournament(ctx, season_id, tier)
+    }
 }

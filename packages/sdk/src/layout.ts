@@ -198,6 +198,8 @@ export const SEASON_SPACE = 8 + 2 + SEASON_TOP * 40 + 8 + SEASON_TOP * 40 + SEAS
 export interface TournamentAccount {
   seasonId: bigint; tier: number; entryFee: bigint; players: number; pot: bigint;
   top: SeasonEntry[]; settled: boolean; prizes: bigint[]; claimed: number;
+  /** Paid the account rent (first entrant); `closeTournament` refunds it. */
+  payer: PublicKey;
 }
 export function decodeTournament(data: Uint8Array): TournamentAccount {
   const r = checkDisc(data, "Tournament");
@@ -206,9 +208,10 @@ export function decodeTournament(data: Uint8Array): TournamentAccount {
   const top = Array.from({ length: TOURNAMENT_TOP }, () => ({ player: r.pubkey(), points: r.u64() }));
   const settled = r.bool();
   const prizes = Array.from({ length: TOURNAMENT_TOP }, () => r.u64());
-  return { seasonId, tier, entryFee, players, pot, top, settled, prizes, claimed: r.u16() };
+  const claimed = r.u16();
+  return { seasonId, tier, entryFee, players, pot, top, settled, prizes, claimed, payer: r.pubkey() };
 }
-export const TOURNAMENT_SPACE = 8 + 2 + 8 + 1 + 8 + 4 + 8 + TOURNAMENT_TOP * 40 + 1 + TOURNAMENT_TOP * 8 + 2;
+export const TOURNAMENT_SPACE = 8 + 2 + 8 + 1 + 8 + 4 + 8 + TOURNAMENT_TOP * 40 + 1 + TOURNAMENT_TOP * 8 + 2 + 32;
 export const TOURNAMENT_ENTRY_SPACE = 8 + 2 + 32 + 32;
 
 export interface ModuleAccount { id: bigint; author: PublicKey; birth: number; survive: number; royaltyBps: number; name: string; accrued: bigint; totalEarned: bigint; worldsUsing: number; qBirth: number; qSurvive: number; qAmp: number }

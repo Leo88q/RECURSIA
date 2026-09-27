@@ -39,6 +39,7 @@ export type Action =
   | { kind: "breach"; child: PublicKey; host: PublicKey }
   | { kind: "tick"; world: PublicKey; module: PublicKey; host: PublicKey | null }
   | { kind: "vrf_request"; seed: Uint8Array; treasury: PublicKey }
+  | { kind: "close_tournament"; seasonId: bigint; tier: number; payer: PublicKey }
   | { kind: "quantum_observe"; world: PublicKey; index: number; vrf: PublicKey }
   | { kind: "quantum_decohere"; world: PublicKey; index: number; owner: PublicKey }
   | { kind: "swap_resolve"; world: PublicKey; a: number; b: number; offerer: PublicKey; acceptor: PublicKey; vrf: PublicKey }
@@ -124,6 +125,8 @@ export function tournamentActions(tournaments: Snapshot["tournaments"], seasonId
   for (const { acc: t } of tournaments ?? []) {
     if (t.seasonId >= seasonId) continue;
     if (!t.settled) { if (t.pot > 0n) out.push({ kind: "tournament_settle", seasonId: t.seasonId, tier: t.tier }); continue; }
+    // everything paid: close it, the rent goes back to whoever paid it (the program enforces the recipient)
+    if (t.pot === 0n) { out.push({ kind: "close_tournament", seasonId: t.seasonId, tier: t.tier, payer: t.payer }); continue; }
     t.top.forEach((e, rank) => {
       if (isDefault(e.player) || t.prizes[rank] === 0n || (t.claimed & (1 << rank)) !== 0) return;
       out.push({ kind: "claim_tournament_prize", winner: e.player, seasonId: t.seasonId, tier: t.tier, rank });
