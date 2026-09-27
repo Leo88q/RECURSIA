@@ -166,5 +166,5 @@ run(`stateful fuzz of money instructions (seed ${SEED}, ${STEPS} steps)`, () => 
     // the walk must actually exercise the money paths, not just bounce off validation
     for (const n of ["acquire", "tick", "plant", "top_up"]) expect(stats.get(n)?.ok ?? 0, `${n} never succeeded (${summary})`).toBeGreaterThan(0);
     expect(c.config().curEpoch, "no epoch closed during the walk").toBeGreaterThan(1n);
-  });
+  }, 300_000); // runs the compiled program step by step: far beyond the 5 s default on CI runners
 });

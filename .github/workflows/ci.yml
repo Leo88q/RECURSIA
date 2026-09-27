@@ -132,21 +132,20 @@ jobs:
             target/types/recursia.ts
             target/deploy/recursia.so
       - name: Integration tests — compiled program in LiteSVM (checklist #54/#58)
-        # forks (not worker threads): the native LiteSVM addon runs on a process
-        # main thread; V8 allocation-site pretenuring off — a GC crash in
-        # PretenuringHandler was observed with the addon under worker threads.
+        # One process per file (forks). The VM engine is the litesvm 1.4.1 native
+        # addon (see tests/chain/test/harness.ts: the 0.8.0 addon corrupts the heap).
         env: { REQUIRE_SO: "1", CHAIN_TRACE: "1", RUST_BACKTRACE: "1" }
         working-directory: tests/chain
-        run: ../../scripts/ci-run.sh chain-test node --no-allocation-site-pretenuring ../../node_modules/vitest/vitest.mjs run --pool=forks --no-file-parallelism
+        run: ../../scripts/ci-run.sh chain-test npx vitest run --pool=forks --no-file-parallelism
 
   so-blob:
-    # Debug aid: publish the compiled program as an unreferenced git blob so a
+    # Debug aid, only when the anchor job failed: publish the compiled program as an unreferenced git blob so a
     # developer can fetch it through the API (`gh api repos/<repo>/git/blobs/<sha>`)
     # when artifact storage is unreachable. No commit, no ref is created.
     name: Publish recursia.so blob
     runs-on: ubuntu-latest
     needs: anchor
-    if: always() && needs.anchor.result != 'skipped' && github.event_name == 'push'
+    if: failure() && needs.anchor.result == 'failure' && github.event_name == 'push'
     permissions:
       contents: write
     steps:

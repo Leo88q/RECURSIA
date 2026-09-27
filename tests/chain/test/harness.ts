@@ -9,7 +9,8 @@
 import { existsSync, readFileSync, writeSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Clock, FailedTransactionMetadata, LiteSVM, TransactionMetadata } from "litesvm";
+import { createRequire } from "node:module";
+import type * as LiteSvmModule from "litesvm";
 import {
   ComputeBudgetProgram, Keypair, PublicKey, Transaction, type TransactionInstruction,
 } from "@solana/web3.js";
@@ -19,6 +20,30 @@ import {
 } from "@recursia/sdk";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * VM engine. The native addon bundled with litesvm 0.6–0.8 (agave 3.1 /
+ * solana-sbpf 0.13.1) corrupts the host heap while executing this program
+ * (std::bad_alloc / SIGABRT after a few transactions, reproducible with a bare
+ * `addProgram` + an empty instruction). The 1.4.1 addon (agave 4.2 /
+ * solana-sbpf 0.21.1) exposes the same native API and runs clean, so the
+ * 0.8.0 JS wrapper (web3.js 1.x types) is pointed at it. Exact-pinned optional
+ * alias in package.json; other platforms fall back to the bundled addon.
+ * The override is scoped to this import — other napi-rs modules are unaffected.
+ */
+async function loadLiteSvm(): Promise<typeof LiteSvmModule> {
+  const req = createRequire(import.meta.url);
+  let native: string | undefined;
+  try { native = req.resolve("litesvm-native-linux-x64-gnu/litesvm.linux-x64-gnu.node"); } catch { /* not linux-x64-gnu */ }
+  const prev = process.env.NAPI_RS_NATIVE_LIBRARY_PATH;
+  if (native && !prev) process.env.NAPI_RS_NATIVE_LIBRARY_PATH = native;
+  try { return await import("litesvm"); } finally {
+    if (prev === undefined) delete process.env.NAPI_RS_NATIVE_LIBRARY_PATH; else process.env.NAPI_RS_NATIVE_LIBRARY_PATH = prev;
+  }
+}
+const { Clock, FailedTransactionMetadata, LiteSVM } = await loadLiteSvm();
+type LiteSVM = LiteSvmModule.LiteSVM;
+type TransactionMetadata = LiteSvmModule.TransactionMetadata;
 export const SO_PATH = process.env.RECURSIA_SO ?? resolve(here, "../../../target/deploy/recursia.so");
 export const HAVE_SO = existsSync(SO_PATH);
 /** CI sets REQUIRE_SO=1 in the job that builds the program: a missing binary is a failure, not a skip. */

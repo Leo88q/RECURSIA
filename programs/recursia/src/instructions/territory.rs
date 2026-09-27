@@ -386,6 +386,9 @@ pub fn withdraw_deposit(mut ctx: Context<HolderOp>, amount: u64) -> Result<()> {
     accrue_or_fail(&mut ctx)?;
     let p = ctx.accounts.config.params;
     let t = &mut ctx.accounts.territory;
+    // An over-withdrawal is a user error, not an arithmetic bug: MathOverflow is
+    // reserved for "should be impossible" so monitoring/fuzzing can alarm on it.
+    require!(amount <= t.deposit, RecursiaError::DepositTooSmall);
     let left = math::sub(t.deposit, amount)?;
     require!(left >= math::epoch_tax(t.price, p.harberger_bps)?, RecursiaError::DepositTooSmall);
     t.deposit = left;
