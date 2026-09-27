@@ -6,6 +6,7 @@ import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { useNotify } from "./ui/Toast";
 import type { Route } from "./lib/route";
 import { Art, Glyph } from "./ui/Icon";
+import { Onboarding } from "./ui/Onboarding";
 
 type Tab = "cell" | "world" | "wallet";
 const TABS: Array<[Tab, string, React.ReactNode]> = [["cell", "Клетка", <Art name="cell" size={20} />], ["world", "Мир", <Art name="world" size={18} />], ["wallet", "Кошелёк и ИИ", <Art name="coin" size={18} />]];
@@ -48,6 +49,9 @@ export function SandboxView({ sb, route, go, speed, setSpeed, frame, bump }: {
   return (
     <div className="layout">
       <aside className="left" aria-label="Мультивселенная">
+        <ErrorBoundary label="onboarding" compact>
+          <Onboarding sb={sb} frame={frame} setSpeed={setSpeed} notify={notify} goCell={(p) => { go({ page: "sandbox", world: p.world, cell: p.idx }); setTab("cell"); }} />
+        </ErrorBoundary>
         <div className="panel-title"><Art name="nested" size={18} />Мультивселенная</div>
         <WorldTree sb={sb} current={world.id} onPick={(id) => { setWorld(id); setTab("world"); }} />
         <div className="legend-box">

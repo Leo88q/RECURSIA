@@ -160,9 +160,10 @@ PROGRAM_ID публикуется в README и на сайте; кошелёк �
 
 ## 10. Перед mainnet (чек-лист)
 - [ ] Внешний аудит программы (+ исправления, повторная проверка).
-- [ ] Trident-фаззинг инструкций с инвариантами из `SDK/model.ts`.
+- [ ] Coverage-guided фаззинг (Trident) поверх имеющегося property- и LiteSVM-фаззинга.
 - [ ] Минимум 2–4 недели devnet/testnet с живыми игроками, калибровка параметров по `docs/TOKENOMICS.md`.
-- [ ] Bug bounty (Immunefi или аналог).
-- [ ] Verified build опубликован, upgrade authority = multisig.
-- [ ] Мониторинг: алерты на `propose`, смену upgrade authority, аномальные выводы.
+- [ ] Bug bounty (Immunefi или аналог) — уровни и правила в `docs/OPERATIONS.md` §3, политика раскрытия в `.github/SECURITY.md`.
+- [ ] Verified build опубликован (`docs/OPERATIONS.md` §2), upgrade authority = **отдельный** Upgrade multisig с time lock 48 ч (§1).
+- [ ] Мониторинг: ≥ 2 экземпляра watcher (`npm run watch -w @recursia/keeper`) с `ALERT_WEBHOOK`; учебная пауза проведена.
+- [ ] Devnet-плейтест пройден по критериям `docs/PLAYTEST.md` §7.
 - [ ] Фронтенд: свой RPC с allow-list домена, заголовки проверены (securityheaders.com), DNSSEC/registry lock/CAA, HSTS preload, базовые образы Docker закреплены по digest.

@@ -599,3 +599,18 @@ details.tech code { word-break: break-all; }
 /* tournaments */
 .tournament-card .tier { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .tournament-card .tier-head { display: flex; flex-direction: column; gap: 2px; }
+
+/* onboarding: first steps + mentor */
+.onboarding, .mentor { margin: 0 12px 10px; }
+.onboarding .steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; font-size: 13px; }
+.onboarding .steps li { display: flex; gap: 6px; align-items: center; color: var(--muted); }
+.onboarding .steps li.done { color: var(--mint); }
+.onboarding .steps li.cur { color: inherit; font-weight: 600; }
+.mentor .tips { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.mentor .tip { display: grid; grid-template-columns: 16px 1fr; gap: 6px; font-size: 12.5px; line-height: 1.35; align-items: start; }
+.mentor .tip .linkish { text-align: left; color: inherit; text-decoration: none; cursor: pointer; }
+.mentor .tip .linkish:hover { text-decoration: underline dotted; }
+.mentor .tip.danger svg { color: #ff7b7b; }
+.mentor .tip.warn svg { color: #ffc861; }
+.mentor .tip.tip svg { color: var(--mint); }
+.mentor .tip.ok svg { color: #8fd18f; }

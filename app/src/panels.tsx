@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
-  BREACH_RESONANCE, ONE, PATTERNS, SEASON_EPOCHS, TOURNAMENT_JOIN_EPOCHS, TOURNAMENT_MAX_PLAYERS, TOURNAMENT_TIERS, tournamentPlaces, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS, REBELLION_MIN_VOTES, REBELLION_THRESHOLD_BPS, Rng,
-  cellsFromPattern, epochTax, isQuantum, patternFromCells, ruleString, scoreBlockPattern, splitTick, type MSwap, type MWorld, type Personality,
+  BREACH_RESONANCE, ONE, PATTERNS, SEASON_EPOCHS, TOURNAMENT_JOIN_EPOCHS, TOURNAMENT_MAX_PLAYERS, TOURNAMENT_TIERS, tournamentPlaces, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS, REBELLION_MIN_VOTES, REBELLION_THRESHOLD_BPS,
+  cellsFromPattern, epochTax, isQuantum, patternFromCells, ruleString, splitTick, type MSwap, type MWorld, type Personality,
 } from "@recursia/sdk";
 import { fmtRcr, YOU, type Sandbox } from "./sandbox";
 import { youify } from "./lib/format";
@@ -9,7 +9,7 @@ import { holderColor } from "./WorldCanvas";
 import { Art, Glyph, WorldIcon, type ArtName } from "./ui/Icon";
 import { SeasonCard, SponsorCard } from "./ui/Season";
 import { TournamentCard } from "./ui/Tournament";
-import { plantAdvice } from "./lib/advice";
+import { plantAdvice, plantForecast } from "./lib/advice";
 
 const toUnits = (s: string) => { const n = Number(s.replace(",", ".")); return Number.isFinite(n) && n >= 0 ? BigInt(Math.round(n * 1e6)) : 0n; };
 const fromUnits = (v: bigint) => (Number(v) / 1e6).toString();
@@ -45,7 +45,7 @@ export function WorldTree({ sb, current, onPick }: { sb: Sandbox; current: strin
 export function PatternEditor({ world, idx, onPlant, disabledReason, cost = "5 SKR" }: { world: MWorld; idx: number; onPlant: (p: bigint) => void; disabledReason: string | null; cost?: string }) {
   const [cells, setCells] = useState<boolean[][]>(() => cellsFromPattern(PATTERNS.acorn));
   const pattern = patternFromCells(cells);
-  const forecast = useMemo(() => quantumForecast(world, idx, pattern), [world, world.generation, idx, pattern]);
+  const forecast = useMemo(() => plantForecast(world, idx, pattern), [world, world.generation, idx, pattern]);
   const advice = plantAdvice(forecast.lo, forecast.hi, world.alive[idx] ?? 0);
   const toggle = (r: number, c: number) => setCells((old) => old.map((row, ri) => row.map((v, ci) => (ri === r && ci === c ? !v : v))));
   return (
@@ -76,19 +76,6 @@ export function PatternEditor({ world, idx, onPlant, disabledReason, cost = "5 S
     </div>
   );
 }
-/** Forecast: exact for classical worlds, min–max over sampled futures for quantum ones. */
-function quantumForecast(world: MWorld, idx: number, pattern: bigint): { lo: number; hi: number } {
-  if (!isQuantum(world)) { const v = scoreBlockPattern(world.grid, world.birth, world.survive, idx, pattern, 16, 16); return { lo: v, hi: v }; }
-  const r = new Rng(0x51ab + idx);
-  const q = { qBirth: world.qBirth, qSurvive: world.qSurvive, amp: world.qAmp, seed: [0n, 0n, 0n, 0n] };
-  let lo = 64, hi = 0;
-  for (let k = 0; k < 8; k++) {
-    const v = scoreBlockPattern(world.grid, world.birth, world.survive, idx, pattern, 16, 16, q, 0n, () => r.u32());
-    lo = Math.min(lo, v); hi = Math.max(hi, v);
-  }
-  return { lo, hi };
-}
-
 // ------------------------------------------------------------------ quantum
 const PATTERN_OPTIONS = Object.entries(PATTERNS);
 
