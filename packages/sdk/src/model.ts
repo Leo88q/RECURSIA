@@ -9,11 +9,12 @@ import {
   REBELLION_THRESHOLD_BPS, REWARD_POOL_BPS, TERRITORIES, TOTAL_SUPPLY, TREASURY_BPS, type Params,
 } from "./constants.js";
 import { bpsFloor, distribute, epochTax, harbergerDue, splitTick, worldEmission } from "./economy.js";
-import { bigbang, GLIDER, orBlock, population, stepNQ, territoryCounts, writeBlock, type Grid } from "./sim.js";
+import { bigbang, GLIDER, orBlock, population, stepNQ, swapBlocks, territoryCounts, writeBlock, type Grid } from "./sim.js";
 import { sha256 } from "@noble/hashes/sha256";
 import {
   collapse as qCollapse, commitment as qCommitment, neighbour, quantumRuleError, quantumSeed,
   QUANTUM_BOUNTY_DIV, QUANTUM_DELAY_SLOTS, QUANTUM_REARM_BURN_BPS, QUANTUM_REVEAL_SLOTS, QUANTUM_STAKE_MULT, SLOT_HASHES_MAX,
+  SWAP_BOUNTY_DIV, SWAP_OFFER_TTL_SLOTS, swapRoll,
 } from "./quantum.js";
 
 /** Deterministic 32-byte identity for model actors / worlds (stands in for a pubkey). */
@@ -40,6 +41,13 @@ export interface MWorld {
   history: number[];
   // quantum layer
   key: Uint8Array; qBirth: number; qSurvive: number; qAmp: number; entropy: Uint8Array | null; quantumEscrow: bigint; superpositions: number;
+  /** Neutral quantum world: no architect, SWAP market enabled. */
+  neutral: boolean;
+}
+/** Probabilistic block exchange in a neutral world (mirror of the `QuantumSwap` account). */
+export interface MSwap {
+  key: string; world: string; offerer: string; acceptor: string; indexA: number; indexB: number; weightBps: number;
+  premium: bigint; bounty: bigint; createdSlot: number; expirySlot: number; accepted: boolean; targetSlot: number; rearms: number;
 }
 export interface MPlayer { id: string; wallet: bigint; claimable: bigint; totalEarned: bigint; isAgent: boolean; spentFees: bigint }
 export interface MPermit { owner: string; agent: string; vault: bigint; maxSpendPerEpoch: bigint; maxPrice: bigint; spent: bigint; spendEpoch: number; expirySlot: number; scope: number }
@@ -60,6 +68,7 @@ export class GameModel {
   events: GameEvent[] = [];
   paused = false;
   superpositions = new Map<string, MSuperposition>();
+  swaps = new Map<string, MSwap>();
   /** Salt of the simulated cluster's slot hashes (sandbox); fixed = reproducible runs. */
   chainSalt: Uint8Array = new Uint8Array(32);
 
@@ -131,6 +140,7 @@ export class GameModel {
       resonance: 0, children: [], rebellionId: 0, rebellionVotes: 0, rebellionDeadline: 0, lastRebellionSlot: 0, liberated: false, totalBurned: 0n,
       history: [population(grid)],
       key: keyBytes, qBirth: m.qBirth, qSurvive: m.qSurvive, qAmp: m.qAmp, entropy: null, quantumEscrow: 0n, superpositions: 0,
+      neutral: false,
     };
     m.worldsUsing++;
     this.worlds.set(id, w);
@@ -155,6 +165,22 @@ export class GameModel {
     const w = this.newWorld(`root-${this.rootCount++}`, name, null, 0, architect, feeBps, moduleId);
     w.energy = initialEnergy; w.vault = initialEnergy;
     this.log("world", `${architect} создал вселенную «${name}»`, w.id);
+    this.check();
+    return w;
+  }
+
+  /** Neutral quantum world: creator pays but gets no rights; module must be quantum. */
+  createNeutralWorld(creator: string, name: string, moduleId: number, initialEnergy: bigint): MWorld {
+    req(!this.paused, "paused");
+    const m = this.modules[moduleId]; req(m, "unknown module");
+    req(isQuantum(m), "neutral worlds need quantum physics");
+    req(this.pl(creator).wallet >= this.params.worldCreateFee + initialEnergy, "insufficient funds");
+    this.payCreation(creator);
+    this.spend(creator, initialEnergy);
+    const w = this.newWorld(`root-${this.rootCount++}`, name, null, 0, creator, 0, moduleId);
+    w.architect = null; w.liberated = true; w.neutral = true;
+    w.energy = initialEnergy; w.vault = initialEnergy;
+    this.log("world", `${creator} открыл нейтральный квантовый мир «${name}» — без архитектора, с рынком SWAP`, w.id);
     this.check();
     return w;
   }
@@ -663,6 +689,116 @@ export class GameModel {
     this.check();
   }
 
+  // --------------------------------------------------------------- neutral worlds: SWAP market
+  swapKey(worldId: string, a: number, b: number) { return `${worldId}:${a}:${b}`; }
+  swap(worldId: string, a: number, b: number) { return this.swaps.get(this.swapKey(worldId, a, b)); }
+  swapFee() { return this.params.plantCost; }
+
+  canSwapOffer(offerer: string, worldId: string, a: number, b: number, weightBps: number, premium: bigint): string | null {
+    const w = this.world(worldId);
+    if (this.paused) return "paused";
+    if (!w.neutral || !isQuantum(w)) return "not a neutral quantum world";
+    if (a === b || a < 0 || b < 0 || a >= TERRITORIES || b >= TERRITORIES) return "bad blocks";
+    if (!(weightBps > 0 && weightBps <= 10_000)) return "weight";
+    if (premium < 0n) return "premium";
+    if (w.territories[a].holder !== offerer) return "not holder";
+    const acc = w.territories[b].holder;
+    if (!acc) return "target block has no holder";
+    if (acc === offerer) return "cannot swap with yourself";
+    if (this.swap(worldId, a, b)) return "offer exists";
+    if (this.pl(offerer).wallet < this.swapFee() + premium) return "insufficient funds";
+    return null;
+  }
+
+  swapOffer(offerer: string, worldId: string, a: number, b: number, weightBps: number, premium: bigint): MSwap {
+    const why = this.canSwapOffer(offerer, worldId, a, b, weightBps, premium); req(!why, why ?? "");
+    const w = this.world(worldId);
+    const fee = this.swapFee(); const bounty = fee / SWAP_BOUNTY_DIV; const burn = fee - bounty;
+    this.spend(offerer, fee + premium);
+    this.pl(offerer).spentFees += fee;
+    this.rollEpoch(w); this.recordBurn(w, burn);
+    w.quantumEscrow += premium + bounty; w.vault += premium + bounty;
+    const s: MSwap = {
+      key: this.swapKey(worldId, a, b), world: worldId, offerer, acceptor: w.territories[b].holder!, indexA: a, indexB: b, weightBps,
+      premium, bounty, createdSlot: this.slot, expirySlot: this.slot + SWAP_OFFER_TTL_SLOTS, accepted: false, targetSlot: 0, rearms: 0,
+    };
+    this.swaps.set(s.key, s);
+    this.log("swap", `${offerer} предлагает ${s.acceptor} квантовый SWAP #${a}⇄#${b} в «${w.name}» (p=${(weightBps / 100).toFixed(0)}%, премия ${fmtT(premium)})`, worldId);
+    this.check();
+    return s;
+  }
+
+  canSwapAccept(acceptor: string, worldId: string, a: number, b: number): string | null {
+    const s = this.swap(worldId, a, b);
+    if (!s) return "no offer";
+    if (this.paused) return "paused";
+    if (s.acceptor !== acceptor) return "not addressed to you";
+    if (s.accepted) return "already accepted";
+    if (this.slot > s.expirySlot) return "expired";
+    if (this.world(worldId).territories[b].holder !== acceptor) return "not holder";
+    if (this.world(worldId).territories[a].holder !== s.offerer) return "offerer lost block A";
+    return null;
+  }
+
+  swapAccept(acceptor: string, worldId: string, a: number, b: number) {
+    const why = this.canSwapAccept(acceptor, worldId, a, b); req(!why, why ?? "");
+    const s = this.swap(worldId, a, b)!;
+    s.accepted = true; s.targetSlot = this.slot + QUANTUM_DELAY_SLOTS;
+    this.log("swap", `${acceptor} принял SWAP #${a}⇄#${b}: исход решит хеш слота ${s.targetSlot}`, worldId);
+  }
+
+  canSwapResolve(worldId: string, a: number, b: number): string | null {
+    const s = this.swap(worldId, a, b);
+    if (!s) return "no offer";
+    if (!s.accepted) return "not accepted";
+    if (this.slot <= s.targetSlot) return "not measurable yet";
+    return null;
+  }
+
+  /** Permissionless (works while paused). Returns the outcome. */
+  swapResolve(resolver: string, worldId: string, a: number, b: number): "swapped" | "stayed" | "rearmed" {
+    const why = this.canSwapResolve(worldId, a, b); req(!why, why ?? "");
+    const s = this.swap(worldId, a, b)!; const w = this.world(worldId);
+    this.pl(resolver);
+    if (this.slot - s.targetSlot >= SLOT_HASHES_MAX) {
+      s.targetSlot = this.slot + QUANTUM_DELAY_SLOTS; s.rearms++;
+      this.log("swap", `SWAP #${a}⇄#${b}: измерение просрочено — перевзведено`, worldId);
+      return "rearmed";
+    }
+    // Binding on the blocks: a holder change after acceptance does not void it.
+    const roll = swapRoll(this.slotHash(s.targetSlot), idBytes(`swap:${s.key}`));
+    const swapped = roll < s.weightBps;
+    if (swapped) { swapBlocks(w.grid, a, b); w.alive = territoryCounts(w.grid); }
+    w.quantumEscrow -= s.premium + s.bounty; w.vault -= s.premium + s.bounty;
+    const payee = this.pl(s.acceptor);
+    payee.claimable += s.premium; this.claims += s.premium; payee.totalEarned += s.premium;
+    this.pl(resolver).wallet += s.bounty;
+    this.swaps.delete(s.key);
+    this.log("swap", `⇄ SWAP #${a}⇄#${b} в «${w.name}»: ${swapped ? "блоки обменялись" : "остались на местах"} (бросок ${roll} vs ${s.weightBps})`, worldId);
+    this.check();
+    return swapped ? "swapped" : "stayed";
+  }
+
+  canSwapCancel(caller: string, worldId: string, a: number, b: number): string | null {
+    const s = this.swap(worldId, a, b);
+    if (!s) return "no offer";
+    if (s.accepted) return "already accepted";
+    if (caller !== s.offerer && this.slot <= s.expirySlot) return "offer still open";
+    return null;
+  }
+
+  swapCancel(caller: string, worldId: string, a: number, b: number) {
+    const why = this.canSwapCancel(caller, worldId, a, b); req(!why, why ?? "");
+    const s = this.swap(worldId, a, b)!; const w = this.world(worldId);
+    this.pl(caller);
+    w.quantumEscrow -= s.premium + s.bounty; w.vault -= s.premium + s.bounty;
+    this.pl(s.offerer).claimable += s.premium; this.claims += s.premium;
+    this.pl(caller).wallet += s.bounty;
+    this.swaps.delete(s.key);
+    this.log("swap", `SWAP #${a}⇄#${b} в «${w.name}» отменён`, worldId);
+    this.check();
+  }
+
   circulating(): bigint {
     let v = this.rewardPool + this.treasury + this.claims + this.distribution;
     for (const p of this.players.values()) v += p.wallet;
@@ -679,6 +815,7 @@ export class GameModel {
       const need = w.energy + w.rewardsReserved + w.deposits + w.architectAccrued + w.quantumEscrow;
       let esc = 0n; let n = 0;
       for (const sp of this.superpositions.values()) if (sp.world === w.id) { esc += sp.stake; n++; }
+      for (const s of this.swaps.values()) if (s.world === w.id) esc += s.premium + s.bounty;
       if (esc !== w.quantumEscrow || n !== w.superpositions) throw new Error(`quantum escrow mismatch in ${w.id}`);
       if (w.vault < need) throw new Error(`vault insolvent in ${w.id}`);
       if (w.rewardsReserved !== w.pending.reduce((a, b) => a + b, 0n)) throw new Error(`pending mismatch in ${w.id}`);

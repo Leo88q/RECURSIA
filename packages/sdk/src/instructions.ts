@@ -173,7 +173,7 @@ export class RecursiaIx {
   swapAccept(acceptor: PublicKey, world: PublicKey, a: number, b: number) {
     const p = this.pda;
     return this.ix("swap_accept", [
-      S(acceptor, true), R(p.config()), R(world), W(p.swap(world, a, b)), R(p.territory(world, b)),
+      S(acceptor, true), R(p.config()), R(world), W(p.swap(world, a, b)), R(p.territory(world, a)), R(p.territory(world, b)),
       W(p.player(acceptor)), R(SystemProgram.programId),
     ]);
   }
@@ -183,7 +183,7 @@ export class RecursiaIx {
     const p = this.pda;
     return this.ix("swap_resolve", [
       S(resolver), R(p.config()), R(this.mint), W(world), W(p.worldVault(world)), W(p.swap(world, a, b)), W(offerer),
-      R(p.territory(world, a)), R(p.territory(world, b)), W(p.player(offerer)), W(p.player(acceptor)), W(p.claims()),
+      W(p.player(acceptor)), W(p.claims()),
       W(ata(resolver, this.mint)), R(SYSVAR_SLOT_HASHES), R(TOKEN_PROGRAM_ID),
     ]);
   }

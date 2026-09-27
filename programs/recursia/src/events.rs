@@ -169,8 +169,6 @@ pub struct SwapResolved {
     pub index_b: u8,
     /// Blocks exchanged.
     pub swapped: bool,
-    /// A territory changed hands meanwhile: no swap, premium refunded.
-    pub void: bool,
     pub entropy: [u8; 32],
     pub bounty: u64,
 }

@@ -3,7 +3,8 @@ import { GameModel, idBytes } from "../src/model.js";
 import { DEFAULT_PARAMS, ONE, PHYSICS_PRESETS, TOTAL_SUPPLY } from "../src/constants.js";
 import { epochTax } from "../src/economy.js";
 import { bigbang, getCell, quantumMask, step, stepNQ, type Grid, type Quantum } from "../src/sim.js";
-import { collapse, commitment, neighbour, quantumRuleError, slotHashLookup, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS } from "../src/quantum.js";
+import { collapse, commitment, neighbour, quantumRuleError, slotHashLookup, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS, SWAP_OFFER_TTL_SLOTS } from "../src/quantum.js";
+import { blockPattern as blockPatternOf } from "../src/sim.js";
 import { Rng } from "../src/agents.js";
 
 // ---------------------------------------------------------------- engine
@@ -240,5 +241,71 @@ describe("neutral-world SWAP", () => {
     expect(blockPattern(g, 10)).toBe(0xffn);
     swapBlocks(g, 60, 10);
     expect(blockPattern(g, 10)).toBe(0x0000000000070204n);
+  });
+});
+
+describe("neutral world + SWAP market (model)", () => {
+  const setup = () => {
+    const m = new GameModel();
+    m.addPlayer("dev", 1_000_000n * ONE);
+    const foam = PHYSICS_PRESETS.find((p) => p.name === "Quantum Foam")!;
+    m.registerModule("dev", foam.name, foam.birth, foam.survive, foam.royaltyBps, foam);
+    m.registerModule("dev", "Life", 8, 12, 100);
+    for (const p of ["alice", "bob", "carol", "keeper"]) m.addPlayer(p, 100_000n * ONE);
+    const w = m.createNeutralWorld("carol", "Нейтраль", 0, 5_000n * ONE);
+    const dep = epochTax(100n * ONE, DEFAULT_PARAMS.harbergerBps) * 5n;
+    m.acquire("alice", w.id, 3, 10n * ONE, 100n * ONE, dep);
+    m.acquire("bob", w.id, 40, 10n * ONE, 100n * ONE, dep);
+    return { m, w };
+  };
+  it("neutral world has no ruler and needs quantum physics", () => {
+    const { m, w } = setup();
+    expect(w.architect).toBeNull();
+    expect(w.neutral && w.liberated).toBe(true);
+    expect(() => m.startRebellion("alice", w.id, 3)).toThrow();
+    expect(() => m.createNeutralWorld("carol", "Classic", 1, 0n)).toThrow(/quantum/);
+    const plain = m.createRootWorld("carol", "Plain", 0, 0, 0n);
+    expect(m.canSwapOffer("alice", plain.id, 3, 40, 5_000, 0n)).toMatch(/neutral/);
+  });
+  it("offer → accept → resolve: premium to acceptor, blocks exchange iff roll < weight, invariants hold", () => {
+    let swapped = 0, stayed = 0;
+    for (let i = 0; i < 24; i++) {
+      const { m, w } = setup();
+      m.chainSalt = new Uint8Array(32).fill(i);
+      const pa = blockPatternOf(w.grid, 3), pb = blockPatternOf(w.grid, 40);
+      const bobClaim = m.players.get("bob")!.claimable;
+      const burned = m.totalBurned;
+      m.swapOffer("alice", w.id, 3, 40, 5_000, 7n * ONE);
+      expect(m.totalBurned - burned).toBe(DEFAULT_PARAMS.plantCost - DEFAULT_PARAMS.plantCost / 5n);
+      expect(m.canSwapAccept("carol", w.id, 3, 40)).toMatch(/not addressed/);
+      m.swapAccept("bob", w.id, 3, 40);
+      expect(m.canSwapResolve(w.id, 3, 40)).toMatch(/not measurable/);
+      m.advanceSlots(QUANTUM_DELAY_SLOTS + 1);
+      const r = m.swapResolve("keeper", w.id, 3, 40);
+      expect(m.players.get("bob")!.claimable - bobClaim).toBe(7n * ONE);
+      if (r === "swapped") { swapped++; expect(blockPatternOf(w.grid, 3)).toBe(pb); expect(blockPatternOf(w.grid, 40)).toBe(pa); }
+      else { stayed++; expect(blockPatternOf(w.grid, 3)).toBe(pa); }
+      expect(w.quantumEscrow).toBe(0n);
+      expect(m.swaps.size).toBe(0);
+    }
+    expect(swapped).toBeGreaterThan(3);
+    expect(stayed).toBeGreaterThan(3);
+  });
+  it("cancel: offerer anytime before accept, others only after expiry; premium refunded as claimable", () => {
+    const { m, w } = setup();
+    m.swapOffer("alice", w.id, 3, 40, 2_000, 5n * ONE);
+    expect(m.canSwapCancel("keeper", w.id, 3, 40)).toMatch(/still open/);
+    m.advanceSlots(SWAP_OFFER_TTL_SLOTS + 1);
+    expect(m.canSwapAccept("bob", w.id, 3, 40)).toBe("expired");
+    const before = m.players.get("alice")!.claimable;
+    m.swapCancel("keeper", w.id, 3, 40);
+    expect(m.players.get("alice")!.claimable - before).toBe(5n * ONE);
+    expect(w.quantumEscrow).toBe(0n);
+  });
+  it("a new holder of block A never inherits an un-accepted offer", () => {
+    const { m, w } = setup();
+    m.swapOffer("alice", w.id, 3, 40, 5_000, 0n);
+    m.acquire("carol", w.id, 3, 1_000n * ONE, 100n * ONE, epochTax(100n * ONE, DEFAULT_PARAMS.harbergerBps) * 5n);
+    expect(m.canSwapAccept("bob", w.id, 3, 40)).toMatch(/offerer lost/);
   });
 });

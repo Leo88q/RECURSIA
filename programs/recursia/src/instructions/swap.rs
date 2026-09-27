@@ -8,8 +8,11 @@
 //!  3. `swap_resolve` — permissionless after the target slot. roll =
 //!     H("recursia:swap", slot_hash, swap) → with probability w the two blocks
 //!     exchange contents (all life inside moves). Premium → acceptor (paid for
-//!     taking the risk, whatever the outcome). If either block changed hands
-//!     meanwhile the swap is void and the premium goes back to the offerer.
+//!     taking the risk, whatever the outcome). Once accepted the swap is
+//!     BINDING on the blocks, not on the people: if a block changes hands in
+//!     the meantime the new holder inherits the pending swap (it is public
+//!     state). A "void if holder changed" rule would let the losing side read
+//!     the target hash and void the bet by buying its own block from an alt.
 //!     If the target fell out of SlotHashes the measurement is re-armed.
 //!  4. `swap_cancel`  — offerer before acceptance, anyone after expiry.
 //!
@@ -151,6 +154,7 @@ pub struct SwapAccept<'info> {
         has_one = world, has_one = acceptor
     )]
     pub swap: Box<Account<'info, QuantumSwap>>,
+    pub territory_a: Box<Account<'info, Territory>>,
     pub territory_b: Box<Account<'info, Territory>>,
     /// Premium is paid as a pull-payment to this Player account.
     #[account(
@@ -168,8 +172,11 @@ pub fn swap_accept(ctx: Context<SwapAccept>) -> Result<()> {
     let s = &ctx.accounts.swap;
     require!(!s.accepted, RecursiaError::SwapAccepted);
     require!(slot <= s.expiry_slot, RecursiaError::SwapExpired);
+    check_territory_pda(&ctx.accounts.territory_a, &s.world, ctx.program_id)?;
     check_territory_pda(&ctx.accounts.territory_b, &s.world, ctx.program_id)?;
-    require!(ctx.accounts.territory_b.index == s.index_b, RecursiaError::Mismatch);
+    require!(ctx.accounts.territory_a.index == s.index_a && ctx.accounts.territory_b.index == s.index_b, RecursiaError::Mismatch);
+    // Block A's current holder must be the one who offered (a new holder never agreed).
+    require_keys_eq!(ctx.accounts.territory_a.holder, s.offerer, RecursiaError::NotHolder);
     require_keys_eq!(ctx.accounts.territory_b.holder, ctx.accounts.acceptor.key(), RecursiaError::NotHolder);
 
     let acceptor = ctx.accounts.acceptor.key();
@@ -209,10 +216,6 @@ pub struct SwapResolve<'info> {
     /// CHECK: receives the swap account's rent on close; pinned by `has_one = offerer`.
     #[account(mut)]
     pub offerer: UncheckedAccount<'info>,
-    pub territory_a: Box<Account<'info, Territory>>,
-    pub territory_b: Box<Account<'info, Territory>>,
-    #[account(mut)]
-    pub offerer_player: Box<Account<'info, Player>>,
     #[account(mut)]
     pub acceptor_player: Box<Account<'info, Player>>,
     #[account(mut, seeds = [SEED_CLAIMS], bump = config.claims_bump)]
@@ -236,10 +239,6 @@ pub fn swap_resolve(ctx: Context<SwapResolve>) -> Result<()> {
     // ---- checks
     require!(s.accepted, RecursiaError::SwapNotAccepted);
     require!(slot > s.target_slot, RecursiaError::NotMeasurable);
-    check_territory_pda(&ctx.accounts.territory_a, &world_key, ctx.program_id)?;
-    check_territory_pda(&ctx.accounts.territory_b, &world_key, ctx.program_id)?;
-    require!(ctx.accounts.territory_a.index == s.index_a && ctx.accounts.territory_b.index == s.index_b, RecursiaError::Mismatch);
-    check_player_pda(&ctx.accounts.offerer_player, &s.offerer, ctx.program_id)?;
     check_player_pda(&ctx.accounts.acceptor_player, &s.acceptor, ctx.program_id)?;
     let lookup = {
         let data = ctx.accounts.slot_hashes.try_borrow_data()?;
@@ -260,8 +259,7 @@ pub fn swap_resolve(ctx: Context<SwapResolve>) -> Result<()> {
     };
 
     // ---- effects
-    let valid = ctx.accounts.territory_a.holder == s.offerer && ctx.accounts.territory_b.holder == s.acceptor;
-    let swapped = valid && swap_roll(&entropy, &swap_key) < s.weight_bps as u32;
+    let swapped = swap_roll(&entropy, &swap_key) < s.weight_bps as u32;
     {
         let w = &mut ctx.accounts.world;
         if swapped {
@@ -271,13 +269,10 @@ pub fn swap_resolve(ctx: Context<SwapResolve>) -> Result<()> {
         }
         w.quantum_escrow = math::sub(w.quantum_escrow, math::add(s.premium, s.bounty)?)?;
     }
-    if valid {
+    {
         let pl = &mut ctx.accounts.acceptor_player;
         pl.claimable = math::add(pl.claimable, s.premium)?;
         pl.total_earned = math::add(pl.total_earned, s.premium)?;
-    } else {
-        let pl = &mut ctx.accounts.offerer_player;
-        pl.claimable = math::add(pl.claimable, s.premium)?;
     }
 
     // ---- interactions
@@ -291,7 +286,7 @@ pub fn swap_resolve(ctx: Context<SwapResolve>) -> Result<()> {
     ctx.accounts.world_vault.reload()?;
     assert_world_solvent(&ctx.accounts.world, ctx.accounts.world_vault.amount)?;
     ctx.accounts.swap.close(ctx.accounts.offerer.to_account_info())?;
-    emit!(SwapResolved { world: world_key, index_a: s.index_a, index_b: s.index_b, swapped, void: !valid, entropy, bounty: s.bounty });
+    emit!(SwapResolved { world: world_key, index_a: s.index_a, index_b: s.index_b, swapped, entropy, bounty: s.bounty });
     Ok(())
 }
 
