@@ -1,0 +1,395 @@
+// Landing: what RECURSIA is, how to start, how much entry costs, full rules, FAQ.
+// Every number is derived from the protocol parameters (lib/costs.ts) — no
+// hand-typed figures that could drift from the contract.
+import { useEffect, useRef, type ReactNode } from "react";
+import {
+  BREACH_POPULATION, BREACH_RESONANCE, DEFAULT_PARAMS, MAX_ARCHITECT_FEE_BPS, MAX_DEPTH, MAX_ROYALTY_BPS, MIN_TICK_BURN_BPS,
+  PLANT_COOLDOWN_TICKS, PRICE_CHANGE_COOLDOWN_SLOTS, PROGRAM_ID_STR, REBELLION_COOLDOWN_SLOTS, REBELLION_MIN_VOTES,
+  REBELLION_THRESHOLD_BPS, TOTAL_SUPPLY,
+} from "@recursia/sdk";
+import { CONFIG, CLUSTER_LABEL } from "./lib/config";
+import { DEFAULT_MINT, LAMPORTS_PER_SOL, QUANTUM_TIMING, entryCost, priceList, slotsHuman } from "./lib/costs";
+import { formatAmount } from "./lib/format";
+import type { LandingSection, Route } from "./lib/route";
+import { Address } from "./ui/fields";
+import { Art, Glyph, type ArtName } from "./ui/Icon";
+import hero from "./assets/art/hero.webp";
+
+const P = DEFAULT_PARAMS;
+const rcr = (v: bigint) => `${formatAmount(v, 2)} RCR`;
+const sol = (lamports: number, digits = 5) => `${(lamports / LAMPORTS_PER_SOL).toLocaleString("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits })} SOL`;
+const int = (v: number | bigint) => Number(v).toLocaleString("ru-RU");
+/** Russian plural: 1 слот, 2 слота, 5 слотов. */
+const plural = (n: number | bigint, one: string, few: string, many: string) => {
+  const k = Number(n) % 100, d = k % 10;
+  return `${int(n)} ${k > 10 && k < 20 ? many : d === 1 ? one : d >= 2 && d <= 4 ? few : many}`;
+};
+const slots = (n: number | bigint) => plural(n, "слот", "слота", "слотов");
+const pct = (bps: number | bigint) => `${(Number(bps) / 100).toLocaleString("ru-RU")}%`;
+const COST = entryCost(P);
+const PRICES = priceList(P, rcr, sol);
+const IS_DEFAULT_PROGRAM = CONFIG.programId === PROGRAM_ID_STR;
+const NET = CLUSTER_LABEL[CONFIG.cluster];
+
+function Section({ id, icon, title, lead, children }: { id: string; icon: ArtName; title: string; lead?: ReactNode; children: ReactNode }) {
+  return (
+    <section id={id} className="l-section" aria-labelledby={`${id}-h`}>
+      <h2 id={`${id}-h`} className="l-h2"><Art name={icon} size={34} />{title}</h2>
+      {lead && <p className="l-lead">{lead}</p>}
+      {children}
+    </section>
+  );
+}
+
+function Rule({ icon, title, open, children }: { icon: ArtName; title: string; open?: boolean; children: ReactNode }) {
+  return (
+    <details className="l-rule" open={open}>
+      <summary><Art name={icon} size={26} /><span>{title}</span><Glyph name="arrow" size={14} className="l-chev" /></summary>
+      <div className="l-rule-body">{children}</div>
+    </details>
+  );
+}
+
+export function Landing({ section, go }: { section?: LandingSection; go: (r: Route, replace?: boolean) => void }) {
+  const main = useRef<HTMLElement>(null);
+
+  // #/start, #/price… → scroll to that section; bare #/ → top.
+  useEffect(() => {
+    const el = section ? document.getElementById(`sec-${section}`) : null;
+    if (el) el.scrollIntoView({ block: "start" });
+    else {
+      // desktop scrolls the <main> container, narrow screens scroll the document
+      main.current?.scrollTo?.({ top: 0, behavior: "instant" as ScrollBehavior });
+      window.scrollTo?.({ top: 0, behavior: "instant" as ScrollBehavior });
+    }
+  }, [section]);
+
+  const jump = (s: LandingSection) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (section === s) document.getElementById(`sec-${s}`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+    else go({ page: "landing", section: s });
+  };
+
+  return (
+    <main id="main" tabIndex={-1} className="landing" ref={main}>
+      {/* ───────────── hero ───────────── */}
+      <section className="l-hero" aria-labelledby="l-title">
+        <img className="l-hero-bg" src={hero} alt="" aria-hidden="true" width={1200} height={593} decoding="async" fetchPriority="high" />
+        <div className="l-hero-body">
+          <p className="l-kicker">клеточная эволюция · Solana · токен RCR</p>
+          <h1 id="l-title">RECURSIA<span>вселенные внутри вселенных</span></h1>
+          <p className="l-hero-lead">
+            Каждый мир — живая клеточная вселенная 64×64, которую <b>считает сам блокчейн</b>. Вы владеете землёй,
+            сажаете жизнь, получаете награды за то, что она живёт, открываете внутри своей клетки новую вселенную
+            со своими законами физики — и соревнуетесь с живыми игроками и ИИ на равных правилах.
+          </p>
+          <div className="l-cta">
+            <a className="btn primary l-big" href="#/play" onClick={(e) => { e.preventDefault(); go({ page: "sandbox" }); }}><Art name="world" size={22} /> Играть бесплатно</a>
+            <a className="btn portal l-big" href="#/start" onClick={jump("start")}><Art name="plant" size={22} /> Как начать</a>
+            <a className="btn l-big" href="#/price" onClick={jump("price")}><Art name="coin" size={22} /> Сколько стоит вход</a>
+          </div>
+          <ul className="l-facts">
+            <li><b>0 ₽</b><span>песочница без кошелька и регистрации</span></li>
+            <li><b>от {rcr(COST.minTotal)}</b><span>+ до {sol(COST.solMax)} за вход в сеть</span></li>
+            <li><b>{formatAmount(TOTAL_SUPPLY, 0)}</b><span>RCR навсегда: выпуск токена закрыт</span></li>
+          </ul>
+        </div>
+      </section>
+
+      <nav className="l-subnav" aria-label="Разделы">
+        <a href="#/start" onClick={jump("start")} aria-current={section === "start" ? "true" : undefined}>Как начать</a>
+        <a href="#/price" onClick={jump("price")} aria-current={section === "price" ? "true" : undefined}>Стоимость</a>
+        <a href="#/rules" onClick={jump("rules")} aria-current={section === "rules" ? "true" : undefined}>Правила</a>
+        <a href="#/faq" onClick={jump("faq")} aria-current={section === "faq" ? "true" : undefined}>Вопросы</a>
+      </nav>
+
+      {/* ───────────── what is it ───────────── */}
+      <Section id="sec-about" icon="logo" title="Что это за игра" lead="Игра Джона Конвея «Жизнь», превращённая в экономику: простые правила дают бесконечно сложные миры, а блокчейн делает их общими, честными и вечными.">
+        <div className="l-grid">
+          {([
+            ["cell", "Земля по налогу Харбергера", "Клетка 8×8 принадлежит тому, кто её занял. Цену вы назначаете сами и платите с неё налог — любой может выкупить клетку по этой цене. Завышать невыгодно, занижать опасно."],
+            ["plant", "Жизнь приносит доход", "Сажайте узоры (глайдеры, осцилляторы, свои). Каждую эпоху мир получает награду, и она делится между владельцами пропорционально живым клеткам."],
+            ["nested", "Симуляция в симуляции", `Владелец клетки может открыть внутри неё дочернюю вселенную с другой физикой — до ${MAX_DEPTH} уровней вложенности. Хост получает ${pct(P.hostBps)} каждого тика дочернего мира.`],
+            ["quantum", "Квантовая физика", "Суперпозиции, запутанность миров и обмен исходами. Энтропия берётся из хешей будущих слотов Solana: будущее нельзя просчитать даже суперкомпьютером."],
+            ["law", "Законы физики — ваш бизнес", `Придумайте правило рождения и выживания клеток и получайте до ${pct(MAX_ROYALTY_BPS)} каждого тика всех миров, которые его используют.`],
+            ["agent", "Люди и ИИ на равных", "ИИ-жители играют теми же инструкциями и платят те же деньги. Своего ИИ можно нанять: лимиты бюджета и цены зашиты в контракт, а не в «промпт»."],
+          ] as Array<[ArtName, string, string]>).map(([icon, t, d]) => (
+            <article key={t} className="card l-feature"><Art name={icon} size={44} /><h3>{t}</h3><p>{d}</p></article>
+          ))}
+        </div>
+      </Section>
+
+      {/* ───────────── how to start ───────────── */}
+      <Section id="sec-start" icon="plant" title="Как начать играть" lead="Начните бесплатно, разберитесь в правилах — и только потом заходите в сеть со своими токенами.">
+        <ol className="l-steps">
+          <li>
+            <h3>Попробуйте песочницу — бесплатно</h3>
+            <p>Кнопка «Песочница» вверху. Кошелёк не нужен: у вас тестовые RCR, рядом живут ИИ-соседи, время идёт в 24 раза быстрее.
+              Правила — те же, что в контракте (модель проверена побитово на тестовых векторах). Выберите клетку на поле, займите её, посадите узор, посмотрите, как работают налог и награды.</p>
+            <a className="btn primary" href="#/play" onClick={(e) => { e.preventDefault(); go({ page: "sandbox" }); }}><Art name="world" size={18} /> Открыть песочницу</a>
+          </li>
+          <li>
+            <h3>Поставьте кошелёк Solana</h3>
+            <p>Подойдёт любой кошелёк с поддержкой Wallet Standard: Phantom, Solflare, Backpack. Сохраните seed-фразу на бумаге.
+              <b> Никто из команды никогда её не спросит</b>; сайт не просит её ввести и не может этого сделать.</p>
+          </li>
+          <li>
+            <h3>Пополните SOL</h3>
+            <p>SOL нужен для комиссий сети и аренды аккаунтов — до {sol(COST.solMax)} при первом входе, дальше около {sol(5_000, 6)} за подпись.
+              На Devnet SOL бесплатный: <a href="https://faucet.solana.com" target="_blank" rel="noopener noreferrer">faucet.solana.com</a>.</p>
+          </li>
+          <li>
+            <h3>Получите RCR</h3>
+            <p>RCR — единственная валюта игры. В мейннете его покупают на DEX (ликвидность выделяется из распределительной доли genesis), на тестовых сетях раздают тестовые токены.
+              <b> Проверяйте адрес токена</b>: настоящий RCR — только этот mint, монеты с таким же названием — подделки.</p>
+            <p className="l-addr">Mint RCR: {IS_DEFAULT_PROGRAM ? <Address value={DEFAULT_MINT} label={DEFAULT_MINT} /> : <span className="muted">PDA «mint» программы {CONFIG.programId} — показан в режиме «{NET}»</span>}</p>
+          </li>
+          <li>
+            <h3>Подключитесь и займите клетку</h3>
+            <p>Режим «{NET}» → «Подключить кошелёк» → выберите мир и свободную клетку → «Занять». Укажите свою цену (не меньше {rcr(P.minPrice)}) и депозит налога.
+              Перед подписью клиент <b>симулирует транзакцию</b> и показывает, сколько RCR спишется. Если цифры не совпадают с ожиданием — не подписывайте.</p>
+          </li>
+          <li>
+            <h3>Посадите жизнь</h3>
+            <p>Выберите узор 8×8 из библиотеки или нарисуйте свой — {rcr(P.plantCost)} сгорают. Сажать можно раз в {PLANT_COOLDOWN_TICKS === 1 ? "тик" : plural(PLANT_COOLDOWN_TICKS, "тик", "тика", "тиков")} ({slotsHuman(P.tickIntervalSlots * BigInt(PLANT_COOLDOWN_TICKS))}).
+              Чем больше клеток живёт на вашей территории в течение эпохи, тем больше ваша доля награды.</p>
+          </li>
+          <li>
+            <h3>Следите, собирайте, развивайтесь</h3>
+            <p>Пополняйте депозит, чтобы клетку не изъяли за долги. Награды забирайте кнопкой «Собрать», затем «Вывести» на кошелёк.
+              Дальше — дочерние миры, квантовые ходы, SWAP, свои законы физики и наём ИИ-жителя.</p>
+          </li>
+        </ol>
+      </Section>
+
+      {/* ───────────── price ───────────── */}
+      <Section id="sec-price" icon="coin" title="Сколько стоит вход" lead={<>Минимальный вход — <b>{rcr(COST.minTotal)}</b> и до <b>{sol(COST.solMax)}</b>. Песочница — бесплатно.</>}>
+        <div className="l-cost">
+          <div className="card l-cost-card">
+            <h3><Art name="coin" size={24} /> RCR — минимальный старт</h3>
+            <table className="l-table">
+              <tbody>
+                <tr><td>Занять свободную клетку</td><td className="num">{rcr(COST.claim)}</td></tr>
+                <tr><td>Депозит налога: минимум 1 эпоха <span className="muted">(рекомендуем неделю — {rcr(COST.depositWeek)})</span></td><td className="num">{rcr(COST.deposit)}</td></tr>
+                <tr><td>Посадить первый узор</td><td className="num">{rcr(COST.plant)}</td></tr>
+                <tr className="l-total"><td>Итого</td><td className="num">{rcr(COST.minTotal)}</td></tr>
+              </tbody>
+            </table>
+            <p className="small muted">С недельным депозитом — {rcr(COST.weekTotal)}. Занятую клетку можно выкупить по цене, которую назначил её владелец.</p>
+          </div>
+          <div className="card l-cost-card">
+            <h3><Glyph name="vault" size={20} /> SOL — один раз, в худшем случае</h3>
+            <table className="l-table">
+              <tbody>
+                <tr><td>Аккаунт игрока <span className="muted">(при первой покупке)</span></td><td className="num">{sol(COST.rentPlayer)}</td></tr>
+                <tr><td>Аккаунт клетки <span className="muted">(если её ещё никто не занимал)</span></td><td className="num">{sol(COST.rentTerritory)}</td></tr>
+                <tr><td>Счёт RCR в кошельке <span className="muted">(если его ещё нет)</span></td><td className="num">{sol(COST.rentAta)}</td></tr>
+                <tr><td>Комиссии сети за 2 транзакции</td><td className="num">{sol(COST.fees)}</td></tr>
+                <tr className="l-total"><td>Итого, не больше</td><td className="num">{sol(COST.solMax)}</td></tr>
+              </tbody>
+            </table>
+            <p className="small muted">Это аренда хранения данных в Solana, студия её не получает. Аренда аккаунтов игрока и клетки остаётся в сети навсегда. Плюс по желанию приоритетная комиссия: клиент ограничивает её потолком.</p>
+          </div>
+        </div>
+        <div className="l-note">
+          <Glyph name="warn" size={16} />
+          <p>Цену RCR в рублях или долларах определяет рынок, поэтому мы её не называем. Все суммы выше — параметры контракта по умолчанию.
+            Управление может менять их только в жёстких границах, зашитых в код, с публичной задержкой {Math.round(Number(P.timelockSecs) / 3600)} ч; действующие значения клиент читает из аккаунта Config.</p>
+        </div>
+
+        <h3 className="l-h3">Что вернётся</h3>
+        <ul className="l-list">
+          <li><b>Выкупили вашу клетку</b> — вы получаете её цену целиком, неизрасходованный депозит и накопленные награды.</li>
+          <li><b>Депозит</b> можно вывести в любой момент, оставив минимум одну эпоху налога.</li>
+          <li><b>Залоги</b> квантовых ходов и премии отменённых SWAP возвращаются; аренда их аккаунтов возвращается при закрытии.</li>
+          <li><b>Сгоревшее не возвращается</b>: посадка, налог, сборы. За счёт этого эмиссия не бывает бесплатной.</li>
+        </ul>
+
+        <h3 className="l-h3">Полный прайс-лист</h3>
+        <div className="l-table-wrap">
+          <table className="l-table l-prices">
+            <thead><tr><th>Действие</th><th>RCR</th><th>SOL (аренда)</th><th>Что возвращается</th></tr></thead>
+            <tbody>{PRICES.map((r) => <tr key={r.what}><td>{r.what}</td><td>{r.rcr}</td><td>{r.sol}</td><td>{r.back}</td></tr>)}</tbody>
+          </table>
+        </div>
+      </Section>
+
+      {/* ───────────── rules ───────────── */}
+      <Section id="sec-rules" icon="law" title="Правила игры" lead="Все правила исполняет смарт-контракт. Ниже — всё, что он делает, простыми словами.">
+        <div className="l-rules">
+          <Rule icon="world" title="Мир, клетки и физика" open>
+            <p>Мир — поле 64×64 клетки на торе (края склеены), разделённое на <b>64 территории 8×8</b>. Каждый тик мир проживает {plural(P.gensPerTick, "поколение", "поколения", "поколений")} по правилу своей физики
+              <b> B/S</b>: клетка рождается, если у неё ровно столько живых соседей, сколько указано в B, и выживает при числе соседей из S. Классика Конвея — B3/S23.</p>
+            <p>Поколения считает сам контракт (битборды, до 8 поколений за транзакцию). Сервера нет: результат одинаков у всех и проверяем.</p>
+          </Rule>
+          <Rule icon="energy" title="Тики и энергия">
+            <p>Тикнуть мир может кто угодно, не чаще раза в {slots(P.tickIntervalSlots)} ({slotsHuman(P.tickIntervalSlots)}). Тик стоит {rcr(P.tickCost)} и оплачивается из <b>энергии мира</b>, а не из кармана вызвавшего.</p>
+            <p>Как делится тик: {pct(P.crankerBps)} — вызвавшему (keeper), {pct(P.protocolBps)} — казне протокола, до {pct(MAX_ROYALTY_BPS)} — автору закона физики,{" "}
+              {pct(P.hostBps)} — владельцу хост-клетки (для дочерних миров), остаток сгорает — не меньше {pct(MIN_TICK_BURN_BPS)}.</p>
+            <p>Энергию пополняют налоги держателей и плата за занятие свободных клеток. Кончилась энергия — мир замирает, пока его не пополнят.</p>
+          </Rule>
+          <Rule icon="cell" title="Владение клеткой: налог Харбергера">
+            <ul className="l-list">
+              <li>Свободная клетка стоит {rcr(P.minPrice)} — они идут в энергию мира. Занятая стоит столько, сколько объявил владелец, деньги получает он.</li>
+              <li>Покупая, вы объявляете новую цену (от {rcr(P.minPrice)}) и кладёте депозит — минимум налог за одну эпоху по этой цене.</li>
+              <li>Налог — <b>{pct(P.harbergerBps)} объявленной цены за эпоху</b> (≈ сутки), списывается из депозита непрерывно, по слотам. До {pct(MAX_ARCHITECT_FEE_BPS)} налога получает архитектор мира, остальное — энергия мира.</li>
+              <li>Депозит кончился — клетку <b>изымают</b>: она становится свободной, накопленные награды остаются вашими.</li>
+              <li>Менять цену можно не чаще раза в {slots(PRICE_CHANGE_COOLDOWN_SLOTS)} ({slotsHuman(PRICE_CHANGE_COOLDOWN_SLOTS)}), а при покупке задать предельную цену: защита от подмены цены перед вашей транзакцией.</li>
+            </ul>
+            <p className="muted small">Пример: клетка с ценой 100 RCR стоит 0,5 RCR налога в сутки. Поставите 10 RCR — налог копеечный, но любой заберёт клетку за 10 RCR.</p>
+          </Rule>
+          <Rule icon="plant" title="Посадка и очки эпохи">
+            <p>Владелец записывает в свою территорию узор 8×8 (OR к текущим клеткам) за {rcr(P.plantCost)}, которые сгорают полностью. Посадка — не чаще раза в тик.</p>
+            <p>После каждого тика контракт считает живые клетки каждой территории и прибавляет их к <b>очкам эпохи</b> владельца. Жизнь, которая держится долго, приносит больше, чем разовая вспышка.</p>
+          </Rule>
+          <Rule icon="coin" title="Эпохи и награды (эмиссия)">
+            <p>Эпоха — {slots(P.epochSlots)} ({slotsHuman(P.epochSlots)}). В конце эпохи из пула наград ({pct(4_500)} всех токенов) выделяется {pct(P.emissionRateBps)} остатка пула.</p>
+            <p>Мир получает долю <b>пропорционально тому, сколько RCR в нём сожгли</b>, но не больше {pct(P.rebateCapBps)} этого сожжённого. Долю мира делят владельцы клеток по очкам эпохи; доля бесхозных клеток уходит в энергию мира.</p>
+            <p>Следствие: из пула нельзя получить больше, чем сожжено. Фарм, сибилы и игра «сам с собой» убыточны по построению. Пул не пополняется, эмиссия затухает, а сжигание продолжается — токен дефляционный.</p>
+          </Rule>
+          <Rule icon="nested" title="Дочерние миры">
+            <p>Владелец клетки может открыть внутри неё новую вселенную: выбрать закон физики, назвать мир и задать комиссию архитектора (до {pct(MAX_ARCHITECT_FEE_BPS)} налога Харбергера в этом мире).
+              Стоимость — {rcr(P.worldCreateFee)} ({pct(P.feeBurnBps)} сгорает) плюс стартовая энергия. Максимальная глубина — {MAX_DEPTH} уровней.</p>
+            <p>Каждый тик дочернего мира платит {pct(P.hostBps)} держателю хост-клетки: ваша клетка становится доходной «планетой». Продали хост-клетку — доход уходит новому владельцу.
+              Если на хост-клетке вымерла жизнь, дочерний мир <b>засыпает</b> и не тикает, пока жизнь не вернётся.</p>
+          </Rule>
+          <Rule icon="breach" title="Прорыв между уровнями">
+            <p>Если дочерний мир долго держит население не меньше {BREACH_POPULATION} клеток (резонанс — {plural(BREACH_RESONANCE, "тик", "тика", "тиков")} подряд), он вбрасывает глайдер в свою клетку в родительском мире. Жизнь «протекает» из симуляции наружу.</p>
+          </Rule>
+          <Rule icon="rebel" title="Восстание против архитектора">
+            <p>Если архитектор берёт слишком большую комиссию, держатели клеток могут проголосовать за восстание. Нужны не меньше {pct(REBELLION_THRESHOLD_BPS)} занятых клеток и не меньше {REBELLION_MIN_VOTES} голосов.
+              При победе мир <b>освобождается навсегда</b>: комиссия архитектора обнуляется, накопленное он забирает. Новая попытка возможна через {slotsHuman(REBELLION_COOLDOWN_SLOTS)}.</p>
+          </Rule>
+          <Rule icon="quantum" title="Квантовый слой">
+            <ul className="l-list">
+              <li><b>Квантовые законы</b>: часть правил рождения и выживания срабатывает с вероятностью ½, ¼ или ⅛. Случайность берётся из хеша слота, назначенного заранее: ни keeper, ни ИИ её не выбирают и не предсказывают.</li>
+              <li><b>Суперпозиция</b>: вы сажаете в клетку сразу два узора A и B с весом w. В сеть уходит только хеш: соперники не видят ни узоров, ни весов. Сгорает {rcr(P.plantCost)}, залог — {rcr(P.plantCost * 4n)}.</li>
+              <li><b>Наблюдение</b>: через {slots(QUANTUM_TIMING.delay)} ({slotsHuman(QUANTUM_TIMING.delay)}) кто угодно фиксирует энтропию и получает 5% залога.</li>
+              <li><b>Коллапс</b>: вы раскрываете узоры; ветвь A выпадает с вероятностью w. Залог возвращается. С шансом 1/16 узор ещё и <b>туннелирует</b> в соседнюю клетку.</li>
+              <li><b>Запутанность</b>: две ваши клетки в разных мирах получают противоположные ветви одного измерения.</li>
+              <li><b>Декогеренция</b>: не раскрыли за {slotsHuman(QUANTUM_TIMING.reveal)} — залог сгорает. Прятать неудачный исход дороже, чем честно раскрыть.</li>
+            </ul>
+          </Rule>
+          <Rule icon="swap" title="Нейтральные миры и SWAP исходов">
+            <p>Нейтральный мир никому не принадлежит: архитектора нет с рождения, физика только квантовая. Здесь торгуют <b>вероятностями</b>.</p>
+            <ol className="l-list">
+              <li>Держатель клетки A предлагает держателю B: «с вероятностью p меняемся содержимым клеток» и прикладывает премию. Сбор — {rcr(P.plantCost)}.</li>
+              <li>B принимает — и в этот момент назначается будущий слот измерения.</li>
+              <li>Кто угодно разрешает сделку после этого слота: блоки 8×8 меняются местами со всей жизнью внутри (или нет). Премия уходит принявшему <b>при любом исходе</b>.</li>
+            </ol>
+            <p>Сделка обязательна для клеток, а не для людей: если клетку продали, новый владелец унаследует сделку, которую видел публично. Непринятое предложение живёт {slotsHuman(QUANTUM_TIMING.swapTtl)}.</p>
+          </Rule>
+          <Rule icon="lab" title="Лаборатория: свои законы физики">
+            <p>Соберите правило B/S (и квантовые маски) в редакторе, посмотрите предпросмотр и оценку жизнеспособности, опубликуйте за {rcr(P.moduleRegisterFee)}.
+              Роялти (до {pct(MAX_ROYALTY_BPS)} каждого тика) фиксируется навсегда. Каждый мир на вашем законе платит вам с каждого тика.</p>
+            <p className="muted small">Пример при параметрах по умолчанию: один непрерывно тикающий мир с роялти 2,5% даёт ≈ {rcr((P.epochSlots / P.tickIntervalSlots) * P.tickCost * 250n / 10_000n)} в сутки.</p>
+          </Rule>
+          <Rule icon="agent" title="ИИ-жители и наём агента">
+            <p>ИИ-жители четырёх характеров — садовник, экспансионист, спекулянт, демиург — играют теми же транзакциями, что и люди. Это не языковые модели: они читают только числа из блокчейна, поэтому их нельзя «уговорить» текстом.</p>
+            <p>Можно нанять своего агента. Вы выдаёте доверенность: отдельное хранилище с бюджетом, лимит на эпоху, максимальная цена клетки, срок (до ~30 дней), разрешённый мир и действия.
+              Всё это проверяет контракт. Агент не может вывести деньги и потратить больше лимита. Отозвать доверенность можно в любой момент — остаток вернётся.</p>
+          </Rule>
+          <Rule icon="architect" title="Как здесь зарабатывают">
+            <ul className="l-list">
+              <li><b>Держатели клеток</b>: доля эмиссии за живые клетки + доход хоста с дочерних миров + продажа клетки.</li>
+              <li><b>Архитекторы</b>: до {pct(MAX_ARCHITECT_FEE_BPS)} налога Харбергера в своём мире (пока не восстанут жители).</li>
+              <li><b>Авторы законов</b>: роялти с каждого тика миров на их физике.</li>
+              <li><b>Торговцы исходами</b>: премии за принятый риск SWAP.</li>
+              <li><b>Keeper'ы</b>: {pct(P.crankerBps)} каждого тика, 5% залога за квантовое наблюдение, 20% сбора за разрешение SWAP.</li>
+            </ul>
+            <p className="muted small">Честно: в нашей экономической симуляции средний пассивный игрок уходит в минус — эмиссия лишь частично возвращает сожжённое. Выигрывают те, кто держит живые узоры, строит востребованные миры и законы.</p>
+          </Rule>
+          <Rule icon="energy" title="Токен RCR">
+            <ul className="l-list">
+              <li>Всего {formatAmount(TOTAL_SUPPLY, 0)} RCR, 6 знаков после запятой, классический SPL Token без расширений.</li>
+              <li>Распределение зашито в контракт: 45% — пул наград (только эмиссией), 10% — казна (только публичными предложениями с задержкой 48 ч), 45% — распределение через мультисиг (ликвидность, аирдропы игрокам, гранты).</li>
+              <li>Право выпуска отозвано навсегда в момент genesis, права заморозки не было никогда — новых RCR не появится, ваш счёт нельзя заблокировать.</li>
+              <li>Студия зарабатывает только пока игроки играют: {pct(P.protocolBps)} каждого тика и половина сборов за миры и законы.</li>
+            </ul>
+          </Rule>
+          <Rule icon="observe" title="Все параметры">
+            <div className="l-table-wrap">
+              <table className="l-table">
+                <thead><tr><th>Параметр</th><th>По умолчанию</th><th>Граница в коде</th></tr></thead>
+                <tbody>
+                  <tr><td>Тик</td><td>{rcr(P.tickCost)} раз в {slots(P.tickIntervalSlots)}, {plural(P.gensPerTick, "поколение", "поколения", "поколений")}</td><td>до 8 поколений</td></tr>
+                  <tr><td>Эпоха</td><td>{slots(P.epochSlots)} ({slotsHuman(P.epochSlots)})</td><td>не короче 9 000 слотов</td></tr>
+                  <tr><td>Эмиссия за эпоху</td><td>{pct(P.emissionRateBps)} пула</td><td>не больше 2%</td></tr>
+                  <tr><td>Потолок награды мира</td><td>{pct(P.rebateCapBps)} сожжённого в нём</td><td>—</td></tr>
+                  <tr><td>Налог Харбергера</td><td>{pct(P.harbergerBps)} цены за эпоху</td><td>не больше 5%</td></tr>
+                  <tr><td>Минимальная цена клетки</td><td>{rcr(P.minPrice)}</td><td>—</td></tr>
+                  <tr><td>Посадка</td><td>{rcr(P.plantCost)}, сгорает</td><td>—</td></tr>
+                  <tr><td>Создание мира / закона</td><td>{rcr(P.worldCreateFee)} / {rcr(P.moduleRegisterFee)}, {pct(P.feeBurnBps)} сгорает</td><td>—</td></tr>
+                  <tr><td>Сжигание с тика</td><td>остаток после выплат</td><td>не меньше {pct(MIN_TICK_BURN_BPS)}</td></tr>
+                  <tr><td>Роялти закона / комиссия архитектора</td><td>задаёт автор / архитектор</td><td>≤ {pct(MAX_ROYALTY_BPS)} / ≤ {pct(MAX_ARCHITECT_FEE_BPS)}</td></tr>
+                  <tr><td>Изменение параметров</td><td>публичное предложение</td><td>задержка ≥ {Math.round(Number(P.timelockSecs) / 3600)} ч</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="muted small">1 слот Solana ≈ 0,4 с. В песочнице время ускорено в 24 раза, сборы масштабированы.</p>
+          </Rule>
+        </div>
+      </Section>
+
+      {/* ───────────── safety ───────────── */}
+      <Section id="sec-safety" icon="observe" title="Безопасность и риски">
+        <div className="l-grid two">
+          <div className="card">
+            <h3 className="l-h3 flat">Как мы защищаем игроков</h3>
+            <ul className="l-list">
+              <li>Каждая транзакция сначала симулируется, и вы видите её результат до подписи.</li>
+              <li>Выпуск токена отозван, заморозки нет, казна тратится только с публичной задержкой 48 ч через мультисиг.</li>
+              <li>Налоги, лимиты агентов, границы параметров — в коде контракта, а не на сервере.</li>
+              <li>Случайность — только из хешей будущих слотов, назначенных заранее (commit-reveal).</li>
+              <li>Открытые проверки при каждом изменении кода: скрытый юникод, скомпрометированные npm-пакеты, тесты контракта и инварианты экономической симуляции.</li>
+            </ul>
+          </div>
+          <div className="card l-risk">
+            <h3 className="l-h3 flat">Что нужно знать о рисках</h3>
+            <ul className="l-list">
+              <li><b>Внешний аудит контракта ещё не проведён.</b> Играйте в мейннете только суммами, потерю которых готовы принять.</li>
+              <li>Клетку могут выкупить по вашей цене в любой момент — назначайте цену, за которую готовы её отдать.</li>
+              <li>Налог идёт всегда; пустой депозит — изъятие клетки.</li>
+              <li>Цена RCR может падать. Это игра, а не инвестиция и не обещание дохода.</li>
+              <li>Не подписывайте транзакции с других сайтов «от имени RECURSIA» и не доверяйте «ИИ-помощникам», которые просят seed-фразу или подпись.</li>
+            </ul>
+          </div>
+        </div>
+      </Section>
+
+      {/* ───────────── FAQ ───────────── */}
+      <Section id="sec-faq" icon="neutral" title="Частые вопросы">
+        <div className="l-rules">
+          {([
+            ["Нужен ли кошелёк, чтобы попробовать?", "Нет. Песочница работает прямо в браузере, без регистрации, с тестовыми RCR и теми же правилами, что и контракт."],
+            ["Можно ли играть с телефона?", "Да, интерфейс адаптивный. Для игры в сети откройте сайт во встроенном браузере Phantom или Solflare."],
+            ["Могу ли я потерять деньги?", "Да. Сожжённое (посадка, налог, сборы) не возвращается, клетку могут выкупить, цена RCR меняется. Выкуп — не потеря: вы получаете объявленную цену и остаток депозита."],
+            ["Что будет, если я перестану заходить?", "Налог продолжит списываться из депозита. Когда депозит кончится, клетку изымут, а накопленные награды останутся вам. Хотите играть пассивно — наймите ИИ-агента с лимитом."],
+            ["Это казино?", "Нет. Классические миры полностью детерминированы. В квантовых мирах случайность проверяема, никто её не выбирает, а вероятности известны заранее. Доход — за жизнь, которую вы поддерживаете, а не за ставки против заведения."],
+            ["Почему ИИ не выиграет всё?", "ИИ играют по тем же правилам и платят те же деньги. Квантовая энтропия не даёт просчитать будущее дальше текущего тика никому, а лимиты агентов проверяет контракт."],
+            ["Как вывести заработанное?", "Награды и выручка от продажи копятся на вашем игровом балансе. Кнопка «Вывести» переводит RCR на ваш кошелёк; комиссия — только сетевая."],
+            ["Кто может изменить правила?", `Параметры меняются только публичным предложением с задержкой не меньше ${Math.round(Number(P.timelockSecs) / 3600)} ч и в жёстких границах кода. Ключ обновления программы — у мультисига, не у одного человека.`],
+          ] as Array<[string, string]>).map(([q, a]) => (
+            <details key={q} className="l-rule l-faq"><summary><span>{q}</span><Glyph name="arrow" size={14} className="l-chev" /></summary><div className="l-rule-body"><p>{a}</p></div></details>
+          ))}
+        </div>
+      </Section>
+
+      {/* ───────────── final CTA ───────────── */}
+      <section className="l-final">
+        <Art name="nested" size={64} />
+        <h2>Вселенная ждёт своего демиурга</h2>
+        <p>Начните с песочницы — это бесплатно и занимает минуту.</p>
+        <div className="l-cta center">
+          <a className="btn primary l-big" href="#/play" onClick={(e) => { e.preventDefault(); go({ page: "sandbox" }); }}><Art name="world" size={22} /> Играть бесплатно</a>
+          <a className="btn l-big" href="#/chain" onClick={(e) => { e.preventDefault(); go({ page: "chain" }); }}><Art name="coin" size={22} /> Играть в {NET}</a>
+        </div>
+      </section>
+
+      <footer className="l-footer small muted">
+        <p>Программа: <Address value={CONFIG.programId} /> · сеть: {NET}{IS_DEFAULT_PROGRAM && <> · mint RCR: <Address value={DEFAULT_MINT} /></>}</p>
+        <p>RECURSIA — экспериментальная игра на блокчейне. Ничто на этой странице не является инвестиционной рекомендацией или обещанием дохода.</p>
+      </footer>
+    </main>
+  );
+}

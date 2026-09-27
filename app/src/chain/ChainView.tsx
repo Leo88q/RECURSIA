@@ -70,7 +70,7 @@ export function ChainView({ route, go }: { route: Extract<Route, { page: "chain"
           ? "Не удалось связаться с узлом Solana. Проверьте подключение или повторите через минуту — ваши средства в сети не зависят от этого сайта."
           : "Контракт RECURSIA на этом кластере ещё не развёрнут. Пока можно играть в «Песочнице» — там те же правила, что и в контракте, только время идёт быстрее."}</p>
         <div className="row-wrap">
-          <a className="btn primary" href="#/"><Art name="world" size={20} /> Играть в песочнице</a>
+          <a className="btn primary" href="#/play"><Art name="world" size={20} /> Играть в песочнице</a>
           <button className="btn" onClick={() => data.refresh()}>Повторить</button>
         </div>
         <details className="tech">

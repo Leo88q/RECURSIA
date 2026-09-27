@@ -1,6 +1,8 @@
 // Tiny hash router: static hosting friendly (no server rewrites needed, works
 // on IPFS/Arweave mirrors too) and shareable deep links.
-//   #/                        → sandbox
+//   #/                        → landing (rules, how to start, entry cost)
+//   #/start | #/price | #/rules | #/faq → landing, scrolled to that section
+//   #/play                    → sandbox
 //   #/sandbox/<worldId>/<cell>
 //   #/lab
 //   #/chain                   → on-chain worlds list
@@ -8,7 +10,11 @@
 //   #/chain/lab
 import { useCallback, useEffect, useState } from "react";
 
+export const LANDING_SECTIONS = ["start", "price", "rules", "faq"] as const;
+export type LandingSection = (typeof LANDING_SECTIONS)[number];
+
 export type Route =
+  | { page: "landing"; section?: LandingSection }
   | { page: "sandbox"; world?: string; cell?: number }
   | { page: "lab" }
   | { page: "chain"; world?: string; cell?: number }
@@ -27,22 +33,26 @@ function cellOf(s: string | undefined): number | undefined {
 export function parseRoute(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean).map((p) => { try { return decodeURIComponent(p); } catch { return ""; } });
   const [head, a, b] = parts;
+  if (head === undefined) return { page: "landing" };
+  if ((LANDING_SECTIONS as readonly string[]).includes(head)) return { page: "landing", section: head as LandingSection };
+  if (head === "play") return { page: "sandbox" };
   if (head === "lab") return { page: "lab" };
   if (head === "chain") {
     if (a === "lab") return { page: "chain-lab" };
     if (a && BASE58.test(a)) return { page: "chain", world: a, cell: cellOf(b) };
     return { page: "chain" };
   }
-  if (head === "sandbox" && a && SAFE_ID.test(a)) return { page: "sandbox", world: a, cell: cellOf(b) };
-  return { page: "sandbox" };
+  if (head === "sandbox") return a && SAFE_ID.test(a) ? { page: "sandbox", world: a, cell: cellOf(b) } : { page: "sandbox" };
+  return { page: "landing" };
 }
 
 export function formatRoute(r: Route): string {
   switch (r.page) {
+    case "landing": return r.section ? `#/${r.section}` : "#/";
     case "lab": return "#/lab";
     case "chain-lab": return "#/chain/lab";
     case "chain": return r.world ? `#/chain/${r.world}${r.cell !== undefined ? `/${r.cell}` : ""}` : "#/chain";
-    case "sandbox": return r.world ? `#/sandbox/${encodeURIComponent(r.world)}${r.cell !== undefined ? `/${r.cell}` : ""}` : "#/";
+    case "sandbox": return r.world ? `#/sandbox/${encodeURIComponent(r.world)}${r.cell !== undefined ? `/${r.cell}` : ""}` : "#/play";
   }
 }
 
