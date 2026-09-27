@@ -30,23 +30,28 @@ keyblack() { # in size out
 }
 
 for f in "$SRC"/i-*.png; do
+  [ -f "$f" ] || continue
   n="$(basename "$f" .png)"; n="${n#i-}"
   keyblack "$f" 96 "$ART/$n.webp"
 done
-keyblack "$SRC/logo.png" 160 "$ART/logo.webp"
+# Every source is optional: re-running with only some PNGs (e.g. new icons) refreshes just those.
+have() { [ -f "$SRC/$1" ]; }
+have logo.png && keyblack "$SRC/logo.png" 160 "$ART/logo.webp"
 
 # backgrounds (opaque)
-$IM "$SRC/bg.png" -resize '1920x>' -modulate 125,115 -strip -quality 84 -define webp:method=6 "$ART/bg.webp"
-$IM "$SRC/hero.png" -resize '1200x>' -strip -quality 76 -define webp:method=6 "$ART/hero.webp"
+have bg.png && $IM "$SRC/bg.png" -resize '1920x>' -modulate 125,115 -strip -quality 84 -define webp:method=6 "$ART/bg.webp"
+have hero.png && $IM "$SRC/hero.png" -resize '1200x>' -strip -quality 76 -define webp:method=6 "$ART/hero.webp"
 
 # PWA / favicon / social (stable URLs → public/)
+if have logo.png; then
 for s in 32 180 192 512; do
   $IM "$SRC/logo.png" -resize "${s}x${s}" -strip +dither -colors 128 -define png:compression-level=9 "$PUB/icons/icon-$s.png"
 done
 # maskable: logo inside the 80% safe zone on the brand background
 $IM -size 512x512 xc:'#07060f' \( "$SRC/logo.png" -resize 380x380 \) -gravity center -composite -strip +dither -colors 128 -define png:compression-level=9 "$PUB/icons/maskable-512.png"
+fi
 # Open Graph 1200×630: key art, darkened toward the bottom for link previews
-$IM "$SRC/hero.png" -resize 1200x630^ -gravity center -extent 1200x630 \
+have hero.png && $IM "$SRC/hero.png" -resize 1200x630^ -gravity center -extent 1200x630 \
   \( -size 1200x630 gradient:'rgba(7,6,15,0)-rgba(7,6,15,0.55)' \) -composite \
   -strip -quality 82 "$PUB/og.jpg"
 for p in "$PUB"/icons/*.png; do command -v optipng >/dev/null && optipng -quiet -o2 "$p" || true; done

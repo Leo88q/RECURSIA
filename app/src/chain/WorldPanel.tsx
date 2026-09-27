@@ -5,7 +5,7 @@ import { rcr, slotsToHuman } from "../lib/format";
 import { worldEpochClaimable } from "../lib/epoch";
 import { AmountField, Address, amountOf } from "../ui/fields";
 import { blocked, type ChainCtx } from "./ctx";
-import { Glyph, WorldIcon } from "../ui/Icon";
+import { Art, Glyph, WorldIcon } from "../ui/Icon";
 
 export function WorldPanel({ c }: { c: ChainCtx }) {
   const { cur, config, me } = c;
@@ -61,21 +61,21 @@ export function WorldPanel({ c }: { c: ChainCtx }) {
 
       {me && hasArchitect && w.architect.equals(me) && (
         <div className="card">
-          <div className="card-title"><Glyph name="crown" size={17} className="gold" />Вы — архитектор</div>
+          <div className="card-title"><Art name="architect" size={21} />Вы — архитектор</div>
           <div className="small">Накоплено: <b>{rcr(w.architectAccrued)}</b></div>
           <button className="btn" disabled={w.architectAccrued === 0n} onClick={() => c.run({ title: "Доход архитектора", lines: [`${rcr(w.architectAccrued)} → ваш баланс к выводу`], ixs: [c.rx.claimArchitect(me, k)] })}>Забрать</button>
         </div>
       )}
       {rebellionActive && hasArchitect && (
         <div className="card danger-card">
-          <div className="card-title"><Glyph name="rebel" size={18} className="rose" />Восстание #{w.rebellionId}</div>
+          <div className="card-title"><Art name="rebel" size={22} />Восстание #{w.rebellionId}</div>
           <div className="small">Голосов: {w.rebellionVotes} (нужно ≥⅔ владельцев и не меньше {REBELLION_MIN_VOTES})</div>
           <button className="btn danger" disabled={!me} onClick={() => c.run({ title: "Исполнить восстание", lines: [`Мир «${w.name}» становится свободным навсегда`, "Накопления архитектора уходят ему на вывод, комиссия обнуляется"], ixs: [c.rx.executeRebellion(me!, k, w.architect)] })}>Исполнить</button>
         </div>
       )}
       {parent && w.resonance >= BREACH_RESONANCE && (
         <div className="card">
-          <div className="card-title"><Glyph name="breach" size={18} className="violet" />Прорыв</div>
+          <div className="card-title"><Art name="breach" size={22} />Прорыв</div>
           <p className="small">Вложенный мир накопил резонанс: его жизнь может «просочиться» в клетку-хост родителя.</p>
           <button className="btn portal" disabled={!me} onClick={() => c.run({ title: "Прорыв в родительский мир", lines: [`«${w.name}» → ${parentName ?? "родитель"} #${w.parentTerritory}`], ixs: [c.rx.breach(k, parent)] })}>Прорыв</button>
         </div>

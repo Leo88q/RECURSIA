@@ -28,7 +28,7 @@ export function CellPanel({ c, idx }: { c: ChainCtx; idx: number }) {
       <div className="kv-head">
         <div className="title">Клетка #{idx}</div>
         {mine && <span className="tag mine">ваша</span>}
-        {t.agent && <span className="tag"><Glyph name="agent" size={12} /> агент</span>}
+        {t.agent && <span className="tag"><Art name="agent" size={15} /> агент</span>}
       </div>
       <dl className="kv">
         <dt>Владелец</dt><dd>{t.holder ? <Address value={t.holder} /> : "свободна"}</dd>
@@ -92,7 +92,7 @@ function HolderCards({ c, idx }: { c: ChainCtx; idx: number }) {
   return (
     <>
       <div className="card">
-        <div className="card-title"><Glyph name="sprout" size={18} className="mint" />Посадить жизнь</div>
+        <div className="card-title"><Art name="plant" size={22} />Посадить жизнь</div>
         <PatternEditor world={c.model!} idx={idx} cost={rcr(p.plantCost, 0)} disabledReason={plantBlocked}
           onPlant={(pat) => c.run({ title: "Посадка паттерна", lines: [`Клетка #${idx}`, `Сжигается ${rcr(p.plantCost)}`, "Паттерн заменит содержимое вашего блока 8×8"], ixs: [c.rx.plant(c.me!, k, idx, pat)], successText: "Жизнь посажена" })} />
       </div>
@@ -187,9 +187,9 @@ function SuperpositionCard({ c, idx, sp }: { c: ChainCtx; idx: number; sp: Super
         <dt>Залог</dt><dd>{rcr(sp.stake)}</dd>
         {sp.observed && !decoherable && <><dt>Осталось</dt><dd>{slotsToHuman(sp.revealDeadline - slot)}</dd></>}
       </dl>
-      {pv && <div className="small">Исход: ветвь <b>{pv.branchA ? "A" : "B"}</b>{pv.tunnel ? <> + <Glyph name="energy" size={13} className="gold" /> туннелирование</> : ""}</div>}
+      {pv && <div className="small">Исход: ветвь <b>{pv.branchA ? "A" : "B"}</b>{pv.tunnel ? <> + <Art name="energy" size={16} /> туннелирование</> : ""}</div>}
       <div className="row-wrap">
-        {measurable && <button className="btn" disabled={!!blocked(c, { paused: false })} onClick={() => c.run({ title: "Наблюдение", lines: ["Фиксирует энтропию слота для суперпозиции", `Награда наблюдателя: ${rcr(sp.stake / 20n)}`], ixs: c.withAta([c.rx.quantumObserve(me!, k, idx)]) })}><Glyph name="eye" size={15} /> Наблюдать · +{rcr(sp.stake / 20n)}</button>}
+        {measurable && <button className="btn" disabled={!!blocked(c, { paused: false })} onClick={() => c.run({ title: "Наблюдение", lines: ["Фиксирует энтропию слота для суперпозиции", `Награда наблюдателя: ${rcr(sp.stake / 20n)}`], ixs: c.withAta([c.rx.quantumObserve(me!, k, idx)]) })}><Art name="observe" size={19} /> Наблюдать · +{rcr(sp.stake / 20n)}</button>}
         {isOwner && secret && sp.observed && !decoherable && <button className="btn portal" onClick={async () => {
           const r = await c.run({ title: "Коллапс волновой функции", lines: [`Раскрытие коммита клетки #${idx}`, `Возврат залога ${rcr(sp.stake)}`], ixs: c.withAta([c.rx.quantumCollapse(me!, k, idx, secret.a, secret.b, secret.w, secret.salt, ent)]), successText: "Волновая функция коллапсировала" });
           if (r.ok) removeSecret(k.toBase58(), idx, me!.toBase58());
@@ -231,7 +231,7 @@ function SwapCard({ c, idx }: { c: ChainCtx; idx: number }) {
   const gap = a >= 0 ? model.alive[idx] - model.alive[a] : 0;
   return (
     <div className="card swap-card">
-      <div className="card-title"><Glyph name="swap" size={18} className="mint" />Квантовый SWAP</div>
+      <div className="card-title"><Art name="swap" size={22} />Квантовый SWAP</div>
       <p className="muted small">Обмен содержимым двух клеток с вероятностью p. Премия уходит принявшему при любом исходе — это цена риска. После принятия сделка обязательна для клеток, даже при смене владельца.</p>
       {canOffer && (
         <>
@@ -277,7 +277,7 @@ function RebellionCard({ c, idx }: { c: ChainCtx; idx: number }) {
   const voted = !!t && t.votedRebellion === w.rebellionId;
   return (
     <div className="card danger-card">
-      <div className="card-title"><Glyph name="rebel" size={18} className="rose" />Восстание против архитектора</div>
+      <div className="card-title"><Art name="rebel" size={22} />Восстание против архитектора</div>
       <p className="small">Архитектор берёт {w.architectFeeBps / 100}% с тиков. Если ≥⅔ владельцев клеток (минимум {REBELLION_MIN_VOTES}) проголосуют — мир станет свободным навсегда, а накопления архитектора распределятся.</p>
       {active
         ? <div className="small">Идёт восстание #{w.rebellionId}: голосов {w.rebellionVotes} · до слота {w.rebellionDeadline.toString()}</div>

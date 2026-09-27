@@ -11,7 +11,7 @@ const walk = (d: string): string[] => readdirSync(d).flatMap((f) => { const p = 
 describe("icon system", () => {
   it("every painted icon resolves to a bundled asset", () => {
     for (const [name, url] of Object.entries(ART)) expect(url, name).toMatch(/\.webp/);
-    for (const f of ["logo", "world", "nested", "neutral", "quantum", "lab", "coin", "bg", "hero"]) {
+    for (const f of [...Object.keys(ART), "bg", "hero"]) {
       const size = statSync(join(SRC, "assets/art", `${f}.webp`)).size;
       expect(size, f).toBeGreaterThan(1_000);
       expect(size, f).toBeLessThan(160 * 1024);

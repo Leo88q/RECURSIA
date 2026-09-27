@@ -451,3 +451,12 @@ details.tech code { word-break: break-all; }
 .modal-back { overflow-y: auto; place-items: safe center; }
 @supports not (align-items: safe center) { .modal-back { align-items: start; } }
 .modal { max-height: none; margin-block: auto; }
+
+/* painted icons: economy strip + chronicle */
+.stat { display: flex; align-items: center; gap: 8px; }
+.stat-ico { display: inline-flex; flex: none; width: 24px; justify-content: center; opacity: 0.95; }
+.ev { display: flex; align-items: flex-start; gap: 8px; }
+.ev-slot { flex: none; padding-top: 2px; }
+.ev-ico { flex: none; margin-top: 0; }
+.ev-text { min-width: 0; }
+@media (max-width: 640px) { .stat-ico { display: none; } }

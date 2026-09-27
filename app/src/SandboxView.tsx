@@ -8,7 +8,7 @@ import type { Route } from "./lib/route";
 import { Art, Glyph } from "./ui/Icon";
 
 type Tab = "cell" | "world" | "wallet";
-const TABS: Array<[Tab, string, React.ReactNode]> = [["cell", "Клетка", <Glyph name="cell" size={16} />], ["world", "Мир", <Art name="world" size={18} />], ["wallet", "Кошелёк и ИИ", <Art name="coin" size={18} />]];
+const TABS: Array<[Tab, string, React.ReactNode]> = [["cell", "Клетка", <Art name="cell" size={20} />], ["world", "Мир", <Art name="world" size={18} />], ["wallet", "Кошелёк и ИИ", <Art name="coin" size={18} />]];
 const SPEEDS = [0, 1, 2, 5, 10];
 
 export function SandboxView({ sb, route, go, speed, setSpeed, frame, bump }: {
@@ -85,7 +85,7 @@ export function SandboxView({ sb, route, go, speed, setSpeed, frame, bump }: {
         <div role="tabpanel">
           <ErrorBoundary label={`sandbox-${tab}`} compact key={`${tab}-${world.id}-${selected}`}>
             {tab === "cell" && (selected === null
-              ? <div className="panel-body empty-state"><Glyph name="cell" size={44} className="empty-ico" /><p>Выберите клетку 8×8 на карте (или стрелками с клавиатуры).</p><p className="muted small"><Art name="nested" size={16} /> Двойной клик / Enter по фиолетовому порталу — войти во вложенную вселенную. <kbd>Пробел</kbd> — пауза.</p></div>
+              ? <div className="panel-body empty-state"><Art name="cell" size={48} className="empty-ico" /><p>Выберите клетку 8×8 на карте (или стрелками с клавиатуры).</p><p className="muted small"><Art name="nested" size={16} /> Двойной клик / Enter по фиолетовому порталу — войти во вложенную вселенную. <kbd>Пробел</kbd> — пауза.</p></div>
               : <TerritoryPanel key={`${world.id}-${selected}`} sb={sb} world={world} idx={selected} onDescend={descend} notify={notify} />)}
             {tab === "world" && <WorldPanel sb={sb} world={world} notify={notify} />}
             {tab === "wallet" && <WalletPanel sb={sb} notify={notify} />}

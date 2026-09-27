@@ -127,7 +127,7 @@ export function PhysicsLab({ modules, fee, feeBurnBps, fmt, onPublish, onClaim, 
       </section>
 
       <section className="lab-col wide">
-        <div className="panel-title"><Glyph name="scroll" size={17} />Рынок законов физики</div>
+        <div className="panel-title"><Art name="law" size={21} />Рынок законов физики</div>
         <table className="market">
           <thead><tr><th>Закон</th><th>Автор</th><th>Миров</th><th>Жизнь</th><th>Роялти</th><th>Заработано</th><th /></tr></thead>
           <tbody>

@@ -6,17 +6,28 @@ import neutral from "../assets/art/neutral.webp";
 import quantum from "../assets/art/quantum.webp";
 import lab from "../assets/art/lab.webp";
 import coin from "../assets/art/coin.webp";
+import agent from "../assets/art/agent.webp";
+import cell from "../assets/art/cell.webp";
+import swap from "../assets/art/swap.webp";
+import rebel from "../assets/art/rebel.webp";
+import architect from "../assets/art/architect.webp";
+import breach from "../assets/art/breach.webp";
+import observe from "../assets/art/observe.webp";
+import plant from "../assets/art/plant.webp";
+import law from "../assets/art/law.webp";
+import energy from "../assets/art/energy.webp";
 
 /**
  * Two kinds of icons, one visual language (neon on the void):
  *  - <Art>: painted raster icons (app/src/assets/art, built by scripts/build-art.sh)
- *    for the key game concepts — world kinds, quantum, lab, the RCR coin, the logo.
+ *    for the key game concepts — world kinds, quantum, lab, RCR coin, AI agent, cell,
+ *    SWAP, rebellion, architect, breach, observer, planting, laws, energy, the logo.
  *  - <Glyph>: crisp line icons for actions and small UI affordances. They inherit
  *    `currentColor` and get the same glow via CSS, and never fall back to tofu
  *    the way emoji / rare Unicode symbols do on systems without the font.
  * Both are decorative by default (alt="" / aria-hidden) — the adjacent text is the label.
  */
-export const ART = { logo, world, nested, neutral, quantum, lab, coin } as const;
+export const ART = { logo, world, nested, neutral, quantum, lab, coin, agent, cell, swap, rebel, architect, breach, observe, plant, law, energy } as const;
 export type ArtName = keyof typeof ART;
 
 export function Art({ name, size = 20, className = "", title, style }: { name: ArtName; size?: number; className?: string; title?: string; style?: CSSProperties }) {
@@ -66,6 +77,7 @@ const P: Record<string, string> = {
   clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 7v5l3 2",
   crown: "M4 18h16M5 15 4 7l4.5 3.5L12 5l3.5 5.5L20 7l-1 8H5Z",
   flow: "M12 3v9l7 4M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z",
+  flame: "M12 22c4 0 7-2.8 7-6.8 0-3.2-2-5.7-3.6-7.4-.3 1.8-1.3 3-2.6 3.5.3-3.4-1.3-6.6-4.3-8.3.2 3.3-1.6 5.3-3.1 7.1C4.3 11.5 5 13.6 5 15.2 5 19.2 8 22 12 22ZM12 22c-1.7 0-3-1.2-3-3 0-1.6 1.4-2.8 3-4.5 1.6 1.7 3 2.9 3 4.5 0 1.8-1.3 3-3 3Z",
   vault: "M4 5h16v14H4zM4 9h16M9 14h.01M12 14a2 2 0 1 0 4 0 2 2 0 0 0-4 0",
   close: "M6 6l12 12M18 6 6 18",
 };

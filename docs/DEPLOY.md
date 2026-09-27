@@ -96,7 +96,7 @@ npm -w app run check:bundle     # бюджет бандла, CSP-meta, _headers,
 ### Графика
 Иконки, фон и ключевой арт — собственные ассеты в `app/src/assets/art` (WebP, хеш в имени → immutable-кеш), PWA-иконки и
 Open Graph-картинка — в `app/public/icons`, `app/public/og.jpg`. Исходники (PNG ~17 МБ) в git не хранятся; оптимизированные
-файлы собираются воспроизводимо: `app/scripts/build-art.sh <папка с PNG>` (ImageMagick с WebP). Чёрный фон неоновых иконок
+файлы собираются воспроизводимо: `app/scripts/build-art.sh <папка с PNG>` (ImageMagick с WebP; можно подать только часть исходников — например, новые `i-*.png` — обновятся только они). Чёрный фон неоновых иконок
 превращается в настоящую прозрачность (альфа из яркости + un-premultiply). Бюджет: все картинки ≤ 400 KB, каждая ≤ 160 KB
 (`check:bundle`). Мелкие UI-глифы — inline-SVG (`app/src/ui/Icon.tsx`), без emoji: они превращаются в «тофу» на системах без шрифта.
 

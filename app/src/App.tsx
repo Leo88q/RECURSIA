@@ -120,11 +120,11 @@ export function App() {
           <div className="intro-hero" aria-hidden="true"><img src={hero} alt="" width={1200} height={593} decoding="async" /></div>
           <p>Каждый мир — клеточная вселенная 64×64, которую <b>считает сам блокчейн Solana</b>. Никакого сервера: законы физики исполняются в смарт-контракте.</p>
           <ul>
-            <li className="ico-li"><Glyph name="cell" size={18} /><span><b>Клетки 8×8</b> — земля по налогу Харбергера: вы сами назначаете цену, платите с неё налог, и любой может выкупить клетку по этой цене.</span></li>
+            <li className="ico-li"><Art name="cell" size={22} /><span><b>Клетки 8×8</b> — земля по налогу Харбергера: вы сами назначаете цену, платите с неё налог, и любой может выкупить клетку по этой цене.</span></li>
             <li className="ico-li"><Art name="coin" size={18} /><span><b>Жизнь = доход.</b> Эмиссия эпохи делится по числу живых клеток. Сажайте паттерны и эволюционируйте.</span></li>
             <li className="ico-li"><Art name="nested" size={18} /><span><b>Симуляция в симуляции.</b> Владелец клетки может запустить внутри неё новую вселенную.</span></li>
             <li className="ico-li"><Art name="quantum" size={18} /><span><b>Квантовая физика.</b> Суперпозиции, запутанность и обмен исходами (SWAP) на энтропии блокчейна; свои законы физики с роялти.</span></li>
-            <li className="ico-li"><Glyph name="agent" size={18} /><span><b>ИИ-жители</b> играют рядом с вами. Своего ИИ можно нанять с ончейн-лимитами.</span></li>
+            <li className="ico-li"><Art name="agent" size={22} /><span><b>ИИ-жители</b> играют рядом с вами. Своего ИИ можно нанять с ончейн-лимитами.</span></li>
           </ul>
           <p className="muted small">«Песочница» исполняет те же правила, что и контракт, в ускоренном времени, с тестовыми RCR. Режим «{CLUSTER_LABEL[CONFIG.cluster]}» работает с развёрнутой программой через ваш кошелёк.</p>
           <button className="btn primary" data-autofocus onClick={closeIntro}>Войти в мультивселенную</button>

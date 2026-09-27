@@ -6,7 +6,7 @@ import {
 import { fmtRcr, YOU, type Sandbox } from "./sandbox";
 import { youify } from "./lib/format";
 import { holderColor } from "./WorldCanvas";
-import { Art, Glyph, WorldIcon } from "./ui/Icon";
+import { Art, Glyph, WorldIcon, type ArtName } from "./ui/Icon";
 
 const toUnits = (s: string) => { const n = Number(s.replace(",", ".")); return Number.isFinite(n) && n >= 0 ? BigInt(Math.round(n * 1e6)) : 0n; };
 const fromUnits = (v: bigint) => (Number(v) / 1e6).toString();
@@ -24,7 +24,7 @@ export function WorldTree({ sb, current, onPick }: { sb: Sandbox; current: strin
         <button className={`tree-node ${w.id === current ? "active" : ""}`} onClick={() => onPick(w.id)}>
           <span className={`dot ${status === "dormant" ? "dormant" : status === "no energy" ? "dead" : "live"}`} />
           <WorldIcon neutral={w.neutral} depth={w.depth} /><span className="tree-name">{w.name}</span>
-          {w.liberated && !w.neutral && <Glyph name="rebel" size={13} className="mint tag-free" title="Свободный мир: архитектор свергнут восстанием" />}
+          {w.liberated && !w.neutral && <Art name="rebel" size={16} className="tag-free" title="Свободный мир: архитектор свергнут восстанием" />}
           {isQuantum(w) && <Art name="quantum" size={15} className="tag-ico" title="квантовые законы физики" />}
           <svg className="spark" viewBox="0 0 40 12" preserveAspectRatio="none">
             <polyline fill="none" stroke="currentColor" strokeWidth="1" points={spark.map((v, i) => `${i},${12 - (v / max) * 11}`).join(" ")} />
@@ -115,7 +115,7 @@ export function QuantumCard({ sb, world, idx, notify }: { sb: Sandbox; world: MW
         </dl>
         {sp.observed && preview && secret && (
           <p className="small">
-            Прогноз коллапса: ветвь <b>{preview.branchA ? "A" : "B"}</b>{preview.tunnel ? <> + <Glyph name="energy" size={13} className="gold" /> туннелирование в соседнюю клетку</> : ""}.
+            Прогноз коллапса: ветвь <b>{preview.branchA ? "A" : "B"}</b>{preview.tunnel ? <> + <Art name="energy" size={16} /> туннелирование в соседнюю клетку</> : ""}.
             {" "}Раскрыть нужно в течение {Math.max(0, left)} слотов, иначе ставка сгорит.
           </p>
         )}
@@ -163,7 +163,7 @@ function SwapRow({ sb, s, notify }: { sb: Sandbox; s: MSwap; notify: (e: string 
     : m.slot > s.expirySlot ? "истекло" : `открыто ещё ${s.expirySlot - m.slot} сл.`;
   return (
     <div className="swap-row">
-      <div className="small"><b>#{s.indexA}</b> ({s.offerer}) <Glyph name="swap" size={12} className="inline-ico" /> <b>#{s.indexB}</b> ({s.acceptor}) · p={(s.weightBps / 100).toFixed(0)}% · премия {fmtRcr(s.premium, 2)}</div>
+      <div className="small"><b>#{s.indexA}</b> ({s.offerer}) <Art name="swap" size={15} className="inline-ico" /> <b>#{s.indexB}</b> ({s.acceptor}) · p={(s.weightBps / 100).toFixed(0)}% · премия {fmtRcr(s.premium, 2)}</div>
       <div className="muted tiny">{state} · разница жизни {gap > 0 ? "+" : ""}{gap} кл. в пользу #{gap >= 0 ? s.indexB : s.indexA}</div>
       <div className="row-wrap">
         {m.canSwapAccept(YOU, s.world, s.indexA, s.indexB) === null && <button className="btn portal" onClick={() => notify(sb.act(() => m.swapAccept(YOU, s.world, s.indexA, s.indexB)), "SWAP принят — исход решит энтропия")}>Принять · получить {fmtRcr(s.premium, 2)}</button>}
@@ -189,7 +189,7 @@ export function SwapCard({ sb, world, idx, notify }: { sb: Sandbox; world: MWorl
   const ev = (gap * weight) / 10_000;
   return (
     <div className="card swap-card">
-      <div className="card-title"><Glyph name="swap" size={18} className="mint" />Квантовый SWAP</div>
+      <div className="card-title"><Art name="swap" size={22} />Квантовый SWAP</div>
       <p className="muted small">В нейтральном мире нет архитектора — игроки обмениваются исходами. Предложите владельцу обмен содержимым клеток с вероятностью p; он получает премию за риск при любом исходе. Исход решает хеш будущего слота, после принятия сделка обязательна для клеток.</p>
       {foreign && (
         <>
@@ -248,7 +248,7 @@ export function TerritoryPanel({ sb, world, idx, onDescend, notify }: { sb: Sand
         </div>
       </div>
       <dl className="kv">
-        <dt>Владелец</dt><dd>{t.holder ? <>{t.holder}{t.agent && <Glyph name="agent" size={14} className="inline-ico mint" title="управляет ИИ-агент" />}</> : "свободна"}</dd>
+        <dt>Владелец</dt><dd>{t.holder ? <>{t.holder}{t.agent && <Art name="agent" size={17} className="inline-ico" title="управляет ИИ-агент" />}</> : "свободна"}</dd>
         <dt>Живых клеток</dt><dd>{world.alive[idx]} / 64</dd>
         <dt>Очки эпохи</dt><dd>{world.scoresCur[idx].toLocaleString("ru-RU")}</dd>
         {t.holder && <><dt>Цена (самооценка)</dt><dd>{fmtRcr(t.price)}</dd></>}
@@ -283,7 +283,7 @@ export function TerritoryPanel({ sb, world, idx, onDescend, notify }: { sb: Sand
       {mine && (
         <>
           <div className="card">
-            <div className="card-title"><Glyph name="sprout" size={18} className="mint" />Посадить жизнь</div>
+            <div className="card-title"><Art name="plant" size={22} />Посадить жизнь</div>
             <PatternEditor world={world} idx={idx} disabledReason={m.canPlant(YOU, world.id, idx) === "cooldown" ? "Перезарядка до следующего тика" : null}
               onPlant={(p) => run(() => m.plant(YOU, world.id, idx, p), "Паттерн посажен")} />
           </div>
@@ -314,7 +314,7 @@ export function TerritoryPanel({ sb, world, idx, onDescend, notify }: { sb: Sand
           )}
           {world.architect && world.architect !== YOU && !world.liberated && (
             <div className="card">
-              <div className="card-title"><Glyph name="rebel" size={18} className="rose" />Восстание против архитектора</div>
+              <div className="card-title"><Art name="rebel" size={22} />Восстание против архитектора</div>
               <p className="muted small">Архитектор {world.architect} забирает {world.architectFeeBps / 100}% налогов. ≥{REBELLION_THRESHOLD_BPS / 100}% владельцев клеток (минимум {REBELLION_MIN_VOTES}) могут его свергнуть.</p>
               {m.rebellionActive(world)
                 ? <button className="btn danger" onClick={() => run(() => m.voteRebellion(YOU, world.id, idx), "Голос учтён")}>Голосовать ({world.rebellionVotes})</button>
@@ -356,7 +356,7 @@ export function WorldPanel({ sb, world, notify }: { sb: Sandbox; world: MWorld; 
       </dl>
       {world.parent && (
         <div className="card">
-          <div className="card-title"><Glyph name="breach" size={18} className="violet" />Резонанс (прорыв в мир-родитель)</div>
+          <div className="card-title"><Art name="breach" size={22} />Резонанс (прорыв в мир-родитель)</div>
           <div className="bar"><div style={{ width: `${(world.resonance / BREACH_RESONANCE) * 100}%` }} /></div>
           <div className="muted small">{world.resonance}/{BREACH_RESONANCE} тиков с населением ≥ 400. При полном резонансе жизнь «просачивается» глайдером в клетку-хост.</div>
         </div>
@@ -377,7 +377,7 @@ export function WorldPanel({ sb, world, notify }: { sb: Sandbox; world: MWorld; 
             : <div className="swap-list">{[...m.swaps.values()].filter((s) => s.world === world.id).map((s) => <SwapRow key={s.key} sb={sb} s={s} notify={notify} />)}</div>}
         </div>
       )}
-      {m.rebellionActive(world) && <div className="card danger-card"><Glyph name="rebel" size={16} /> Идёт восстание: {world.rebellionVotes} голосов из {owned} владельцев</div>}
+      {m.rebellionActive(world) && <div className="card danger-card"><Art name="rebel" size={20} /> Идёт восстание: {world.rebellionVotes} голосов из {owned} владельцев</div>}
       <div className="card row-wrap">
         <label className="field inline">Энергия +<input value={fund} onChange={(e) => setFund(e.target.value)} /></label>
         <button className="btn" onClick={() => notify(sb.act(() => m.fundWorld(YOU, world.id, toUnits(fund))), "Мир подпитан энергией")}>Подпитать мир</button>
@@ -422,7 +422,7 @@ export function WalletPanel({ sb, notify }: { sb: Sandbox; notify: (e: string | 
       </div>
 
       <div className="card">
-        <div className="card-title"><Glyph name="agent" size={18} className="mint" />Нанять ИИ-жителя</div>
+        <div className="card-title"><Art name="agent" size={22} />Нанять ИИ-жителя</div>
         <p className="muted small">ИИ действует от вашего имени через ончейн-разрешение: тратит только выделенный бюджет, только на посадку и захват клеток, с лимитом на эпоху и потолком цены. Вывести средства он не может.</p>
         <label className="field">Характер
           <select value={pers} onChange={(e) => setPers(e.target.value as Personality)}>
@@ -440,12 +440,12 @@ export function WalletPanel({ sb, notify }: { sb: Sandbox; notify: (e: string | 
       </div>
       {sb.mine.length > 0 && (
         <div className="card">
-          <div className="card-title"><Glyph name="agent" size={18} className="mint" />Ваши ИИ</div>
+          <div className="card-title"><Art name="agent" size={22} />Ваши ИИ</div>
           {sb.mine.map(({ agent, label }) => {
             const p = m.permits.get(`${YOU}:${agent.id}`)!;
             return (
               <div key={agent.id} className="agent-row">
-                <span><Glyph name="agent" size={15} className="mint" /> {label}</span>
+                <span><Art name="agent" size={19} /> {label}</span>
                 <span className="muted small">бюджет {fmtRcr(p.vault)} · потрачено {fmtRcr(p.spent)}/{fmtRcr(p.maxSpendPerEpoch)}</span>
               </div>
             );
@@ -453,9 +453,9 @@ export function WalletPanel({ sb, notify }: { sb: Sandbox; notify: (e: string | 
         </div>
       )}
       <div className="card">
-        <div className="card-title"><Glyph name="cell" size={16} />Ваши клетки</div>
+        <div className="card-title"><Art name="cell" size={20} />Ваши клетки</div>
         {holdings.length === 0 && <div className="muted small">Пока нет. Выберите клетку на карте.</div>}
-        {holdings.map(([w, i]) => <div key={w.id + i} className="agent-row"><span>{w.name} #{i}{w.territories[i].agent && <Glyph name="agent" size={13} className="inline-ico mint" title="ИИ-агент" />}</span><span className="muted small">{w.alive[i]} клеток · {fmtRcr(w.pending[i], 2)}</span></div>)}
+        {holdings.map(([w, i]) => <div key={w.id + i} className="agent-row"><span>{w.name} #{i}{w.territories[i].agent && <Art name="agent" size={16} className="inline-ico" title="ИИ-агент" />}</span><span className="muted small">{w.alive[i]} клеток · {fmtRcr(w.pending[i], 2)}</span></div>)}
       </div>
     </div>
   );
@@ -467,19 +467,29 @@ export function EconomyStrip({ sb }: { sb: Sandbox }) {
   const total = 1_000_000_000n * ONE;
   return (
     <div className="econ">
-      <Stat label="Эпоха" value={`${m.curEpoch}`} sub={`${Math.round(((m.slot - m.epochStart) / Number(m.params.epochSlots)) * 100)}%`} />
-      <Stat label="Сожжено" value={short(m.totalBurned)} sub={`${(Number((m.totalBurned * 1_000_000n) / total) / 10_000).toFixed(4)}% эмиссии`} />
-      <Stat label="Выплачено эмиссии" value={short(m.totalEmitted)} sub="≤ 90% сожжённого" />
-      <Stat label="Пул наград" value={short(m.rewardPool)} />
-      <Stat label="Казна" value={short(m.treasury)} sub="таймлок 48ч" />
-      <Stat label="Вселенных" value={`${m.worlds.size}`} sub={`глубина ${Math.max(...[...m.worlds.values()].map((w) => w.depth))}`} />
+      <Stat icon={<Glyph name="clock" size={18} className="gold" />} label="Эпоха" value={`${m.curEpoch}`} sub={`${Math.round(((m.slot - m.epochStart) / Number(m.params.epochSlots)) * 100)}%`} />
+      <Stat icon={<Glyph name="flame" size={18} className="rose" />} label="Сожжено" value={short(m.totalBurned)} sub={`${(Number((m.totalBurned * 1_000_000n) / total) / 10_000).toFixed(4)}% эмиссии`} />
+      <Stat icon={<Art name="coin" size={22} />} label="Выплачено эмиссии" value={short(m.totalEmitted)} sub="≤ 90% сожжённого" />
+      <Stat icon={<Art name="energy" size={22} />} label="Пул наград" value={short(m.rewardPool)} />
+      <Stat icon={<Glyph name="vault" size={18} className="violet" />} label="Казна" value={short(m.treasury)} sub="таймлок 48ч" />
+      <Stat icon={<Art name="nested" size={22} />} label="Вселенных" value={`${m.worlds.size}`} sub={`глубина ${Math.max(...[...m.worlds.values()].map((w) => w.depth))}`} />
     </div>
   );
 }
 const short = (v: bigint) => { const n = Number(v / ONE); return n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : `${n}`; };
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return <div className="stat"><div className="stat-label">{label}</div><div className="stat-value">{value}</div>{sub && <div className="stat-sub">{sub}</div>}</div>;
+function Stat({ label, value, sub, icon }: { label: string; value: string; sub?: string; icon?: React.ReactNode }) {
+  return <div className="stat">{icon && <span className="stat-ico">{icon}</span>}<div><div className="stat-label">{label}</div><div className="stat-value">{value}</div>{sub && <div className="stat-sub">{sub}</div>}</div></div>;
 }
+
+/** Chronicle: a painted icon per event kind (model + sandbox kinds). */
+const EVENT_ART: Record<string, ArtName> = {
+  swap: "swap", quantum: "quantum", world: "nested", foreclose: "cell", acquire: "cell", rebellion: "rebel", liberated: "rebel",
+  module: "law", epoch: "coin", breach: "breach", agent: "agent", welcome: "logo", plant: "plant", energy: "energy",
+};
+const eventArt = (kind: string, text: string): ArtName =>
+  kind === "quantum" && /наблюд/i.test(text) ? "observe" : kind === "quantum" && /посадил|посадка/i.test(text) ? "plant" : EVENT_ART[kind] ?? "world";
+// legacy text markers ("⚛ Коллапс…") are redundant next to the icon
+const stripMarker = (t: string) => t.replace(/^[^\p{L}\p{N}«"(#]+/u, "");
 
 export function Chronicle({ sb, worldId }: { sb: Sandbox; worldId: string }) {
   const [only, setOnly] = useState(false);
@@ -487,7 +497,7 @@ export function Chronicle({ sb, worldId }: { sb: Sandbox; worldId: string }) {
   return (
     <section className="chronicle" aria-label="Хроники">
       <div className="chron-head"><span>Хроники мультивселенной</span><label className="small"><input type="checkbox" checked={only} onChange={(e) => setOnly(e.target.checked)} /> только этот мир</label></div>
-      <ul aria-live="off">{ev.map((e, i) => <li key={i} className={`ev ${e.kind}`}><span className="ev-slot">{e.slot}</span>{youify(e.text, YOU)}</li>)}</ul>
+      <ul aria-live="off">{ev.map((e, i) => <li key={i} className={`ev ${e.kind}`}><span className="ev-slot">{e.slot}</span><Art name={eventArt(e.kind, e.text)} size={18} className="ev-ico" /><span className="ev-text">{youify(stripMarker(e.text), YOU)}</span></li>)}</ul>
     </section>
   );
 }

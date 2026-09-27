@@ -43,7 +43,7 @@ export function WalletPanel({ c }: { c: ChainCtx }) {
       </div>
       {myModules.length > 0 && (
         <div className="card">
-          <div className="card-title"><Glyph name="scroll" size={17} className="gold" />Роялти ваших законов</div>
+          <div className="card-title"><Art name="law" size={21} />Роялти ваших законов</div>
           {myModules.map((m) => (
             <div key={m.key.toBase58()} className="agent-row">
               <span>«{m.acc.name}»</span>
@@ -53,11 +53,11 @@ export function WalletPanel({ c }: { c: ChainCtx }) {
         </div>
       )}
       <div className="card">
-        <div className="card-title"><Glyph name="cell" size={16} />Ваши клетки</div>
+        <div className="card-title"><Art name="cell" size={20} />Ваши клетки</div>
         {my.holdings.length === 0 && <div className="muted small">Пока нет. Выберите свободную клетку на карте.</div>}
         {my.holdings.map((h) => (
           <button key={h.key.toBase58()} className="agent-row as-button" onClick={() => c.openWorld(h.acc.world.toBase58(), h.acc.index)}>
-            <span>{worldName(h.acc.world)} #{h.acc.index}{h.acc.agentManaged && <Glyph name="agent" size={13} className="inline-ico mint" title="ИИ-агент" />}</span>
+            <span>{worldName(h.acc.world)} #{h.acc.index}{h.acc.agentManaged && <Art name="agent" size={16} className="inline-ico" title="ИИ-агент" />}</span>
             <span className="muted small">цена {rcr(h.acc.price)} · депозит {rcr(h.acc.deposit)}</span>
           </button>
         ))}
@@ -87,7 +87,7 @@ export function AgentsPanel({ c }: { c: ChainCtx }) {
   return (
     <div className="panel-body">
       <div className="card">
-        <div className="card-title"><Glyph name="agent" size={18} className="mint" />Нанять ИИ-агента</div>
+        <div className="card-title"><Art name="agent" size={22} />Нанять ИИ-агента</div>
         <p className="muted small">Агент (ваш бот, сервис или ИИ) подписывает своим ключом, но тратит только из отдельного бюджета разрешения, только на разрешённые действия, с лимитом на эпоху и потолком цены. Вывести средства агент не может. Все лимиты проверяет смарт-контракт, а не промпт — prompt injection их не обойдёт.</p>
         <label className="field">Адрес агента<input value={agent} onChange={(e) => setAgent(e.target.value)} spellCheck={false} placeholder="публичный ключ агента" aria-invalid={!!agentErr} /></label>
         {agentErr && <div className="field-err">{agentErr}</div>}
@@ -108,14 +108,14 @@ export function AgentsPanel({ c }: { c: ChainCtx }) {
         })}>Нанять · {b !== null ? rcr(b) : "—"}</button>
         {why && agent && <div className="field-hint">{why}</div>}
       </div>
-      {my.permits.length > 0 && <div className="panel-title"><Glyph name="agent" size={17} className="mint" />Ваши агенты</div>}
+      {my.permits.length > 0 && <div className="panel-title"><Art name="agent" size={21} />Ваши агенты</div>}
       {my.permits.map(({ key, acc: p }) => {
         const k = key.toBase58();
         const a = amountOf(amounts[k] ?? "");
         const left = Number(p.expirySlot) - c.slot;
         return (
           <div key={k} className="card">
-            <div className="card-title"><Glyph name="agent" size={18} className="mint" /><Address value={p.agent.toBase58()} /></div>
+            <div className="card-title"><Art name="agent" size={22} /><Address value={p.agent.toBase58()} /></div>
             <dl className="kv small">
               <dt>Действия</dt><dd>{[p.scope & PERMIT_PLANT && "посадка", p.scope & PERMIT_ACQUIRE && "покупка"].filter(Boolean).join(", ")}</dd>
               <dt>Мир</dt><dd>{p.allowedWorld.equals(PublicKey.default) ? "любой" : c.data.worlds.find((x) => x.key.equals(p.allowedWorld))?.acc.name ?? shortAddr(p.allowedWorld.toBase58())}</dd>
