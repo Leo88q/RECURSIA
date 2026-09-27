@@ -58,7 +58,9 @@ export class Sandbox {
       for (let j = 1; j <= 3; j++) {
         const id = `ИИ·${label}-${j}`;
         m.addPlayer(id, 12_000n * U, true);
-        this.agents.push(new AIAgent(id, pers, seed * 1000 + ++k));
+        ++k;
+        // every other AI enters the open tournament each season (the player sees rivals there)
+        this.agents.push(new AIAgent(id, pers, seed * 1000 + k, undefined, { tournamentTier: k % 2 === 0 ? 0 : undefined }));
       }
     }
     m.addPlayer(YOU, 5_000n * U);
@@ -96,6 +98,12 @@ export class Sandbox {
       const season = m.seasonId;
       m.advanceEpoch();
       if (season !== m.seasonId) for (let r = 0; r < 10; r++) { try { m.claimSeasonPrize(r); } catch { /* empty rank */ } }
+      // AI keeper settles finished tournaments; the player's own prize waits for the player to claim it
+      for (const t of m.tournaments.values()) {
+        if (t.settled || m.seasonId <= t.seasonId) continue;
+        try { m.settleTournament(t.seasonId, t.tier); } catch { /* */ }
+        t.top.forEach((e, r) => { if (e.player && e.player !== YOU) { try { m.claimTournamentPrize(t.seasonId, t.tier, r); } catch { /* */ } } });
+      }
       for (const w of m.worlds.values()) { try { m.claimWorldEpoch(w.id); } catch { /* nothing */ } }
     }
   }

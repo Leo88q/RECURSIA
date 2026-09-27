@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { DEFAULT_PARAMS, PROGRAM_ID, RecursiaIx, TERRITORIES, type ConfigAccount, type SuperpositionAccount, type SwapAccount, type TerritoryAccount, type WorldAccount } from "@recursia/sdk";
-import { claimable, plan, seasonPrizes, type Snapshot } from "../src/plan.js";
+import { claimable, plan, seasonPrizes, tournamentActions, type Snapshot } from "../src/plan.js";
 import { toInstruction } from "../src/ix.js";
 
 const P = DEFAULT_PARAMS;
@@ -9,7 +9,7 @@ const key = () => Keypair.generate().publicKey;
 const cfg = (o: Partial<ConfigAccount> = {}): ConfigAccount => ({
   version: 1, bump: 255, admin: key(), mint: key(), paused: false, params: P,
   pending: { kind: 0 } as never, pendingEta: 0n, pendingNonce: 0n, rootWorlds: 1n, totalWorlds: 1n, modules: 1n,
-  curEpoch: 5n, epochStartSlot: 1_000_000n, curTotalSink: 0n, prevTotalSink: 0n, prevEmission: 0n, prevClaimed: 0n,
+  curEpoch: 5n, epochStartSlot: 1_000_000n, curTotalSink: 0n, prevTotalSink: 0n, prevEmission: 0n, prevClaimed: 0n, prevEffClaimed: 0n,
   totalSunk: 0n, totalEmitted: 0n,
   curTotalScore: 0n, prevTotalScore: 0n, prevSponsorBudget: 0n, prevSponsorClaimed: 0n, totalSponsored: 0n,
   treasurySeen: 0n, seasonId: 1n, seasonStartEpoch: 1n, totalSeasonFunded: 0n, totalSeasonPaid: 0n, ...o,
@@ -153,5 +153,26 @@ describe("keeper planner", () => {
     expect(plan(snap({ season })).some((a) => a.kind === "claim_season_prize")).toBe(true);
     const rx = new RecursiaIx(PROGRAM_ID, key());
     expect(toInstruction(rx, key(), acts[0]).keys).toHaveLength(7);
+  });
+
+  it("settles finished tournaments once, then credits unpaid prizes; running ones are left alone", () => {
+    const winner = key();
+    const e = (player: PublicKey, points: bigint) => ({ player, points });
+    const top = [e(winner, 100n), ...Array.from({ length: 11 }, () => e(PublicKey.default, 0n))];
+    const base = { entryFee: 700n, players: 3, top, prizes: new Array(12).fill(0n), claimed: 0 };
+    const t = (o: object) => ({ key: key(), acc: { ...base, seasonId: 1n, tier: 0, pot: 1890n, settled: false, ...o } });
+    const running = t({ seasonId: 2n });
+    const open = t({});
+    const settled = t({ tier: 1, settled: true, prizes: [1890n, ...new Array(11).fill(0n)] });
+    const paid = t({ seasonId: 0n, settled: true, prizes: [5n, ...new Array(11).fill(0n)], claimed: 1 });
+    const acts = tournamentActions([running, open, settled, paid], 2n);
+    expect(acts).toEqual([
+      { kind: "tournament_settle", seasonId: 1n, tier: 0 },
+      { kind: "claim_tournament_prize", winner, seasonId: 1n, tier: 1, rank: 0 },
+    ]);
+    const rx = new RecursiaIx(PROGRAM_ID, key());
+    expect(toInstruction(rx, key(), acts[0]).keys).toHaveLength(6);
+    expect(toInstruction(rx, key(), acts[1]).keys).toHaveLength(7);
+    for (const a of acts) expect(toInstruction(rx, key(), a).keys.some((k) => k.isSigner)).toBe(false);
   });
 });

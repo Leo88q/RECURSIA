@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  BREACH_RESONANCE, ONE, PATTERNS, SEASON_EPOCHS, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS, REBELLION_MIN_VOTES, REBELLION_THRESHOLD_BPS, Rng,
+  BREACH_RESONANCE, ONE, PATTERNS, SEASON_EPOCHS, TOURNAMENT_JOIN_EPOCHS, TOURNAMENT_MAX_PLAYERS, TOURNAMENT_TIERS, tournamentPlaces, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS, REBELLION_MIN_VOTES, REBELLION_THRESHOLD_BPS, Rng,
   cellsFromPattern, epochTax, isQuantum, patternFromCells, ruleString, scoreBlockPattern, splitTick, type MSwap, type MWorld, type Personality,
 } from "@recursia/sdk";
 import { fmtRcr, YOU, type Sandbox } from "./sandbox";
@@ -8,6 +8,8 @@ import { youify } from "./lib/format";
 import { holderColor } from "./WorldCanvas";
 import { Art, Glyph, WorldIcon, type ArtName } from "./ui/Icon";
 import { SeasonCard, SponsorCard } from "./ui/Season";
+import { TournamentCard } from "./ui/Tournament";
+import { plantAdvice } from "./lib/advice";
 
 const toUnits = (s: string) => { const n = Number(s.replace(",", ".")); return Number.isFinite(n) && n >= 0 ? BigInt(Math.round(n * 1e6)) : 0n; };
 const fromUnits = (v: bigint) => (Number(v) / 1e6).toString();
@@ -44,6 +46,7 @@ export function PatternEditor({ world, idx, onPlant, disabledReason, cost = "5 S
   const [cells, setCells] = useState<boolean[][]>(() => cellsFromPattern(PATTERNS.acorn));
   const pattern = patternFromCells(cells);
   const forecast = useMemo(() => quantumForecast(world, idx, pattern), [world, world.generation, idx, pattern]);
+  const advice = plantAdvice(forecast.lo, forecast.hi, world.alive[idx] ?? 0);
   const toggle = (r: number, c: number) => setCells((old) => old.map((row, ri) => row.map((v, ci) => (ri === r && ci === c ? !v : v))));
   return (
     <div className="pattern">
@@ -62,8 +65,11 @@ export function PatternEditor({ world, idx, onPlant, disabledReason, cost = "5 S
         <div className="forecast">Прогноз через 16 поколений: <b>{forecast.lo === forecast.hi ? forecast.lo : `${forecast.lo}–${forecast.hi}`}</b> живых клеток в блоке
           {forecast.lo !== forecast.hi && <div className="muted small"><Art name="quantum" size={14} /> квантовый разброс: точное будущее не вычислимо до появления энтропии слота</div>}
         </div>
+        <div className={`advice ${advice.level}`} role={advice.level === "ok" ? "status" : "alert"} data-testid="plant-advice">
+          <Glyph name={advice.level === "ok" ? "check" : "warn"} size={14} /> {advice.text}
+        </div>
         <button className="btn primary" disabled={!!disabledReason} title={disabledReason ?? ""} onClick={() => onPlant(pattern)}>
-          Посадить жизнь · {cost}
+          {advice.level === "danger" ? "Всё равно посадить" : "Посадить жизнь"} · {cost}
         </button>
         {disabledReason && <div className="muted small">{disabledReason}</div>}
       </div>
@@ -467,6 +473,30 @@ export function WalletPanel({ sb, notify }: { sb: Sandbox; notify: (e: string | 
         last={m.lastSeason && { id: m.lastSeason.id, rows: m.lastSeason.top.map((e, r) => ({ label: e.player, points: e.points, you: e.player === YOU, prize: m.lastSeason!.prizes[r], claimed: m.lastSeason!.claimed[r] })) }}
         onClaim={(r) => notify(sb.act(() => m.claimSeasonPrize(r)), "Приз зачислен победителю")} claimBlocked={null}
         fmt={(v) => fmtRcr(v, 0)}
+      />
+      <TournamentCard
+        seasonId={m.seasonId} joinOpen={m.curEpoch < m.seasonStartEpoch + TOURNAMENT_JOIN_EPOCHS}
+        tiers={TOURNAMENT_TIERS.map((mult, tier) => {
+          const t = m.tournament(m.seasonId, tier);
+          const joined = !!t?.players.includes(YOU);
+          const why = m.canJoinTournament(YOU, tier);
+          return {
+            tier, fee: t ? t.entryFee : m.params.plantCost * mult, players: t?.players.length ?? 0, max: TOURNAMENT_MAX_PLAYERS, pot: t?.pot ?? 0n, joined,
+            paidPlaces: tournamentPlaces(t?.players.length ?? 0),
+            top: (t?.top ?? []).filter((e) => e.player).map((e) => ({ label: e.player, points: e.points, you: e.player === YOU })),
+            joinBlocked: why === null ? null : why === "registration closed" ? "Регистрация закрыта до следующего сезона" : why === "tournament full" ? "Турнир заполнен" : why === "insufficient balance" ? "Недостаточно SKR" : why,
+            submitBlocked: m.seasonPointsOf(YOU) === 0n ? "Соберите награды с клеток — это и есть очки" : null,
+          };
+        })}
+        finished={[...m.tournaments.values()].filter((t) => t.seasonId < m.seasonId && t.players.includes(YOU)).slice(-2).map((t) => ({
+          seasonId: t.seasonId, tier: t.tier, settled: t.settled, pot: t.pot,
+          rows: t.top.map((e, r) => ({ label: e.player || "—", points: e.points, you: e.player === YOU, prize: t.prizes[r] ?? 0n, claimed: !!t.claimed[r] })),
+        }))}
+        onJoin={(tier) => notify(sb.act(() => m.joinTournament(YOU, tier)), "Вы в турнире! Очки сезона считаются автоматически")}
+        onSubmit={(tier) => notify(sb.act(() => { if (!m.tournamentSubmit(YOU, tier)) throw new Error("Очков пока мало для таблицы турнира"); }), "Очки обновлены")}
+        onSettle={(s, tier) => notify(sb.act(() => m.settleTournament(s, tier)), "Итоги подведены")}
+        onClaim={(s, tier, r) => notify(sb.act(() => m.claimTournamentPrize(s, tier, r)), "Приз зачислен победителю")}
+        actionBlocked={null} fmt={(v) => fmtRcr(v, 0)}
       />
       <SponsorCard pool={m.sponsorPool} fmt={(v) => fmtRcr(v, 0)} parse={(s) => { const v = toUnits(s); return v > 0n ? v : null; }}
         blockedWhy={(a) => (a === null ? "Введите сумму" : a > me.wallet ? "Недостаточно SKR" : null)}

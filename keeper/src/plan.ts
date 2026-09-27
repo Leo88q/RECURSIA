@@ -10,7 +10,7 @@
 import type { PublicKey } from "@solana/web3.js";
 import {
   BREACH_RESONANCE, harbergerDue, QUANTUM_BOUNTY_DIV, QUANTUM_REVEAL_SLOTS,
-  type ConfigAccount, type SeasonAccount, type SuperpositionAccount, type SwapAccount, type TerritoryAccount, type WorldAccount,
+  type ConfigAccount, type SeasonAccount, type TournamentAccount, type SuperpositionAccount, type SwapAccount, type TerritoryAccount, type WorldAccount,
 } from "@recursia/sdk";
 
 export interface Snapshot {
@@ -21,12 +21,15 @@ export interface Snapshot {
   superpositions?: { key: PublicKey; acc: SuperpositionAccount }[];
   swaps?: { key: PublicKey; acc: SwapAccount }[];
   season?: SeasonAccount;
+  tournaments?: { key: PublicKey; acc: TournamentAccount }[];
 }
 
 export type Action =
   | { kind: "advance_epoch" }
   | { kind: "claim_world_epoch"; world: PublicKey }
   | { kind: "claim_season_prize"; winner: PublicKey; rank: number }
+  | { kind: "tournament_settle"; seasonId: bigint; tier: number }
+  | { kind: "claim_tournament_prize"; winner: PublicKey; seasonId: bigint; tier: number; rank: number }
   | { kind: "settle"; world: PublicKey; index: number; holder: PublicKey }
   | { kind: "breach"; child: PublicKey; host: PublicKey }
   | { kind: "tick"; world: PublicKey; module: PublicKey; host: PublicKey | null }
@@ -100,6 +103,20 @@ export function seasonPrizes(season: SeasonAccount | undefined): Action[] {
   return out;
 }
 
+/** Tournaments of closed seasons: settle once, then credit every unclaimed prize to its winner. */
+export function tournamentActions(tournaments: Snapshot["tournaments"], seasonId: bigint): Action[] {
+  const out: Action[] = [];
+  for (const { acc: t } of tournaments ?? []) {
+    if (t.seasonId >= seasonId) continue;
+    if (!t.settled) { if (t.pot > 0n) out.push({ kind: "tournament_settle", seasonId: t.seasonId, tier: t.tier }); continue; }
+    t.top.forEach((e, rank) => {
+      if (isDefault(e.player) || t.prizes[rank] === 0n || (t.claimed & (1 << rank)) !== 0) return;
+      out.push({ kind: "claim_tournament_prize", winner: e.player, seasonId: t.seasonId, tier: t.tier, rank });
+    });
+  }
+  return out;
+}
+
 export function plan(s: Snapshot, limits: PlanLimits = DEFAULT_LIMITS): Action[] {
   const out: Action[] = [];
   const c = s.config;
@@ -119,6 +136,7 @@ export function plan(s: Snapshot, limits: PlanLimits = DEFAULT_LIMITS): Action[]
 
   // 1b. season prizes of the last closed season (permissionless; credited to the winner, not to us)
   out.push(...seasonPrizes(s.season));
+  out.push(...tournamentActions(s.tournaments, c.seasonId));
 
   // 2. foreclosures — keep the Harberger market honest
   const settles: Action[] = [];

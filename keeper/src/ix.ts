@@ -8,6 +8,8 @@ export function toInstruction(rx: RecursiaIx, cranker: PublicKey, a: Action): Tr
     case "advance_epoch": return rx.advanceEpoch();
     case "claim_world_epoch": return rx.claimWorldEpoch(a.world);
     case "claim_season_prize": return rx.claimSeasonPrize(a.winner, a.rank);
+    case "tournament_settle": return rx.tournamentSettle(a.seasonId, a.tier);
+    case "claim_tournament_prize": return rx.claimTournamentPrize(a.winner, a.seasonId, a.tier, a.rank);
     case "settle": return rx.settle(a.world, a.index, a.holder);
     case "breach": return rx.breach(a.child, a.host);
     case "tick": return rx.tick(cranker, a.world, a.module, a.host);

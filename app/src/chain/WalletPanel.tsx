@@ -6,7 +6,8 @@ import { AmountField, Address, amountOf } from "../ui/fields";
 import { blocked, type ChainCtx } from "./ctx";
 import { Glyph, Art } from "../ui/Icon";
 import { SeasonCard, SponsorCard } from "../ui/Season";
-import { SEASON_EPOCHS } from "@recursia/sdk";
+import { SEASON_EPOCHS, TOURNAMENT_JOIN_EPOCHS, TOURNAMENT_MAX_PLAYERS, TOURNAMENT_TIERS, tournamentPlaces } from "@recursia/sdk";
+import { TournamentCard } from "../ui/Tournament";
 
 const isDefaultKey = (k: PublicKey) => k.equals(PublicKey.default);
 
@@ -37,6 +38,48 @@ function SeasonSection({ c }: { c: ChainCtx }) {
         blockedWhy={(a) => (a === null ? "Введите сумму" : blocked(c, { spend: a }))}
         onFund={(a) => { c.run({ title: "Спонсировать живые миры", lines: [`${rcr(a)} → спонсорский пул`, "Невозвратно: пул раздаётся мирам по 10% за эпоху пропорционально живым клеткам"], danger: "Это пожертвование в пул наград, а не вклад: вернуть его нельзя.", ixs: [rx.fundSponsorPool(me, a)], successText: "Спасибо! Живые миры получат больше" }).then(() => c.data.refresh()); }} />
     </>
+  );
+}
+
+/** Season tournaments: entry fee → top 30% by (program-counted) season points. */
+function TournamentSection({ c }: { c: ChainCtx }) {
+  const { me, my, rx, config } = c;
+  if (!me) return null;
+  const label = (k: PublicKey) => (k.equals(me) ? "Вы" : shortAddr(k.toBase58()));
+  const season = config.seasonId;
+  const joinOpen = config.curEpoch < config.seasonStartEpoch + BigInt(TOURNAMENT_JOIN_EPOCHS);
+  const myPoints = my.player && my.player.seasonId === season ? my.player.seasonPoints : 0n;
+  const find = (s: bigint, tier: number) => c.data.tournaments.find((t) => t.acc.seasonId === s && t.acc.tier === tier);
+  const refresh = () => { c.data.refresh(); my.refresh(); };
+  return (
+    <TournamentCard
+      seasonId={Number(season)} joinOpen={joinOpen}
+      tiers={TOURNAMENT_TIERS.map((mult, tier) => {
+        const t = find(season, tier);
+        const fee = t ? t.acc.entryFee : config.params.plantCost * mult;
+        const joined = !!t && my.tournamentEntries.has(t.key.toBase58());
+        const players = t?.acc.players ?? 0;
+        return {
+          tier, fee, players, max: TOURNAMENT_MAX_PLAYERS, pot: t?.acc.pot ?? 0n, joined, paidPlaces: tournamentPlaces(players),
+          top: (t?.acc.top ?? []).filter((e) => !isDefaultKey(e.player)).map((e) => ({ label: label(e.player), points: e.points, you: e.player.equals(me) })),
+          joinBlocked: blocked(c, { spend: fee }) ?? (!joinOpen ? "Регистрация закрыта до следующего сезона" : players >= TOURNAMENT_MAX_PLAYERS ? "Турнир заполнен" : null),
+          submitBlocked: blocked(c) ?? (myPoints === 0n ? "Соберите награды с клеток — это и есть очки" : null),
+        };
+      })}
+      finished={c.data.tournaments.filter((t) => t.acc.seasonId < season && my.tournamentEntries.has(t.key.toBase58())).slice(-2).map((t) => ({
+        seasonId: Number(t.acc.seasonId), tier: t.acc.tier, settled: t.acc.settled, pot: t.acc.pot,
+        rows: t.acc.top.map((e, r) => ({ label: isDefaultKey(e.player) ? "—" : label(e.player), points: e.points, you: e.player.equals(me), prize: t.acc.prizes[r], claimed: (t.acc.claimed & (1 << r)) !== 0 })),
+      }))}
+      onJoin={(tier) => { const fee = find(season, tier)?.acc.entryFee ?? config.params.plantCost * TOURNAMENT_TIERS[tier]; c.run({
+        title: "Участие в турнире", lines: [`Взнос ${rcr(fee)}: 90% — в банк турнира, 10% — студии`, "Призы: лучшие 30% участников по очкам сезона, после окончания сезона"],
+        danger: "Взнос не возвращается: если вы не попадёте в призовые 30%, он достанется победителям.",
+        ixs: c.withAta([rx.tournamentJoin(me, season, tier)]), successText: "Вы в турнире",
+      }).then(refresh); }}
+      onSubmit={(tier) => { c.run({ title: "Обновить очки турнира", lines: [`Очки: ${rcr(myPoints)} — программа берёт их из вашего аккаунта игрока`], ixs: [rx.tournamentSubmit(me, season, tier)], successText: "Очки обновлены" }).then(refresh); }}
+      onSettle={(s, tier) => { c.run({ title: "Подвести итоги турнира", lines: ["Фиксирует призы; неразыгранная часть банка уходит в пул наград"], ixs: [rx.tournamentSettle(BigInt(s), tier)], successText: "Итоги подведены" }).then(refresh); }}
+      onClaim={(s, tier, r) => { const t = find(BigInt(s), tier)!; c.run({ title: "Зачислить приз турнира", lines: [`${r + 1}-е место: ${rcr(t.acc.prizes[r])} → «к выводу» победителя`], ixs: [rx.claimTournamentPrize(t.acc.top[r].player, BigInt(s), tier, r)], successText: "Приз зачислен" }).then(refresh); }}
+      actionBlocked={blocked(c, { paused: false })} fmt={(v) => rcr(v, 0)}
+    />
   );
 }
 
@@ -87,6 +130,7 @@ export function WalletPanel({ c }: { c: ChainCtx }) {
         </div>
       )}
       <SeasonSection c={c} />
+      <TournamentSection c={c} />
       <div className="card">
         <div className="card-title"><Art name="cell" size={20} />Ваши клетки</div>
         {my.holdings.length === 0 && <div className="muted small">Пока нет. Выберите свободную клетку на карте.</div>}

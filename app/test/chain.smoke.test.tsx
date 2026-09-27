@@ -28,6 +28,7 @@ function config(): Uint8Array {
   b.u64(2n).u64(2n).u64(1n).u64(3n).u64(0n).u64(0n).u64(0n).u64(0n).u64(0n).u64(5_000_000_000n).u64(0n);
   b.u8(255).u64(0n).u64(0n).u64(0n).u64(0n).u64(0n); // sponsor pool
   b.u8(255).u8(255).u64(0n).u64(1n).u64(1n).u64(0n).u64(0n); // seasons
+  b.u64(0n); // prev_eff_claimed
   return b.done();
 }
 function world(name: string, index: bigint, neutral: boolean): Uint8Array {

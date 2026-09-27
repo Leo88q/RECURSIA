@@ -589,3 +589,13 @@ details.tech code { word-break: break-all; }
 .leaderboard .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .leaderboard .pts { font-variant-numeric: tabular-nums; }
 .btn.tiny { padding: 2px 8px; font-size: 12px; min-height: 0; }
+
+/* planting advice (client-side preview; the program never blocks) */
+.advice { font-size: 12px; line-height: 1.4; padding: 6px 8px; border-radius: 8px; margin: 6px 0; border: 1px solid var(--line); display: flex; gap: 6px; align-items: flex-start; }
+.advice.ok { color: var(--mint); background: rgba(124, 247, 212, 0.06); }
+.advice.warn { color: var(--gold); background: rgba(255, 214, 107, 0.08); border-color: rgba(255, 214, 107, 0.35); }
+.advice.danger { color: var(--rose); background: rgba(255, 107, 139, 0.1); border-color: rgba(255, 107, 139, 0.45); }
+
+/* tournaments */
+.tournament-card .tier { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.tournament-card .tier-head { display: flex; flex-direction: column; gap: 2px; }

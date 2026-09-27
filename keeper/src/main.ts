@@ -29,7 +29,7 @@ import {
 import bs58 from "bs58";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID, PROGRAM_ID, RecursiaIx, SKR_MINT, accountDiscriminator,
-  decodeConfig, decodeSeason, decodeSuperposition, decodeSwap, decodeTerritory, decodeWorld,
+  decodeConfig, decodeSeason, decodeTournament, decodeSuperposition, decodeSwap, decodeTerritory, decodeWorld,
 } from "@recursia/sdk";
 import { DEFAULT_LIMITS, crankIncome, plan, type Snapshot } from "./plan.js";
 import { toInstruction } from "./ix.js";
@@ -66,7 +66,7 @@ const ALLOWED_PROGRAMS = new Set([programId.toBase58(), ComputeBudgetProgram.pro
 
 async function snapshot(conn: Connection, rx: RecursiaIx): Promise<Snapshot> {
   const disc = (n: string) => ({ memcmp: { offset: 0, bytes: bs58.encode(accountDiscriminator(n)) } });
-  const [cfgInfo, worlds, territories, sps, swaps, slot, seasonInfo] = await Promise.all([
+  const [cfgInfo, worlds, territories, sps, swaps, slot, seasonInfo, tours] = await Promise.all([
     conn.getAccountInfo(rx.pda.config(), "confirmed"),
     conn.getProgramAccounts(programId, { commitment: "confirmed", filters: [disc("World")] }),
     conn.getProgramAccounts(programId, { commitment: "confirmed", filters: [disc("Territory")] }),
@@ -74,6 +74,7 @@ async function snapshot(conn: Connection, rx: RecursiaIx): Promise<Snapshot> {
     conn.getProgramAccounts(programId, { commitment: "confirmed", filters: [disc("QuantumSwap")] }),
     conn.getSlot("confirmed"),
     conn.getAccountInfo(rx.pda.season(), "confirmed"),
+    conn.getProgramAccounts(programId, { commitment: "confirmed", filters: [disc("Tournament")] }).catch(() => []),
   ]);
   if (!cfgInfo || !cfgInfo.owner.equals(programId)) throw new Error("config account missing or not owned by program");
   const safe = <T>(f: () => T) => { try { return f(); } catch { return null; } };
@@ -84,6 +85,7 @@ async function snapshot(conn: Connection, rx: RecursiaIx): Promise<Snapshot> {
     territories: territories.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeTerritory(account.data)); return acc ? [{ key: pubkey, acc }] : []; }),
     superpositions: sps.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeSuperposition(account.data)); return acc ? [{ key: pubkey, acc }] : []; }),
     season: seasonInfo && seasonInfo.owner.equals(programId) ? safe(() => decodeSeason(seasonInfo.data)) ?? undefined : undefined,
+    tournaments: tours.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeTournament(account.data)); return acc ? [{ key: pubkey, acc }] : []; }),
     swaps: swaps.flatMap(({ pubkey, account }) => { const acc = safe(() => decodeSwap(account.data)); return acc ? [{ key: pubkey, acc }] : []; }),
   };
 }

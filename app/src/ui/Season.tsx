@@ -81,7 +81,7 @@ export function SponsorCard({ pool, fmt, onFund, blockedWhy, parse }: {
   return (
     <div className="card">
       <div className="card-title"><Glyph name="sprout" size={17} className="mint" />Спонсорский пул</div>
-      <p className="muted small">Деньги спонсоров (студии, партнёров, фанатов) раздаются мирам пропорционально живым клеткам на занятых участках: 10% пула за эпоху, миру — не больше, чем он сам внёс за эпоху. Это единственный источник, из которого игроки могут выйти в плюс.</p>
+      <p className="muted small">Деньги спонсоров (студии, партнёров, фанатов) раздаются мирам пропорционально живым клеткам на занятых участках: 10% пула за эпоху, миру — не больше, чем он сам внёс за эпоху. Вместе с долей эмиссии за эффективность и турнирами это источник, из которого сильные игроки выходят в плюс.</p>
       <dl className="kv small"><dt>В пуле</dt><dd>{pool === null ? "…" : fmt(pool)}</dd></dl>
       <label className="field inline">Сумма<input value={amt} inputMode="decimal" onChange={(e) => setAmt(e.target.value)} placeholder="SKR" /></label>
       <button className="btn" disabled={!!why} onClick={() => { if (a) { onFund(a); setAmt(""); } }}>Спонсировать</button>
