@@ -1,6 +1,6 @@
 // Superposition secrets: the commit preimage never leaves the browser.
 // Saved BEFORE the commit is signed, so a crash between signing and saving
-// cannot lose it (losing it = the stake decoheres and burns). Export/import
+// cannot lose it (losing it = the stake decoheres and goes to the reward pool). Export/import
 // as a file lets the player move devices.
 
 export interface Secret { a: bigint; b: bigint; w: number; salt: Uint8Array }

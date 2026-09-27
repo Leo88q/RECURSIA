@@ -6,13 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Keypair, PublicKey, TransactionInstruction } from "@solana/web3.js";
-import { ata, Pdas, PROGRAM_ID, RecursiaIx } from "@recursia/sdk";
+import { ata, PROGRAM_ID, RecursiaIx, SKR_MINT } from "@recursia/sdk";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const me = Keypair.generate().publicKey;
 const rx = new RecursiaIx(PROGRAM_ID);
-const userAta = ata(me, new Pdas(PROGRAM_ID).mint());
+const userAta = ata(me, SKR_MINT);
 
 function tokenData(amount: bigint) {
   const d = new Uint8Array(165);
@@ -69,7 +69,7 @@ describe("tx pipeline", () => {
     expect(text()).toContain("строка превью");
     expect(text()).toContain("Симуляция успешна");
     expect(text()).toMatch(/60\s000 CU/);
-    expect(text()).toContain("100 → 80"); // RCR 100 → 80 from simulated post-state
+    expect(text()).toContain("100 → 80"); // SKR 100 → 80 from simulated post-state
     expect(text()).toContain("(−20)");
     expect(signTransaction).not.toHaveBeenCalled(); // nothing signed before the user clicks
     await act(async () => { button("Подписать")!.click(); });

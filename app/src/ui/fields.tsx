@@ -3,8 +3,8 @@ import { formatAmount, parseAmount, shortAddr, toInput } from "../lib/format";
 import { explorerUrl } from "../lib/config";
 import { Glyph } from "./Icon";
 
-/** Controlled RCR amount field: strict parsing, inline error, optional "макс". */
-export function AmountField({ label, value, onChange, max, min, allowZero, hint, suffix = "RCR" }: {
+/** Controlled SKR amount field: strict parsing, inline error, optional "макс". */
+export function AmountField({ label, value, onChange, max, min, allowZero, hint, suffix = "SKR" }: {
   label: ReactNode; value: string; onChange: (v: string) => void; max?: bigint; min?: bigint; allowZero?: boolean; hint?: ReactNode; suffix?: string;
 }) {
   const id = useId();
@@ -47,4 +47,4 @@ export function Skeleton({ lines = 3 }: { lines?: number }) {
   return <div className="skeleton" aria-hidden="true">{Array.from({ length: lines }, (_, i) => <div key={i} style={{ width: `${90 - i * 15}%` }} />)}</div>;
 }
 
-export const Rcr = ({ v, digits = 2 }: { v: bigint; digits?: number }) => <span className="num">{formatAmount(v, digits)}&nbsp;RCR</span>;
+export const Rcr = ({ v, digits = 2 }: { v: bigint; digits?: number }) => <span className="num">{formatAmount(v, digits)}&nbsp;SKR</span>;

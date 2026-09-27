@@ -10,7 +10,14 @@ describe("landing", () => {
   const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
   it("has every section a new player needs", () => {
     for (const id of ["sec-about", "sec-start", "sec-price", "sec-rules", "sec-safety", "sec-faq"]) expect(html).toContain(`id="${id}"`);
-    for (const t of ["Как начать играть", "Сколько стоит вход", "Правила игры", "Частые вопросы", "Налог Харбергера", "Квантовый слой", "SWAP", "Восстание", "Дочерние миры", "Прорыв", "Лаборатория", "ИИ-жители", "Эпохи и награды"]) expect(text).toContain(t);
+    for (const t of ["Как начать играть", "Сколько стоит вход", "Правила игры", "Частые вопросы", "Налог Харбергера", "Квантовый слой", "SWAP", "Восстание", "Дочерние миры", "Прорыв", "Лаборатория", "ИИ-жители", "Эпохи и пул наград"]) expect(text).toContain(t);
+  });
+  it("speaks SKR (Solana Mobile) and never promises burns or a supply cap of its own", () => {
+    expect(text).toContain("SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3");
+    expect(text).toContain("Solana Mobile");
+    expect(text).toContain("80% всех трат");
+    expect(text).toMatch(/20%\s—\sстудии/);
+    expect(text).not.toMatch(/сгора|сожж|сжигани|genesis|RCR|выпуск токена (закрыт|отозван)/i);
   });
   it("philosophy and rules are illustrated; every image is lazy, sized and described", () => {
     expect(html).toContain('id="sec-philosophy"');
@@ -27,11 +34,11 @@ describe("landing", () => {
     expect([...html.matchAll(/aria-controls="rule-/g)].length).toBe(6);
   });
   it("states the entry cost computed from the protocol params", () => {
-    expect(text).toMatch(/от 15,05 RCR/);
+    expect(text).toMatch(/от 1\s053,5 SKR/);
     expect(text).toMatch(/до 0,00538 SOL/);
-    expect(text).toContain("1 000 000 000 RCR"); // supply shown in full, not divided twice
-    expect(text).not.toMatch(/Всего 1 000 RCR/);
-    expect(text).toMatch(/Итого 15,05 RCR/);
+    expect(text).toContain("350 000 SKR"); // law fee shown in whole SKR, not divided twice
+    expect(text).toMatch(/Итого 1\s053,5 SKR/);
+    expect(text).toMatch(/≈ \$20/);
   });
   it("is honest about risk and never asks for a seed phrase", () => {
     expect(text).toContain("Внешний аудит контракта ещё не проведён");

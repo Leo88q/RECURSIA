@@ -2,6 +2,10 @@
 // external text input, so there is no prompt-injection surface (#71–#74).
 // On-chain they act only through bounded AgentPermits (#75).
 import { ONE, TERRITORIES } from "./constants.js";
+
+/** Price unit the agents reason in: plant_cost / 5 (= 70 SKR at default prices).
+ *  Keeps AI valuations proportional to the live price list. */
+const unitOf = (m: GameModel) => { const u = m.params.plantCost / 5n; return u > 0n ? u : ONE; };
 import { epochTax } from "./economy.js";
 import { GameModel, isQuantum, type MWorld } from "./model.js";
 import { blockPattern, PATTERNS, scoreBlockPattern } from "./sim.js";
@@ -76,8 +80,9 @@ export class AIAgent {
   /** Estimated value of a territory: expected emission + host income. */
   valueOf(m: GameModel, w: MWorld, idx: number): bigint {
     const alive = BigInt(w.alive[idx] + 1);
-    const hostBonus = w.territories[idx].childWorld ? 40n * ONE : 0n;
-    return m.params.minPrice + alive * ONE / 2n + hostBonus;
+    const u = unitOf(m);
+    const hostBonus = w.territories[idx].childWorld ? 40n * u : 0n;
+    return m.params.minPrice + alive * u / 2n + hostBonus;
   }
 
   act(m: GameModel): string[] {
@@ -100,7 +105,7 @@ export class AIAgent {
       const t = w.territories[i];
       const need = epochTax(t.price, m.params.harbergerBps) * 2n;
       if (t.deposit < need && me.wallet > need) { this.try(() => m.topUp(this.id, w.id, i, need - t.deposit), log); }
-      if (w.pending[i] > 0n) this.try(() => { const a = m.collect(this.id, w.id, i); this.genome.fitness += Number(a / ONE); }, log);
+      if (w.pending[i] > 0n) this.try(() => { const a = m.collect(this.id, w.id, i); this.genome.fitness += Number(a / unitOf(m)); }, log);
     }
     if (me && me.claimable > 0n) this.try(() => m.withdraw(this.id, me.claimable), log);
 
@@ -184,7 +189,7 @@ export class AIAgent {
       if (host && this.rng.next() < 0.2) {
         const [w, i] = host;
         const mod = pickModuleByVitality(m, this.rng, undefined, vcache(m)) ?? 0;
-        this.try(() => m.createChildWorld(this.id, w.id, i, `${NAMES[this.rng.int(NAMES.length)]}-${w.depth + 1}`, mod, 1000 + this.rng.int(1500), 400n * ONE), log);
+        this.try(() => m.createChildWorld(this.id, w.id, i, `${NAMES[this.rng.int(NAMES.length)]}-${w.depth + 1}`, mod, 1000 + this.rng.int(1500), 400n * unitOf(m)), log);
       }
     }
 
@@ -235,7 +240,7 @@ export class AIAgent {
       if (m.canSwapResolve(s.world, s.indexA, s.indexB) === null && this.rng.next() < 0.5) this.try(() => m.swapResolve(this.id, s.world, s.indexA, s.indexB), log);
       else if (m.canSwapCancel(this.id, s.world, s.indexA, s.indexB) === null && (s.offerer === this.id || this.rng.next() < 0.3)) this.try(() => m.swapCancel(this.id, s.world, s.indexA, s.indexB), log);
     }
-    const unit = ONE / 2n;
+    const unit = unitOf(m) / 2n;
     // accept offers addressed to me when the premium covers the expected loss
     for (const s of [...m.swaps.values()]) {
       if (s.acceptor !== this.id || m.canSwapAccept(this.id, s.world, s.indexA, s.indexB) !== null) continue;

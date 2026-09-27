@@ -4,6 +4,7 @@
 // fetched as 2 batched getMultipleAccountsInfo calls (works on every RPC,
 // unlike heavy getProgramAccounts).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MINT } from "./mint";
 import type { AccountInfo, Connection, GetProgramAccountsFilter, PublicKey as PK } from "@solana/web3.js";
 import { PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
@@ -148,12 +149,12 @@ export function useWorldDetail(connection: Connection, programId: PublicKey, wor
 
 export interface MyData {
   sol: number | null;
-  /** null = no RCR token account yet */
+  /** null = no SKR token account yet */
   rcr: bigint | null;
   player: PlayerAccount | null;
   permits: Array<Keyed<PermitAccount>>;
   holdings: Array<Keyed<TerritoryAccount>>;
-  /** permit pubkey → RCR in its vault */
+  /** permit pubkey → SKR in its vault */
   permitVaults: Map<string, bigint>;
   refresh: () => void;
 }
@@ -168,7 +169,7 @@ export function useMyData(connection: Connection, programId: PublicKey, owner: P
     if (!owner) { setD({ sol: null, rcr: null, player: null, permits: [], holdings: [], permitVaults: new Map() }); return; }
     try {
       const [infos, permits, holdings] = await Promise.all([
-        connection.getMultipleAccountsInfo([owner, ata(owner, pda.mint()), pda.player(owner)], "confirmed"),
+        connection.getMultipleAccountsInfo([owner, ata(owner, MINT), pda.player(owner)], "confirmed"),
         connection.getProgramAccounts(programId, { commitment: "confirmed", filters: [disc("AgentPermit"), { memcmp: { offset: PERMIT_OWNER_OFFSET, bytes: owner.toBase58() } }] }).catch(() => []),
         connection.getProgramAccounts(programId, { commitment: "confirmed", filters: [disc("Territory"), { memcmp: { offset: TERRITORY_HOLDER_OFFSET, bytes: owner.toBase58() } }] }).catch(() => []),
       ]);
@@ -189,7 +190,7 @@ export function useMyData(connection: Connection, programId: PublicKey, owner: P
   usePoll(load, 30_000, [load, tick]);
   useEffect(() => {
     if (!owner) return;
-    const subs = [owner, ata(owner, pda.mint()), pda.player(owner)].map((k) => connection.onAccountChange(k, () => load(), { commitment: "confirmed" }));
+    const subs = [owner, ata(owner, MINT), pda.player(owner)].map((k) => connection.onAccountChange(k, () => load(), { commitment: "confirmed" }));
     return () => { for (const s of subs) connection.removeAccountChangeListener(s).catch(() => {}); };
   }, [connection, ownerKey, load]); // eslint-disable-line react-hooks/exhaustive-deps
   return { ...d, refresh };

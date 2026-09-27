@@ -22,10 +22,11 @@ npm ci --ignore-scripts
 npm test                       # SDK + keeper
 npm run econ                   # экономическая симуляция, все инварианты должны пройти
 cargo test -p recursia && cargo clippy -p recursia -- -D warnings
-anchor build
+anchor build                                   # devnet/localnet (любой mint без freeze authority)
+anchor build -- --features mainnet             # мейннет: initialize принимает только официальный SKR
 npx -w packages/sdk tsx scripts/check-idl.ts ../../target/idl/recursia.json
 ```
-Для verified build: `solana-verify build` и публикация `solana-verify verify-from-repo` после деплоя.
+Для verified build: `solana-verify build -- --features mainnet` и публикация `solana-verify verify-from-repo` после деплоя.
 
 ## 3. Devnet
 ```bash
@@ -34,14 +35,27 @@ solana airdrop 5
 anchor deploy --provider.cluster devnet
 ```
 
-## 4. initialize → genesis
+## 4. initialize → fund_reward_pool
 `initialize` может вызвать **только текущая upgrade authority** (защита от фронт-рана инициализации).
-Передайте `admin` = адрес vault'а вашего Squads multisig. Сразу после:
+Передайте `admin` = адрес vault'а вашего Squads multisig и `mint`:
 
-1. `genesis(distribution)` — подписывает admin (через Squads). Минтит 45/10/45 и **навсегда** отзывает mint authority.
-2. Проверьте: `spl-token display <MINT>` → `Mint authority: (not set)`, `Freeze authority: (not set)`, supply = 1 000 000 000.
+- **mainnet** — только официальный SKR `SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3`. Мейннет-сборка
+  (`anchor build -- --features mainnet`) другой mint не примет (`BadMint`).
+- **devnet/localnet** — тестовый mint с 6 decimals и **без freeze authority**:
+  ```bash
+  spl-token create-token --decimals 6            # freeze authority не задаём
+  spl-token create-account <TEST_MINT> && spl-token mint <TEST_MINT> 100000000
+  ```
+  Клиенту и keeper'у передайте его: `VITE_MINT=<TEST_MINT>` и `MINT=<TEST_MINT>`.
 
-Скрипты можно собрать из `RecursiaIx.initialize(...)` / `RecursiaIx.genesis(...)` в SDK; через Squads — «Transaction builder → Import base58».
+`initialize` создаёт PDA-аккаунты `treasury`, `reward_pool`, `claims` для этого mint. Mint больше не меняется.
+Дальше по желанию:
+
+1. `fund_reward_pool(amount)` — пополнить пул наград (студия на запуске, партнёры). Подписать может любой, вывести пул не может никто.
+2. Проверьте: `spl-token display SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3` → `Freeze authority: (not set)`, decimals 6;
+   `config.mint` в аккаунте Config совпадает с ним. Клиент на `mainnet-beta` откажется работать, если `VITE_MINT` не официальный SKR.
+
+Скрипты можно собрать из `RecursiaIx.initialize(...)` / `RecursiaIx.fundRewardPool(...)` в SDK; через Squads — «Transaction builder → Import base58».
 
 ## 5. Передача upgrade authority
 ```bash
@@ -126,7 +140,7 @@ DNSSEC, registry lock, CAA-записи, HSTS preload (`hstspreload.org`), от�
 PROGRAM_ID публикуется в README и на сайте; кошелёк показывает вызываемую программу, превью транзакции — тоже.
 
 ### Что делает клиент ради безопасности игрока
-- каждая транзакция: симуляция → превью (изменение RCR/SOL из post-state симуляции, CU, комиссия, список программ, логи) → подпись;
+- каждая транзакция: симуляция → превью (изменение SKR/SOL из post-state симуляции, CU, комиссия, список программ, логи) → подпись;
 - allow-list программ (RECURSIA, Compute Budget, ATA, System) — инструкции чужих программ отвергаются до симуляции;
 - свежий blockhash в момент подписи, ребродкаст до подтверждения или истечения `lastValidBlockHeight`;
 - приоритетная комиссия по перцентилю `getRecentPrioritizationFees` с жёстким потолком;

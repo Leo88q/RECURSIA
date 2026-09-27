@@ -7,19 +7,19 @@ import { toInstruction } from "../src/ix.js";
 const P = DEFAULT_PARAMS;
 const key = () => Keypair.generate().publicKey;
 const cfg = (o: Partial<ConfigAccount> = {}): ConfigAccount => ({
-  version: 1, bump: 255, admin: key(), mint: key(), genesisDone: true, paused: false, params: P,
+  version: 1, bump: 255, admin: key(), mint: key(), paused: false, params: P,
   pending: { kind: 0 } as never, pendingEta: 0n, pendingNonce: 0n, rootWorlds: 1n, totalWorlds: 1n, modules: 1n,
-  curEpoch: 5n, epochStartSlot: 1_000_000n, curTotalBurn: 0n, prevTotalBurn: 0n, prevEmission: 0n, prevClaimed: 0n,
-  totalBurned: 0n, totalEmitted: 0n, ...o,
+  curEpoch: 5n, epochStartSlot: 1_000_000n, curTotalSink: 0n, prevTotalSink: 0n, prevEmission: 0n, prevClaimed: 0n,
+  totalSunk: 0n, totalEmitted: 0n, ...o,
 });
 const world = (o: Partial<WorldAccount> = {}): WorldAccount => ({
   version: 1, bump: 1, vaultBump: 1, depth: 0, parent: PublicKey.default, parentTerritory: 0, index: 0n, architect: key(),
   architectFeeBps: 0, module: key(), birth: 8, survive: 12, name: "w", grid: new BigUint64Array(64), generation: 0n,
   tickCount: 0n, lastTickSlot: 0n, createdSlot: 0n, energy: 1_000n * 1_000_000n, rewardsReserved: 0n, deposits: 0n,
   architectAccrued: 0n, territoryAlive: new Array(TERRITORIES).fill(1), territoryPending: new Array(TERRITORIES).fill(0n),
-  ownedMask: 0n, epochId: 5n, burnCur: 0n, scoresCur: new Array(TERRITORIES).fill(0), prevEpochId: 4n, burnPrev: 0n,
+  ownedMask: 0n, epochId: 5n, sinkCur: 0n, scoresCur: new Array(TERRITORIES).fill(0), prevEpochId: 4n, sinkPrev: 0n,
   scoresPrev: new Array(TERRITORIES).fill(0), prevClaimed: true, resonance: 0, childCount: 0, rebellionId: 0,
-  rebellionVotes: 0, rebellionDeadline: 0n, lastRebellionSlot: 0n, liberated: false, totalBurned: 0n,
+  rebellionVotes: 0, rebellionDeadline: 0n, lastRebellionSlot: 0n, liberated: false, totalSunk: 0n,
   qBirth: 0, qSurvive: 0, qAmp: 0, entropy: new Uint8Array(32), quantumEscrow: 0n, superpositions: 0, neutral: false, ...o,
 });
 const terr = (w: PublicKey, o: Partial<TerritoryAccount> = {}): TerritoryAccount => ({
@@ -29,15 +29,14 @@ const terr = (w: PublicKey, o: Partial<TerritoryAccount> = {}): TerritoryAccount
 const snap = (o: Partial<Snapshot>): Snapshot => ({ slot: 1_000_100n, config: cfg(), worlds: [], territories: [], ...o });
 
 describe("keeper planner", () => {
-  it("does nothing while paused or before genesis", () => {
+  it("does nothing while paused", () => {
     const w = { key: key(), acc: world() };
     expect(plan(snap({ config: cfg({ paused: true }), worlds: [w] }))).toEqual([]);
-    expect(plan(snap({ config: cfg({ genesisDone: false }), worlds: [w] }))).toEqual([]);
   });
 
   it("advances the epoch first, then claims worlds that burned in it", () => {
-    const burned = { key: key(), acc: world({ burnCur: 50n }) };
-    const idle = { key: key(), acc: world({ burnCur: 0n, lastTickSlot: 1_000_090n }) };
+    const burned = { key: key(), acc: world({ sinkCur: 50n }) };
+    const idle = { key: key(), acc: world({ sinkCur: 0n, lastTickSlot: 1_000_090n }) };
     const acts = plan(snap({ slot: 1_000_000n + P.epochSlots, worlds: [burned, idle] }));
     expect(acts[0]).toEqual({ kind: "advance_epoch" });
     const claims = acts.filter((a) => a.kind === "claim_world_epoch");
@@ -46,15 +45,15 @@ describe("keeper planner", () => {
   });
 
   it("mirrors on-chain claim windows exactly", () => {
-    expect(claimable(world({ epochId: 4n, burnCur: 1n }), 5n)).toBe(true);
-    expect(claimable(world({ epochId: 3n, burnCur: 1n }), 5n)).toBe(false); // skipped epoch → forfeited
-    expect(claimable(world({ epochId: 5n, prevEpochId: 4n, prevClaimed: false, burnPrev: 1n }), 5n)).toBe(true);
-    expect(claimable(world({ epochId: 5n, prevEpochId: 4n, prevClaimed: true, burnPrev: 1n }), 5n)).toBe(false);
+    expect(claimable(world({ epochId: 4n, sinkCur: 1n }), 5n)).toBe(true);
+    expect(claimable(world({ epochId: 3n, sinkCur: 1n }), 5n)).toBe(false); // skipped epoch → forfeited
+    expect(claimable(world({ epochId: 5n, prevEpochId: 4n, prevClaimed: false, sinkPrev: 1n }), 5n)).toBe(true);
+    expect(claimable(world({ epochId: 5n, prevEpochId: 4n, prevClaimed: true, sinkPrev: 1n }), 5n)).toBe(false);
   });
 
   it("forecloses only territories whose tax exceeds the deposit", () => {
     const w = key();
-    // due over 216_000 slots at 0.5%/epoch of 100 RCR = 0.5 RCR
+    // due over 216_000 slots at 0.5%/epoch of 100 SKR = 0.5 SKR
     const broke = terr(w, { deposit: 400_000n, lastTaxSlot: 1_000_100n - P.epochSlots, index: 1 });
     const fine = terr(w, { deposit: 10n * 1_000_000n, lastTaxSlot: 1_000_100n - P.epochSlots, index: 2 });
     const empty = terr(w, { holder: PublicKey.default, deposit: 0n, index: 4 });

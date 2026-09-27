@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{get_stack_height, TRANSACTION_LEVEL_STACK_HEIGHT};
-use anchor_spl::token::{self, Burn, TransferChecked};
+use anchor_spl::token::{self, TransferChecked};
 
 use crate::constants::*;
 use crate::errors::RecursiaError;
@@ -20,7 +20,6 @@ pub fn require_top_level() -> Result<()> {
 }
 
 pub fn require_active(config: &Config) -> Result<()> {
-    require!(config.genesis_done, RecursiaError::GenesisPending);
     require!(!config.paused, RecursiaError::Paused);
     Ok(())
 }
@@ -83,46 +82,41 @@ pub fn user_transfer<'info>(
     )
 }
 
-pub fn vault_burn<'info>(
+/// A player spend out of a program vault (world vault / permit vault):
+/// `studio` → treasury, `pool` → player reward pool.  Nothing is burned —
+/// SKR is an external token and the program has no authority over its mint.
+/// Callers compute the split with `math::split_spend` and record it in state
+/// BEFORE calling this (checklist #7).
+#[allow(clippy::too_many_arguments)]
+pub fn vault_spend<'info>(
     token_program: &AccountInfo<'info>,
     mint: &AccountInfo<'info>,
     from: &AccountInfo<'info>,
+    treasury: &AccountInfo<'info>,
+    reward_pool: &AccountInfo<'info>,
     config: &AccountInfo<'info>,
     config_bump: u8,
-    amount: u64,
+    studio: u64,
+    pool: u64,
 ) -> Result<()> {
-    if amount == 0 {
-        return Ok(());
-    }
-    let bump = [config_bump];
-    let seeds: &[&[u8]] = &[SEED_CONFIG, &bump];
-    token::burn(
-        CpiContext::new_with_signer(
-            token_program.clone(),
-            Burn { mint: mint.clone(), from: from.clone(), authority: config.clone() },
-            &[seeds],
-        ),
-        amount,
-    )
+    vault_transfer(token_program, mint, from, treasury, config, config_bump, studio)?;
+    vault_transfer(token_program, mint, from, reward_pool, config, config_bump, pool)
 }
 
-pub fn user_burn<'info>(
+/// A player spend signed by the user wallet (see `vault_spend`).
+#[allow(clippy::too_many_arguments)]
+pub fn user_spend<'info>(
     token_program: &AccountInfo<'info>,
     mint: &AccountInfo<'info>,
     from: &AccountInfo<'info>,
     authority: &AccountInfo<'info>,
-    amount: u64,
+    treasury: &AccountInfo<'info>,
+    reward_pool: &AccountInfo<'info>,
+    studio: u64,
+    pool: u64,
 ) -> Result<()> {
-    if amount == 0 {
-        return Ok(());
-    }
-    token::burn(
-        CpiContext::new(
-            token_program.clone(),
-            Burn { mint: mint.clone(), from: from.clone(), authority: authority.clone() },
-        ),
-        amount,
-    )
+    user_transfer(token_program, mint, from, treasury, authority, studio)?;
+    user_transfer(token_program, mint, from, reward_pool, authority, pool)
 }
 
 /// Vault solvency invariant (checklist #49/#53): the SPL balance of a world
@@ -148,27 +142,35 @@ pub fn roll_world_epoch(world: &mut World, config: &Config) {
     }
     if world.epoch_id + 1 == config.cur_epoch {
         world.prev_epoch_id = world.epoch_id;
-        world.burn_prev = world.burn_cur;
+        world.sink_prev = world.sink_cur;
         world.scores_prev = world.scores_cur;
         world.prev_claimed = false;
     } else {
         // skipped at least one full epoch: the old window is unclaimable
         world.prev_epoch_id = config.cur_epoch.saturating_sub(1);
-        world.burn_prev = 0;
+        world.sink_prev = 0;
         world.scores_prev = [0; TERRITORIES];
         world.prev_claimed = true;
     }
     world.epoch_id = config.cur_epoch;
-    world.burn_cur = 0;
+    world.sink_cur = 0;
     world.scores_cur = [0; TERRITORIES];
 }
 
-/// Record a burn attributed to a world (counts toward epoch emission share).
-pub fn record_burn(world: &mut World, config: &mut Config, amount: u64) -> Result<()> {
-    world.burn_cur = math::add(world.burn_cur, amount)?;
-    world.total_burned = math::add(world.total_burned, amount)?;
-    config.cur_total_burn = math::add(config.cur_total_burn, amount)?;
-    config.total_burned = math::add(config.total_burned, amount)?;
+/// Record a pool-bound spend attributed to a world.  Only the POOL part is
+/// recorded (never the studio share): it is the world's emission weight.
+pub fn record_sink(world: &mut World, config: &mut Config, amount: u64) -> Result<()> {
+    world.sink_cur = math::add(world.sink_cur, amount)?;
+    world.total_sunk = math::add(world.total_sunk, amount)?;
+    config.cur_total_sink = math::add(config.cur_total_sink, amount)?;
+    config.total_sunk = math::add(config.total_sunk, amount)?;
+    Ok(())
+}
+
+/// Pool inflow not attributed to any world (creation / registration fees,
+/// quantum penalties): lifetime stat only, no emission weight.
+pub fn record_pool_inflow(config: &mut Config, amount: u64) -> Result<()> {
+    config.total_sunk = math::add(config.total_sunk, amount)?;
     Ok(())
 }
 

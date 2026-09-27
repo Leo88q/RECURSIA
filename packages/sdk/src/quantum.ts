@@ -7,7 +7,7 @@ export const QUANTUM_DELAY_SLOTS = 32;
 export const QUANTUM_REVEAL_SLOTS = 21_600;
 export const QUANTUM_STAKE_MULT = 4n;
 export const QUANTUM_BOUNTY_DIV = 20n;
-export const QUANTUM_REARM_BURN_BPS = 2_500n;
+export const QUANTUM_REARM_PENALTY_BPS = 2_500n;
 export const TUNNEL_CHANCE_256 = 16;
 export const SLOT_HASHES_MAX = 512;
 /** Neutral-world SWAP market. */

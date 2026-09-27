@@ -18,7 +18,7 @@ export function ChainLab({ c }: { c: ChainCtx }) {
     <div className="chain-lab">
       <div className="row-wrap lab-bar"><a className="btn" href="#/chain">← К мирам</a><WalletMultiButton /></div>
       <PhysicsLab
-        modules={mods} fee={p.moduleRegisterFee} feeBurnBps={p.feeBurnBps} fmt={(v) => rcr(v)}
+        modules={mods} fee={p.moduleRegisterFee} studioBps={p.protocolBps} fmt={(v) => rcr(v)}
         note="Транзакция симулируется и показывается перед подписью. Роялти неизменяемо после публикации."
         onPublish={async (law, name) => {
           const why = blocked(c, { spend: p.moduleRegisterFee });
@@ -29,7 +29,7 @@ export function ChainLab({ c }: { c: ChainCtx }) {
             lines: [
               `«${name}»: ${ruleString(law.birth, law.survive, law.qBirth, law.qSurvive, law.qAmp)}`,
               `Роялти автора: ${law.royaltyBps / 100}% каждого тика миров с этой физикой (неизменяемо)`,
-              `Сбор регистрации: ${rcr(p.moduleRegisterFee)} (${p.feeBurnBps / 100}% сжигается)`,
+              `Сбор регистрации: ${rcr(p.moduleRegisterFee)} (${p.protocolBps / 100}% — студии, остальное — в пул наград игроков)`,
               `Модуль #${c.config.modules.toString()}`,
             ],
             ixs: [c.rx.registerModule(me!, c.config.modules, law.birth, law.survive, law.royaltyBps, name, law)],

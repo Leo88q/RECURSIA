@@ -9,7 +9,7 @@ import { Art, Glyph, WorldIcon } from "../ui/Icon";
 
 export function WorldPanel({ c }: { c: ChainCtx }) {
   const { cur, config, me } = c;
-  const [fund, setFund] = useState("100");
+  const [fund, setFund] = useState("7000");
   if (!cur) return <div className="panel-body muted">Выберите мир</div>;
   const w = cur.acc, k = cur.key, p = config.params;
   const def = PublicKey.default;
@@ -39,7 +39,7 @@ export function WorldPanel({ c }: { c: ChainCtx }) {
         <dt>Население</dt><dd>{pop.toLocaleString("ru-RU")} клеток</dd>
         <dt>Энергия</dt><dd>{rcr(w.energy)} <span className="muted">(~{ticksLeft} тиков)</span></dd>
         <dt>Резонанс</dt><dd>{w.resonance} / {BREACH_RESONANCE}</dd>
-        <dt>Сожжено</dt><dd>{rcr(w.totalBurned, 0)}</dd>
+        <dt>Вклад в пул наград</dt><dd>{rcr(w.totalSunk, 0)}</dd>
       </dl>
 
       <div className="card">
@@ -55,8 +55,8 @@ export function WorldPanel({ c }: { c: ChainCtx }) {
 
       <div className="card">
         <div className="card-title"><Glyph name="clock" size={17} className="gold" />Эпоха {config.curEpoch.toString()}</div>
-        <p className="muted small">По окончании эпохи мир забирает свою долю эмиссии пропорционально сожжённому; она распределяется между живыми клетками. Вызвать может любой.</p>
-        <button className="btn" disabled={!epochClaimable || !me} onClick={() => c.run({ title: "Эмиссия эпохи для мира", lines: [`Мир «${w.name}» получает долю пула наград за прошлую эпоху`], ixs: [c.rx.claimWorldEpoch(k)] })}>Забрать эмиссию мира</button>
+        <p className="muted small">По окончании эпохи мир забирает свою долю пула наград пропорционально своему вкладу в пул наград (не больше 90% вклада); она распределяется между живыми клетками. Вызвать может любой.</p>
+        <button className="btn" disabled={!epochClaimable || !me} onClick={() => c.run({ title: "Награда эпохи для мира", lines: [`Мир «${w.name}» получает долю пула наград за прошлую эпоху`], ixs: [c.rx.claimWorldEpoch(k)] })}>Забрать награду мира</button>
       </div>
 
       {me && hasArchitect && w.architect.equals(me) && (

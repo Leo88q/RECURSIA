@@ -1,17 +1,21 @@
 // Mirrors programs/recursia/src/constants.rs — keep in sync (checked by tests).
 /** Program id as a plain string (no web3 import — keeps light bundles light). */
 export const PROGRAM_ID_STR = "2GrrTSyT4AG58XkEjtsV18dV8RPm6AZgQSjSxguCwCik";
+/** Official SKR mint (Solana Mobile). Counterfeit "SKR" mints exist — never trust the ticker. */
+export const SKR_MINT_STR = "SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3";
+export const TOKEN_SYMBOL = "SKR";
 export const GRID = 64;
 export const TERRITORIES = 64;
 export const MAX_DEPTH = 7;
 export const DECIMALS = 6;
 export const ONE = 1_000_000n;
-export const TOTAL_SUPPLY = 1_000_000_000n * ONE;
-export const REWARD_POOL_BPS = 4_500n;
-export const TREASURY_BPS = 1_000n;
+/** Approximate SKR supply (Sep 2026) — used only by the offline model / econ-sim. */
+export const SKR_SUPPLY_APPROX = 10_620_000_000n * ONE;
 export const BPS = 10_000n;
 export const MIN_TIMELOCK_SECS = 48 * 60 * 60;
-export const MIN_TICK_BURN_BPS = 3_000;
+export const MIN_TICK_POOL_BPS = 3_000;
+export const MAX_PROTOCOL_BPS = 2_500;
+export const MAX_EMISSION_RATE_BPS = 2_000;
 export const MAX_ROYALTY_BPS = 500;
 export const MAX_ARCHITECT_FEE_BPS = 3_000;
 export const MAX_PRICE = 1_000_000_000n * ONE;
@@ -29,11 +33,11 @@ export interface Params {
   timelockSecs: bigint;
   worldCreateFee: bigint;
   moduleRegisterFee: bigint;
-  feeBurnBps: number;
   tickCost: bigint;
   tickIntervalSlots: bigint;
   gensPerTick: number;
   crankerBps: number;
+  /** Studio share of every player spend (rest → player reward pool). */
   protocolBps: number;
   hostBps: number;
   epochSlots: bigint;
@@ -46,21 +50,20 @@ export interface Params {
 
 export const DEFAULT_PARAMS: Params = {
   timelockSecs: BigInt(MIN_TIMELOCK_SECS),
-  worldCreateFee: 1_000n * ONE,
-  moduleRegisterFee: 5_000n * ONE,
-  feeBurnBps: 5_000,
-  tickCost: 10n * ONE,
+  worldCreateFee: 70_000n * ONE,
+  moduleRegisterFee: 350_000n * ONE,
+  tickCost: 700n * ONE,
   tickIntervalSlots: 150n,
   gensPerTick: 4,
   crankerBps: 200,
-  protocolBps: 1_000,
+  protocolBps: 2_000,
   hostBps: 1_500,
   epochSlots: 216_000n,
-  emissionRateBps: 50,
+  emissionRateBps: 1_000,
   rebateCapBps: 9_000,
   harbergerBps: 50,
-  minPrice: 10n * ONE,
-  plantCost: 5n * ONE,
+  minPrice: 700n * ONE,
+  plantCost: 350n * ONE,
 };
 
 export interface PhysicsPreset { name: string; birth: number; survive: number; royaltyBps: number; qBirth: number; qSurvive: number; qAmp: number; blurb?: string }

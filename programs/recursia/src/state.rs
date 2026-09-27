@@ -10,12 +10,12 @@ pub struct Params {
     pub timelock_secs: i64,
     pub world_create_fee: u64,
     pub module_register_fee: u64,
-    /// Share of creation/registration fees that is burned (rest → treasury).
-    pub fee_burn_bps: u16,
     pub tick_cost: u64,
     pub tick_interval_slots: u64,
     pub gens_per_tick: u8,
     pub cranker_bps: u16,
+    /// Studio share of EVERY player spend (ticks, plants, quantum commits,
+    /// swap fees, creation / registration fees).  Rest → player reward pool.
     pub protocol_bps: u16,
     pub host_bps: u16,
     pub epoch_slots: u64,
@@ -30,21 +30,21 @@ impl Params {
     pub fn default_mainnet() -> Self {
         Params {
             timelock_secs: MIN_TIMELOCK_SECS,
-            world_create_fee: 1_000 * ONE,
-            module_register_fee: 5_000 * ONE,
-            fee_burn_bps: 5_000,
-            tick_cost: 10 * ONE,
+            // SKR ≈ $0.019 (Sep 2026): entry = tick 700 + deposit 3.5 + plant 350 ≈ $20
+            world_create_fee: 70_000 * ONE,
+            module_register_fee: 350_000 * ONE,
+            tick_cost: 700 * ONE,
             tick_interval_slots: 150,
             gens_per_tick: 4,
             cranker_bps: 200,
-            protocol_bps: 1_000,
+            protocol_bps: 2_000,
             host_bps: 1_500,
             epoch_slots: 216_000,
-            emission_rate_bps: 50,
+            emission_rate_bps: 1_000,
             rebate_cap_bps: 9_000,
             harberger_bps: 50,
-            min_price: 10 * ONE,
-            plant_cost: 5 * ONE,
+            min_price: 700 * ONE,
+            plant_cost: 350 * ONE,
         }
     }
 
@@ -55,18 +55,18 @@ impl Params {
             && self.world_create_fee <= MAX_PRICE
             && self.module_register_fee > 0
             && self.module_register_fee <= MAX_PRICE
-            && (self.fee_burn_bps as u64) <= BPS
             && self.tick_cost >= 1_000 // must be large enough that fee splits are non-zero
             && self.tick_cost <= MAX_PRICE
             && self.tick_interval_slots >= MIN_TICK_INTERVAL
             && self.gens_per_tick >= 1
             && self.gens_per_tick <= MAX_GENS_PER_TICK
-            // burn floor: cranker + protocol + host + max royalty ≤ 100% − MIN_BURN
+            && (self.protocol_bps as u64) <= MAX_PROTOCOL_BPS
+            // pool floor: cranker + protocol + host + max royalty ≤ 100% − MIN_POOL
             && (self.cranker_bps as u64
                 + self.protocol_bps as u64
                 + self.host_bps as u64
                 + MAX_ROYALTY_BPS as u64)
-                <= BPS - MIN_TICK_BURN_BPS
+                <= BPS - MIN_TICK_POOL_BPS
             && self.epoch_slots >= MIN_EPOCH_SLOTS
             && self.epoch_slots >= self.tick_interval_slots
             && (self.emission_rate_bps as u64) <= MAX_EMISSION_RATE_BPS
@@ -87,7 +87,7 @@ pub enum PendingAction {
     None,
     SetParams(Params),
     SetAdmin(Pubkey),
-    /// `recipient` is an SPL token account for the RCR mint.
+    /// `recipient` is an SPL token account for the SKR mint.
     TreasurySpend { amount: u64, recipient: Pubkey },
 }
 
@@ -96,14 +96,13 @@ pub enum PendingAction {
 pub struct Config {
     pub version: u8,
     pub bump: u8,
-    pub mint_bump: u8,
     pub treasury_bump: u8,
     pub reward_pool_bump: u8,
     pub claims_bump: u8,
     /// Expected to be a Squads multisig vault (≥3-of-5), see SECURITY.md.
     pub admin: Pubkey,
+    /// SKR mint (external; the program holds no authority over it).
     pub mint: Pubkey,
-    pub genesis_done: bool,
     pub paused: bool,
     pub params: Params,
     pub pending: PendingAction,
@@ -115,12 +114,13 @@ pub struct Config {
     // --- global epoch accounting (lazy, O(1)) ---
     pub cur_epoch: u64,
     pub epoch_start_slot: u64,
-    pub cur_total_burn: u64,
-    pub prev_total_burn: u64,
+    /// Pool-bound spend this epoch (emission weight denominator).
+    pub cur_total_sink: u64,
+    pub prev_total_sink: u64,
     pub prev_emission: u64,
     pub prev_claimed: u64,
     // --- lifetime stats / invariants ---
-    pub total_burned: u64,
+    pub total_sunk: u64,
     pub total_emitted: u64,
 }
 
@@ -159,10 +159,10 @@ pub struct World {
     pub owned_mask: u64,
     // --- epoch scoring ---
     pub epoch_id: u64,
-    pub burn_cur: u64,
+    pub sink_cur: u64,
     pub scores_cur: [u32; TERRITORIES],
     pub prev_epoch_id: u64,
-    pub burn_prev: u64,
+    pub sink_prev: u64,
     pub scores_prev: [u32; TERRITORIES],
     pub prev_claimed: bool,
     // --- recursion mechanics ---
@@ -174,7 +174,7 @@ pub struct World {
     pub rebellion_deadline: u64,
     pub last_rebellion_slot: u64,
     pub liberated: bool,
-    pub total_burned: u64,
+    pub total_sunk: u64,
     // --- quantum layer (copied from the module at creation) ---
     pub q_birth: u16,
     pub q_survive: u16,
@@ -338,4 +338,41 @@ pub struct QuantumSwap {
     pub accepted: bool,
     pub target_slot: u64,
     pub rearms: u8,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_params_are_valid_and_priced_for_skr() {
+        let p = Params::default_mainnet();
+        assert!(p.validate().is_ok());
+        // minimum entry: free cell at min_price + 1 epoch of tax deposit + one plant
+        let entry = p.min_price + p.min_price * p.harberger_bps as u64 / BPS + p.plant_cost;
+        assert_eq!(entry, 1_053_500_000); // 1053.5 SKR ≈ $20 at $0.019
+        assert_eq!(p.protocol_bps, 2_000); // studio: 20% of every player spend
+    }
+
+    #[test]
+    fn studio_share_is_hard_capped() {
+        let mut p = Params::default_mainnet();
+        p.protocol_bps = (MAX_PROTOCOL_BPS + 1) as u16;
+        p.host_bps = 0;
+        assert!(p.validate().is_err());
+        p.protocol_bps = MAX_PROTOCOL_BPS as u16;
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn tick_pool_floor_is_enforced() {
+        let mut p = Params::default_mainnet();
+        p.host_bps = 5_000; // 200 + 2000 + 5000 + 500 > 7000
+        assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn skr_mint_is_the_official_one() {
+        assert_eq!(SKR_MINT.to_string(), "SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3");
+    }
 }

@@ -17,7 +17,7 @@ pub struct Ticked {
     pub world: Pubkey,
     pub generation: u64,
     pub population: u32,
-    pub burned: u64,
+    pub to_pool: u64,
     pub host_tax: u64,
     pub royalty: u64,
     pub cranker: Pubkey,
@@ -52,7 +52,7 @@ pub struct Planted {
 #[event]
 pub struct EpochAdvanced {
     pub epoch: u64,
-    pub total_burn: u64,
+    pub total_sink: u64,
     pub emission: u64,
 }
 
@@ -121,7 +121,7 @@ pub struct Rearmed {
     pub world: Pubkey,
     pub index: u8,
     pub new_target_slot: u64,
-    pub burned: u64,
+    pub penalty: u64,
 }
 
 #[event]
@@ -139,7 +139,7 @@ pub struct Collapsed {
 pub struct Decohered {
     pub world: Pubkey,
     pub index: u8,
-    pub burned: u64,
+    pub penalty: u64,
     pub bounty: u64,
 }
 
@@ -186,4 +186,11 @@ pub struct SwapCancelled {
     pub world: Pubkey,
     pub index_a: u8,
     pub index_b: u8,
+}
+
+/// SKR added to the player reward pool from outside (studio top-ups, partners).
+#[event]
+pub struct RewardPoolFunded {
+    pub funder: Pubkey,
+    pub amount: u64,
 }

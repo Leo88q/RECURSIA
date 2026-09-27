@@ -3,18 +3,18 @@
 //! Lifecycle of a superposed territory:
 //!  1. `quantum_commit` — the holder commits H(A, B, w, salt, owner, world, idx).
 //!     Nobody can see the patterns (real commit-reveal: no counter-play, no
-//!     front-running). Plant cost is burned now; a stake is escrowed in the
+//!     front-running). Plant cost is spent now (studio share + reward pool); a stake is escrowed in the
 //!     world vault. Optionally entangles a territory in ANOTHER world.
 //!  2. `quantum_observe` — permissionless after `target_slot`. Fixes the entropy
 //!     to the hash of the slot scheduled at commit time (the observer cannot
 //!     choose it) and pays the observer a bounty. If the scheduled entry fell
 //!     out of the SlotHashes window, the measurement is re-armed and part of
-//!     the stake is burned (the owner cannot "wait out" a bad outcome).
+//!     the stake goes to the reward pool (the owner cannot "wait out" a bad outcome).
 //!  3. `quantum_collapse` — the owner reveals; the state collapses into A or B
 //!     (entangled partner gets the other one), may tunnel into a neighbour
 //!     block; the remaining stake is refunded.
 //!  4. `quantum_decohere` — permissionless after the reveal window: remaining
-//!     stake is burned (bounty to the caller). Withholding a bad outcome
+//!     stake goes to the reward pool (bounty to the caller). Withholding a bad outcome
 //!     therefore always costs the stake.
 
 use anchor_lang::prelude::*;
@@ -39,7 +39,6 @@ pub struct QuantumCommit<'info> {
     pub holder: Signer<'info>,
     #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
-    #[account(mut)]
     pub mint: Box<Account<'info, Mint>>,
     #[account(mut)]
     pub world: Box<Account<'info, World>>,
@@ -62,6 +61,12 @@ pub struct QuantumCommit<'info> {
     pub world2: Option<Box<Account<'info, World>>>,
     #[account(mut)]
     pub territory2: Option<Box<Account<'info, Territory>>>,
+    /// Studio treasury (SKR): `protocol_bps` of every player spend.
+    #[account(mut, seeds = [SEED_TREASURY], bump = config.treasury_bump)]
+    pub treasury: Box<Account<'info, TokenAccount>>,
+    /// Player reward pool (SKR). Receives the non-studio part of every spend.
+    #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
+    pub reward_pool: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
@@ -89,7 +94,8 @@ pub fn quantum_commit(ctx: Context<QuantumCommit>, index: u8, commitment: [u8; 3
     };
     require!(ctx.accounts.world.tick_count >= ctx.accounts.territory.next_plant_tick, RecursiaError::Cooldown);
     let n: u64 = if entangled { 2 } else { 1 };
-    let burn = math::mul(p.plant_cost, n)?;
+    let spend = math::mul(p.plant_cost, n)?;
+    let (studio, to_pool) = math::split_spend(spend, p.protocol_bps)?;
     let stake = math::mul(math::mul(p.plant_cost, QUANTUM_STAKE_MULT)?, n)?;
 
     // ---- effects
@@ -115,7 +121,7 @@ pub fn quantum_commit(ctx: Context<QuantumCommit>, index: u8, commitment: [u8; 3
     {
         let snapshot = Config::clone(&ctx.accounts.config);
         roll_world_epoch(&mut ctx.accounts.world, &snapshot);
-        record_burn(&mut ctx.accounts.world, &mut ctx.accounts.config, burn)?;
+        record_sink(&mut ctx.accounts.world, &mut ctx.accounts.config, to_pool)?;
         let w = &mut ctx.accounts.world;
         w.quantum_escrow = math::add(w.quantum_escrow, stake)?;
         w.superpositions = w.superpositions.saturating_add(1);
@@ -140,7 +146,11 @@ pub fn quantum_commit(ctx: Context<QuantumCommit>, index: u8, commitment: [u8; 3
     let mint = ctx.accounts.mint.to_account_info();
     let from = ctx.accounts.holder_token.to_account_info();
     let auth = ctx.accounts.holder.to_account_info();
-    user_burn(&tp, &mint, &from, &auth, burn)?;
+    user_spend(
+        &tp, &mint, &from, &auth,
+        &ctx.accounts.treasury.to_account_info(), &ctx.accounts.reward_pool.to_account_info(),
+        studio, to_pool,
+    )?;
     user_transfer(&tp, &mint, &from, &ctx.accounts.world_vault.to_account_info(), &auth, stake)?;
     ctx.accounts.world_vault.reload()?;
     assert_world_solvent(&ctx.accounts.world, ctx.accounts.world_vault.amount)?;
@@ -155,7 +165,6 @@ pub struct QuantumObserve<'info> {
     pub observer: Signer<'info>,
     #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
-    #[account(mut)]
     pub mint: Box<Account<'info, Mint>>,
     #[account(mut)]
     pub world: Box<Account<'info, World>>,
@@ -171,12 +180,14 @@ pub struct QuantumObserve<'info> {
     /// CHECK: address-pinned SlotHashes sysvar, parsed with bounds checks.
     #[account(address = anchor_lang::solana_program::sysvar::slot_hashes::ID @ RecursiaError::SlotHashes)]
     pub slot_hashes: UncheckedAccount<'info>,
+    /// Player reward pool (SKR). Receives the non-studio part of every spend.
+    #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
+    pub reward_pool: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
 }
 
 /// Works while paused: measuring settles a user position, it is not gameplay.
 pub fn quantum_observe(ctx: Context<QuantumObserve>) -> Result<()> {
-    require!(ctx.accounts.config.genesis_done, RecursiaError::GenesisPending);
     let slot = Clock::get()?.slot;
     let sp_ro = &ctx.accounts.superposition;
     require!(!sp_ro.observed, RecursiaError::AlreadyObserved);
@@ -210,20 +221,19 @@ pub fn quantum_observe(ctx: Context<QuantumObserve>) -> Result<()> {
             emit!(Observed { world: world_key, index, observer: ctx.accounts.observer.key(), measured_slot: measured, entropy: hash, bounty });
         }
         quantum::SlotHashLookup::Expired { .. } => {
-            let burned = math::bps_floor(ctx.accounts.superposition.stake, QUANTUM_REARM_BURN_BPS)?;
+            let penalty = math::bps_floor(ctx.accounts.superposition.stake, QUANTUM_REARM_PENALTY_BPS)?;
             let new_target = slot.checked_add(QUANTUM_DELAY_SLOTS).ok_or(RecursiaError::MathOverflow)?;
             {
                 let sp = &mut ctx.accounts.superposition;
-                sp.stake = math::sub(sp.stake, burned)?;
+                sp.stake = math::sub(sp.stake, penalty)?;
                 sp.target_slot = new_target;
                 sp.rearms = sp.rearms.saturating_add(1);
                 let w = &mut ctx.accounts.world;
-                w.quantum_escrow = math::sub(w.quantum_escrow, burned)?;
-                let c = &mut ctx.accounts.config;
-                c.total_burned = math::add(c.total_burned, burned)?;
+                w.quantum_escrow = math::sub(w.quantum_escrow, penalty)?;
+                record_pool_inflow(&mut ctx.accounts.config, penalty)?;
             }
-            vault_burn(&tp, &mint, &vault, &cfg, bump, burned)?;
-            emit!(Rearmed { world: world_key, index, new_target_slot: new_target, burned });
+            vault_transfer(&tp, &mint, &vault, &ctx.accounts.reward_pool.to_account_info(), &cfg, bump, penalty)?;
+            emit!(Rearmed { world: world_key, index, new_target_slot: new_target, penalty });
         }
         quantum::SlotHashLookup::NotYet { .. } => return err!(RecursiaError::NotMeasurable),
     }
@@ -354,7 +364,6 @@ pub struct QuantumDecohere<'info> {
     pub caller: Signer<'info>,
     #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
-    #[account(mut)]
     pub mint: Box<Account<'info, Mint>>,
     #[account(mut)]
     pub world: Box<Account<'info, World>>,
@@ -370,6 +379,9 @@ pub struct QuantumDecohere<'info> {
     pub owner: UncheckedAccount<'info>,
     #[account(mut, token::mint = mint)]
     pub caller_token: Box<Account<'info, TokenAccount>>,
+    /// Player reward pool (SKR). Receives the non-studio part of every spend.
+    #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
+    pub reward_pool: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -385,13 +397,12 @@ pub fn quantum_decohere(ctx: Context<QuantumDecohere>) -> Result<()> {
     };
     require!(expired, RecursiaError::StillCoherent);
     let bounty = sp.stake / QUANTUM_BOUNTY_DIV;
-    let burned = math::sub(sp.stake, bounty)?;
+    let penalty = math::sub(sp.stake, bounty)?;
     {
         let w = &mut ctx.accounts.world;
         w.quantum_escrow = math::sub(w.quantum_escrow, sp.stake)?;
         w.superpositions = w.superpositions.saturating_sub(1);
-        let c = &mut ctx.accounts.config;
-        c.total_burned = math::add(c.total_burned, burned)?;
+        record_pool_inflow(&mut ctx.accounts.config, penalty)?;
     }
     let bump = ctx.accounts.config.bump;
     let tp = ctx.accounts.token_program.to_account_info();
@@ -399,9 +410,9 @@ pub fn quantum_decohere(ctx: Context<QuantumDecohere>) -> Result<()> {
     let vault = ctx.accounts.world_vault.to_account_info();
     let cfg = ctx.accounts.config.to_account_info();
     vault_transfer(&tp, &mint, &vault, &ctx.accounts.caller_token.to_account_info(), &cfg, bump, bounty)?;
-    vault_burn(&tp, &mint, &vault, &cfg, bump, burned)?;
+    vault_transfer(&tp, &mint, &vault, &ctx.accounts.reward_pool.to_account_info(), &cfg, bump, penalty)?;
     ctx.accounts.world_vault.reload()?;
     assert_world_solvent(&ctx.accounts.world, ctx.accounts.world_vault.amount)?;
-    emit!(Decohered { world: ctx.accounts.world.key(), index: sp.index, burned, bounty });
+    emit!(Decohered { world: ctx.accounts.world.key(), index: sp.index, penalty, bounty });
     Ok(())
 }

@@ -4,12 +4,12 @@ import { DEFAULT_PARAMS } from "../src/constants.js";
 import { Rng } from "../src/agents.js";
 
 describe("economy math (mirror of math.rs)", () => {
-  it("tick split sums exactly & respects burn floor", () => {
+  it("tick split sums exactly & respects the reward-pool floor", () => {
     const p = DEFAULT_PARAMS;
     for (const host of [true, false]) for (const roy of [0, 100, 500]) {
       const s = splitTick(p.tickCost, p.crankerBps, p.protocolBps, p.hostBps, roy, host);
-      expect(s.cranker + s.protocol + s.host + s.royalty + s.burn).toBe(p.tickCost);
-      expect(s.burn * 10_000n >= p.tickCost * 3_000n).toBe(true);
+      expect(s.cranker + s.protocol + s.host + s.royalty + s.pool).toBe(p.tickCost);
+      expect(s.pool * 10_000n >= p.tickCost * 3_000n).toBe(true);
     }
   });
   it("harberger rounds up", () => {

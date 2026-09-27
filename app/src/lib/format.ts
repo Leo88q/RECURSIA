@@ -7,7 +7,7 @@ const UNIT = 10n ** BigInt(DECIMALS);
 export type Parsed = { ok: true; value: bigint } | { ok: false; error: string };
 
 /**
- * Strictly parses a human RCR amount ("12", "12.5", "0,000001") into base
+ * Strictly parses a human SKR amount ("12", "12.5", "0,000001") into base
  * units. Rejects exponent notation, signs, more than 6 decimals, and values
  * above `max` — never silently rounds.
  */
@@ -32,7 +32,7 @@ export function formatAmount(v: bigint, maxDigits = 6): string {
   if (frac === "" && a !== 0n && whole === 0n) frac = ""; // below display precision
   return `${neg ? "−" : ""}${grouped}${frac ? `,${frac}` : ""}`;
 }
-export const rcr = (v: bigint, digits = 2) => `${formatAmount(v, digits)} RCR`;
+export const rcr = (v: bigint, digits = 2) => `${formatAmount(v, digits)} SKR`;
 
 /** Base units → value for an <input> ("12.5"), inverse of parseAmount. */
 export function toInput(v: bigint): string {

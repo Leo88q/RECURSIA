@@ -1,17 +1,18 @@
 // Transaction pipeline for live mode (checklist #51 simulate-before-sign,
 // #72/#82 no blind signing, #36 slippage caps in the instructions themselves).
 //
-//   request → simulate (with post-state of your SOL + RCR accounts)
+//   request → simulate (with post-state of your SOL + SKR accounts)
 //           → human preview: what, how much, balance deltas, CU, fee, programs
 //           → sign with a FRESH blockhash (a preview left open never expires)
 //           → rebroadcast until confirmed or the blockhash's last valid height
 //           → decoded Russian error or explorer link.
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { ComputeBudgetProgram, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
 import bs58 from "bs58";
-import { ASSOCIATED_TOKEN_PROGRAM_ID, ata, explainTxError, Pdas } from "@recursia/sdk";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, ata, explainTxError } from "@recursia/sdk";
 import { CONFIG, explorerUrl } from "../lib/config";
+import { MINT } from "./mint";
 import { formatAmount, lamportsToSol, shortAddr } from "../lib/format";
 import { MAX_CU, PHASE_LABEL, PRIORITY_LABEL, computeUnitLimit, estimateFeeLamports, pickPriorityFee, readTokenAmount, type PriorityLevel, type TxPhase } from "../lib/txmath";
 import { Modal } from "../ui/Modal";
@@ -57,7 +58,7 @@ export function TxProvider({ children, onConfirmed }: { children: ReactNode; onC
   const [st, setSt] = useState<State | null>(null);
   const [level, setLevel] = useState<PriorityLevel>(() => (localStorage.getItem("recursia:priority") as PriorityLevel) || "normal");
   const resolver = useRef<((r: TxResult) => void) | null>(null);
-  const mint = useMemo(() => new Pdas(PROGRAM_ID).mint(), []);
+  const mint = MINT;
 
   const finish = useCallback((r: TxResult) => { resolver.current?.(r); resolver.current = null; }, []);
 
@@ -167,7 +168,7 @@ export function TxProvider({ children, onConfirmed }: { children: ReactNode; onC
               </div>
               {!sim.error && (
                 <dl className="kv tx-kv">
-                  {sim.rcrBefore !== null || sim.rcrAfter !== null ? (<><dt>RCR на кошельке</dt><dd>{formatAmount(sim.rcrBefore ?? 0n)} → <b>{formatAmount(sim.rcrAfter ?? sim.rcrBefore ?? 0n)}</b>{delta(sim.rcrBefore ?? 0n, sim.rcrAfter ?? sim.rcrBefore ?? 0n)}</dd></>) : null}
+                  {sim.rcrBefore !== null || sim.rcrAfter !== null ? (<><dt>SKR на кошельке</dt><dd>{formatAmount(sim.rcrBefore ?? 0n)} → <b>{formatAmount(sim.rcrAfter ?? sim.rcrBefore ?? 0n)}</b>{delta(sim.rcrBefore ?? 0n, sim.rcrAfter ?? sim.rcrBefore ?? 0n)}</dd></>) : null}
                   {sim.solAfter !== null && <><dt>SOL (рента аккаунтов)</dt><dd>{lamportsToSol(sim.solBefore)} → {lamportsToSol(sim.solAfter)}</dd></>}
                   <dt>Комиссия сети</dt><dd>≈ {lamportsToSol(estimateFeeLamports(cu, price))} SOL</dd>
                 </dl>

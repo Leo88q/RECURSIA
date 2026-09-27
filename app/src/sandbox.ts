@@ -16,7 +16,11 @@ export const DEV = "Студия";
 // Accelerated time for the sandbox (min allowed epoch on-chain is ~1h).
 // Time runs 24× faster than on-chain (epoch 9 000 vs 216 000 slots), so the law
 // registration fee is scaled by the same factor to keep the royalty payback period realistic.
-export const SANDBOX_PARAMS: Params = { ...DEFAULT_PARAMS, epochSlots: 9_000n, harbergerBps: 100, moduleRegisterFee: 250n * ONE };
+export const SANDBOX_PARAMS: Params = { ...DEFAULT_PARAMS, epochSlots: 9_000n, harbergerBps: 100, moduleRegisterFee: DEFAULT_PARAMS.moduleRegisterFee / 20n };
+/** Sandbox amounts are written in price units: plant_cost / 5 (= 70 SKR at the default SKR price list). */
+const U = DEFAULT_PARAMS.plantCost / 5n;
+/** Test SKR the "studio" seeds the reward pool with at launch (mirror of `fund_reward_pool`). */
+export const SANDBOX_POOL_SEED = 1_000_000n * U;
 export const STEP_SLOTS = 160;
 
 const PERSONAS: Array<[Personality, string]> = [
@@ -35,30 +39,30 @@ export class Sandbox {
   secrets = new Map<string, QuantumSecret>();
 
   constructor(seed = 42) {
-    const m = (this.m = new GameModel(SANDBOX_PARAMS));
+    const m = (this.m = new GameModel(SANDBOX_PARAMS, { poolSeed: SANDBOX_POOL_SEED }));
     m.chainSalt = randomSalt(); // every sandbox session gets its own "cluster" entropy
-    m.addPlayer(DEV, 200_000n * ONE);
+    m.addPlayer(DEV, 200_000n * U);
     for (const p of PHYSICS_PRESETS) m.registerModule(DEV, p.name, p.birth, p.survive, p.royaltyBps, p);
     m.addPlayer(KEEPER, 0n);
-    m.addPlayer("Основатель", 60_000n * ONE);
-    m.createRootWorld("Основатель", "Альфа", 0, 1_500, 8_000n * ONE);
-    m.createRootWorld("Основатель", "Бета", 1, 2_500, 6_000n * ONE);
-    m.createRootWorld("Основатель", "Коралл", 5, 1_000, 6_000n * ONE);
-    m.createRootWorld("Основатель", "Квантовая пена", PHYSICS_PRESETS.findIndex((p) => p.name === "Quantum Foam"), 1_500, 8_000n * ONE);
+    m.addPlayer("Основатель", 60_000n * U);
+    m.createRootWorld("Основатель", "Альфа", 0, 1_500, 8_000n * U);
+    m.createRootWorld("Основатель", "Бета", 1, 2_500, 6_000n * U);
+    m.createRootWorld("Основатель", "Коралл", 5, 1_000, 6_000n * U);
+    m.createRootWorld("Основатель", "Квантовая пена", PHYSICS_PRESETS.findIndex((p) => p.name === "Quantum Foam"), 1_500, 8_000n * U);
     // neutral quantum world: nobody rules it, players exchange outcomes via SWAP
-    m.createNeutralWorld("Основатель", "Ничья земля", PHYSICS_PRESETS.findIndex((p) => p.name === "Tunnel Life"), 8_000n * ONE);
+    m.createNeutralWorld("Основатель", "Ничья земля", PHYSICS_PRESETS.findIndex((p) => p.name === "Tunnel Life"), 8_000n * U);
     let k = 0;
     for (const [pers, label] of PERSONAS) {
       for (let j = 1; j <= 3; j++) {
         const id = `ИИ·${label}-${j}`;
-        m.addPlayer(id, 12_000n * ONE, true);
+        m.addPlayer(id, 12_000n * U, true);
         this.agents.push(new AIAgent(id, pers, seed * 1000 + ++k));
       }
     }
-    m.addPlayer(YOU, 5_000n * ONE);
+    m.addPlayer(YOU, 5_000n * U);
     // warm-up so the multiverse is alive when the player arrives
     for (let i = 0; i < 25; i++) this.step();
-    m.events.push({ slot: m.slot, kind: "welcome", text: "Вы материализовались в мультивселенной с 5 000 RCR. Займите клетку, посадите жизнь, запустите свою симуляцию." });
+    m.events.push({ slot: m.slot, kind: "welcome", text: `Вы материализовались в мультивселенной с тестовыми ${fmtRcr(5_000n * U, 0)}. Займите клетку, посадите жизнь, запустите свою симуляцию.` });
   }
 
   step() {
@@ -118,7 +122,7 @@ export class Sandbox {
 
   collapse(worldId: string, idx: number): string | null {
     const s = this.secrets.get(`${worldId}:${idx}`);
-    if (!s) return "Секрет суперпозиции утерян — ставка сгорит при декогеренции";
+    if (!s) return "Секрет суперпозиции утерян — залог уйдёт в пул наград при декогеренции";
     return this.act(() => { this.m.quantumCollapse(YOU, worldId, idx, s.a, s.b, s.weight, s.salt); this.secrets.delete(`${worldId}:${idx}`); });
   }
 
@@ -150,11 +154,11 @@ export class Sandbox {
 export const fmtRcr = (v: bigint, digits = 0) => {
   const whole = v / ONE;
   const frac = digits ? "," + ((v % ONE) * 10n ** BigInt(digits) / ONE).toString().padStart(digits, "0") : "";
-  return `${whole.toLocaleString("ru-RU")}${frac} RCR`;
+  return `${whole.toLocaleString("ru-RU")}${frac} SKR`;
 };
 
 const DICT: Record<string, string> = {
-  "insufficient funds": "Недостаточно RCR",
+  "insufficient funds": "Недостаточно SKR",
   "price slippage": "Цена изменилась выше вашего лимита (защита от фронтраннинга)",
   "self-buy": "Нельзя купить у самого себя",
   "deposit too small": "Депозит меньше налога за эпоху",

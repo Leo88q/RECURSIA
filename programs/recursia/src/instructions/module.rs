@@ -16,7 +16,6 @@ pub struct RegisterModule<'info> {
     pub author: Signer<'info>,
     #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
-    #[account(mut)]
     pub mint: Box<Account<'info, Mint>>,
     #[account(
         init, payer = author, space = 8 + PhysicsModule::INIT_SPACE,
@@ -27,6 +26,9 @@ pub struct RegisterModule<'info> {
     pub author_token: Box<Account<'info, TokenAccount>>,
     #[account(mut, seeds = [SEED_TREASURY], bump = config.treasury_bump)]
     pub treasury: Box<Account<'info, TokenAccount>>,
+    /// Player reward pool (SKR). Receives the non-studio part of every spend.
+    #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
+    pub reward_pool: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
@@ -50,17 +52,19 @@ pub fn register_module(
     require!(royalty_bps <= MAX_ROYALTY_BPS, RecursiaError::InvalidParams);
 
     let p = ctx.accounts.config.params;
-    let burn = math::bps_floor(p.module_register_fee, p.fee_burn_bps as u64)?;
-    let to_treasury = math::sub(p.module_register_fee, burn)?;
+    let (studio, to_pool) = math::split_spend(p.module_register_fee, p.protocol_bps)?;
+    record_pool_inflow(&mut ctx.accounts.config, to_pool)?;
     let tp = ctx.accounts.token_program.to_account_info();
     let mint = ctx.accounts.mint.to_account_info();
     let from = ctx.accounts.author_token.to_account_info();
     let auth = ctx.accounts.author.to_account_info();
-    user_burn(&tp, &mint, &from, &auth, burn)?;
-    user_transfer(&tp, &mint, &from, &ctx.accounts.treasury.to_account_info(), &auth, to_treasury)?;
+    user_spend(
+        &tp, &mint, &from, &auth,
+        &ctx.accounts.treasury.to_account_info(), &ctx.accounts.reward_pool.to_account_info(),
+        studio, to_pool,
+    )?;
 
     let c = &mut ctx.accounts.config;
-    c.total_burned = math::add(c.total_burned, burn)?;
     let m = &mut ctx.accounts.module;
     m.version = ACCOUNT_VERSION;
     m.bump = ctx.bumps.module;

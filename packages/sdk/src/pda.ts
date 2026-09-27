@@ -1,7 +1,9 @@
 import { PublicKey } from "@solana/web3.js";
-import { PROGRAM_ID_STR } from "./constants.js";
+import { PROGRAM_ID_STR, SKR_MINT_STR } from "./constants.js";
 
 export const PROGRAM_ID = new PublicKey(PROGRAM_ID_STR);
+/** Official SKR mint. Devnet/localnet deployments pass their own test mint. */
+export const SKR_MINT = new PublicKey(SKR_MINT_STR);
 export const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 export const SYSVAR_SLOT_HASHES = new PublicKey("SysvarS1otHashes111111111111111111111111111");
@@ -14,7 +16,6 @@ export class Pdas {
   constructor(readonly programId: PublicKey = PROGRAM_ID) {}
   private f(seeds: Uint8Array[]) { return PublicKey.findProgramAddressSync(seeds, this.programId)[0]; }
   config() { return this.f([enc("config")]); }
-  mint() { return this.f([enc("mint")]); }
   treasury() { return this.f([enc("treasury")]); }
   rewardPool() { return this.f([enc("reward_pool")]); }
   claims() { return this.f([enc("claims")]); }

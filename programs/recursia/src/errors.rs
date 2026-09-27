@@ -6,10 +6,10 @@ pub enum RecursiaError {
     MathOverflow,
     #[msg("Protocol is paused")]
     Paused,
-    #[msg("Genesis already executed")]
-    GenesisDone,
-    #[msg("Genesis not executed yet")]
-    GenesisPending,
+    #[msg("Mint is not SKR (wrong address, decimals or has a freeze authority)")]
+    BadMint,
+    #[msg("Amount must be positive")]
+    ZeroAmount,
     #[msg("Parameter out of hard safety bounds")]
     InvalidParams,
     #[msg("Timelock has not elapsed")]

@@ -83,7 +83,7 @@ function HolderCards({ c, idx }: { c: ChainCtx; idx: number }) {
   const p = c.config.params;
   const t = c.model!.territories[idx];
   const [price, setPrice] = useState(() => toInput(t.price));
-  const [amt, setAmt] = useState("10");
+  const [amt, setAmt] = useState("700");
   const np = amountOf(price, { min: p.minPrice });
   const a = amountOf(amt);
   const cooldown = Number(t.lastPriceChange) + 150 - c.slot;
@@ -127,9 +127,9 @@ function SuperposeCard({ c, idx }: { c: ChainCtx; idx: number }) {
   const [ent, setEnt] = useState("");
   const partners = c.my.holdings.filter((h) => !h.acc.world.equals(c.cur!.key));
   const entangle = ent ? { world: new PublicKey(ent.split("|")[0]), index: Number(ent.split("|")[1]) } : null;
-  const burn = p.plantCost * (entangle ? 2n : 1n);
+  const cost = p.plantCost * (entangle ? 2n : 1n);
   const stake = p.plantCost * 4n * (entangle ? 2n : 1n);
-  const why = blocked(c, { spend: burn + stake });
+  const why = blocked(c, { spend: cost + stake });
   const worldName = (k: PublicKey) => c.data.worlds.find((x) => x.key.equals(k))?.acc.name ?? shortAddr(k.toBase58());
   return (
     <div className="card quantum-card">
@@ -150,18 +150,18 @@ function SuperposeCard({ c, idx }: { c: ChainCtx; idx: number }) {
           </select>
         </label>
       )}
-      <div className="muted small">Сжигается {rcr(burn)}, залог {rcr(stake)} вернётся при раскрытии в течение {slotsToHuman(QUANTUM_REVEAL_SLOTS)}.</div>
+      <div className="muted small">Плата {rcr(cost)} ({p.protocolBps / 100}% — студии, остальное — в пул наград), залог {rcr(stake)} вернётся при раскрытии в течение {slotsToHuman(QUANTUM_REVEAL_SLOTS)}.</div>
       <button className="btn portal" disabled={!!why} title={why ?? ""} onClick={() => {
         const me = c.me!, k = c.cur!.key, salt = randomSalt(), A = PATTERNS[a], B = PATTERNS[b];
         saveSecret(k.toBase58(), idx, me.toBase58(), { a: A, b: B, w, salt }); // BEFORE signing
         const cm = commitment(A, B, w, salt, me.toBytes(), k.toBytes(), idx);
         c.run({
           title: "Квантовая суперпозиция",
-          lines: [`Клетка #${idx}: ${w / 100}% ${PATTERN_NAMES[a] ?? a} + ${(10_000 - w) / 100}% ${PATTERN_NAMES[b] ?? b}`, `Сжигается ${rcr(burn)}, залог ${rcr(stake)}`, ...(entangle ? [`Запутанность: ${worldName(entangle.world)} #${entangle.index} получит противоположную ветвь`] : [])],
-          danger: "Секрет сохранён только в этом браузере. Потеряете его — залог сгорит. Скачайте файл секрета после подтверждения.",
+          lines: [`Клетка #${idx}: ${w / 100}% ${PATTERN_NAMES[a] ?? a} + ${(10_000 - w) / 100}% ${PATTERN_NAMES[b] ?? b}`, `Плата ${rcr(cost)} (в пул наград и студии), залог ${rcr(stake)}`, ...(entangle ? [`Запутанность: ${worldName(entangle.world)} #${entangle.index} получит противоположную ветвь`] : [])],
+          danger: "Секрет сохранён только в этом браузере. Потеряете его — залог будет потерян (уйдёт в пул наград). Скачайте файл секрета после подтверждения.",
           ixs: [c.rx.quantumCommit(me, k, idx, cm, entangle)], successText: "Клетка в суперпозиции ψ — скачайте секрет",
         });
-      }}>Суперпозиция · {rcr(burn + stake)}</button>
+      }}>Суперпозиция · {rcr(cost + stake)}</button>
       {why && <div className="field-hint">{why}</div>}
     </div>
   );
@@ -194,13 +194,13 @@ function SuperpositionCard({ c, idx, sp }: { c: ChainCtx; idx: number; sp: Super
           const r = await c.run({ title: "Коллапс волновой функции", lines: [`Раскрытие коммита клетки #${idx}`, `Возврат залога ${rcr(sp.stake)}`], ixs: c.withAta([c.rx.quantumCollapse(me!, k, idx, secret.a, secret.b, secret.w, secret.salt, ent)]), successText: "Волновая функция коллапсировала" });
           if (r.ok) removeSecret(k.toBase58(), idx, me!.toBase58());
         }}><Art name="quantum" size={18} /> Коллапс</button>}
-        {decoherable && me && <button className="btn" onClick={() => c.run({ title: "Декогеренция", lines: ["Окно раскрытия истекло", `Награда: ${rcr(sp.stake / 20n)}, остаток залога сжигается`], ixs: c.withAta([c.rx.quantumDecohere(me, k, idx, sp.owner)]) })}>Декогеренция · +{rcr(sp.stake / 20n)}</button>}
+        {decoherable && me && <button className="btn" onClick={() => c.run({ title: "Декогеренция", lines: ["Окно раскрытия истекло", `Награда: ${rcr(sp.stake / 20n)}, остаток залога уходит в пул наград`], ixs: c.withAta([c.rx.quantumDecohere(me, k, idx, sp.owner)]) })}>Декогеренция · +{rcr(sp.stake / 20n)}</button>}
       </div>
       {isOwner && (
         <div className="row-wrap">
           {secret && <button className="btn" onClick={() => exportSecret(k.toBase58(), idx, me!.toBase58())}><Glyph name="download" size={15} /> Скачать секрет</button>}
           {!secret && <>
-            <span className="small danger-text">Секрета нет в этом браузере — импортируйте файл, иначе залог сгорит.</span>
+            <span className="small danger-text">Секрета нет в этом браузере — импортируйте файл, иначе залог будет потерян.</span>
             <button className="btn" onClick={() => file.current?.click()}><Glyph name="upload" size={15} /> Импорт секрета</button>
             <input ref={file} type="file" accept="application/json" hidden onChange={async (e) => {
               const f = e.target.files?.[0]; if (!f) return;
@@ -241,10 +241,10 @@ function SwapCard({ c, idx }: { c: ChainCtx; idx: number }) {
           <label className="field">Вероятность обмена p = {weight / 100}%
             <input type="range" min={500} max={10_000} step={500} value={weight} onChange={(e) => setWeight(Number(e.target.value))} aria-valuetext={`${weight / 100} процентов`} />
           </label>
-          <AmountField label="Премия принявшему" value={premium} onChange={setPremium} allowZero hint={`ожидаемый выигрыш: ${((gap * weight) / 10_000).toFixed(1)} живых клеток; сбор ${rcr(p.plantCost)} (80% сжигается)`} />
+          <AmountField label="Премия принявшему" value={premium} onChange={setPremium} allowZero hint={`ожидаемый выигрыш: ${((gap * weight) / 10_000).toFixed(1)} живых клеток; сбор ${rcr(p.plantCost)} (80% — плата: студии и в пул наград; 20% — резолверу)`} />
           <button className="btn portal" disabled={!!why} onClick={() => c.run({
             title: "Предложение квантового SWAP",
-            lines: [`«${c.cur!.acc.name}»: ваша #${a} ⇄ #${idx} (${shortAddr(t.holder!)})`, `Вероятность обмена ${weight / 100}%`, `Сбор ${rcr(p.plantCost)}: 80% сжигается, 20% — награда резолверу`, `Премия ${rcr(prem!)} — в эскроу, при отмене вернётся`],
+            lines: [`«${c.cur!.acc.name}»: ваша #${a} ⇄ #${idx} (${shortAddr(t.holder!)})`, `Вероятность обмена ${weight / 100}%`, `Сбор ${rcr(p.plantCost)}: 80% — плата (студии и в пул наград), 20% — награда резолверу`, `Премия ${rcr(prem!)} — в эскроу, при отмене вернётся`],
             ixs: [c.rx.swapOffer(me!, k, a, idx, weight, prem!)], successText: "SWAP предложен",
           })}>Предложить SWAP · {rcr(p.plantCost + (prem ?? 0n))}</button>
           {why && <div className="field-hint">{why}</div>}

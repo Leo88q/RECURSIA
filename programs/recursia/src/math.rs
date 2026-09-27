@@ -35,10 +35,11 @@ pub struct TickSplit {
     pub protocol: u64,
     pub host: u64,
     pub royalty: u64,
-    pub burn: u64,
+    /// Remainder → player reward pool (≥ MIN_TICK_POOL_BPS by `Params::validate`).
+    pub pool: u64,
 }
 
-/// Split a tick cost. All shares are floored; the burn takes the remainder,
+/// Split a tick cost. All shares are floored; the pool takes the remainder,
 /// so `sum == cost` exactly and rounding never favours a recipient (#15).
 pub fn split_tick(
     cost: u64,
@@ -53,8 +54,8 @@ pub fn split_tick(
     let host = if has_host { bps_floor(cost, host_bps as u64)? } else { 0 };
     let royalty = bps_floor(cost, royalty_bps as u64)?;
     let paid = add(add(add(cranker, protocol)?, host)?, royalty)?;
-    let burn = sub(cost, paid)?;
-    Ok(TickSplit { cranker, protocol, host, royalty, burn })
+    let pool = sub(cost, paid)?;
+    Ok(TickSplit { cranker, protocol, host, royalty, pool })
 }
 
 /// Harberger tax accrued over `elapsed` slots, rounded UP (in favour of the
@@ -84,25 +85,33 @@ pub fn epoch_tax(price: u64, rate_bps: u16) -> Result<u64> {
     u64::try_from(v).map_err(|_| RecursiaError::MathOverflow.into())
 }
 
+/// Split a player spend: `studio_bps` → treasury, remainder → reward pool.
+/// Returns `(studio, pool)`; `studio + pool == amount` exactly.
+pub fn split_spend(amount: u64, studio_bps: u16) -> Result<(u64, u64)> {
+    let studio = bps_floor(amount, studio_bps as u64)?;
+    Ok((studio, sub(amount, studio)?))
+}
+
 /// Emission a world may claim for the previous epoch:
-///   min( emission * burn_w / total_burn ,  burn_w * rebate_cap )
-/// Capped by the rebate so that burning tokens to farm emission is always
-/// net-negative, regardless of how many wallets/worlds an attacker controls.
+///   min( emission * sink_w / total_sink ,  sink_w * rebate_cap )
+/// `sink_w` counts only what the world paid INTO the pool (the studio share
+/// never comes back), so spending to farm emission always loses at least
+/// studio_bps + (1 − rebate_cap) of the spend, however many wallets are used.
 pub fn world_emission(
     emission: u64,
-    total_burn: u64,
-    burn_w: u64,
+    total_sink: u64,
+    sink_w: u64,
     rebate_cap_bps: u16,
     already_claimed: u64,
 ) -> Result<u64> {
-    if total_burn == 0 || burn_w == 0 || emission == 0 {
+    if total_sink == 0 || sink_w == 0 || emission == 0 {
         return Ok(0);
     }
     let pro_rata = (emission as u128)
-        .checked_mul(burn_w as u128)
+        .checked_mul(sink_w as u128)
         .ok_or(RecursiaError::MathOverflow)?
-        / total_burn as u128;
-    let cap = bps_floor(burn_w, rebate_cap_bps as u64)? as u128;
+        / total_sink as u128;
+    let cap = bps_floor(sink_w, rebate_cap_bps as u64)? as u128;
     let remaining = emission.saturating_sub(already_claimed) as u128;
     let v = pro_rata.min(cap).min(remaining);
     Ok(v as u64)
@@ -148,9 +157,20 @@ mod tests {
             for &(c, p, h, r) in &[(200, 1000, 1500, 500), (0, 0, 0, 0), (1, 1, 1, 1)] {
                 for host in [true, false] {
                     let s = split_tick(cost, c, p, h, r, host).unwrap();
-                    assert_eq!(s.cranker + s.protocol + s.host + s.royalty + s.burn, cost);
-                    assert!(s.burn >= cost * 3000 / 10_000 - 1);
+                    assert_eq!(s.cranker + s.protocol + s.host + s.royalty + s.pool, cost);
+                    assert!(s.pool >= cost * 3000 / 10_000 - 1);
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn spend_split_is_exact() {
+        for amount in [0u64, 1, 7, 350_000_000, u64::MAX / 10_000] {
+            for bps in [0u16, 1, 2_000, 2_500, 10_000] {
+                let (st, pl) = split_spend(amount, bps).unwrap();
+                assert_eq!(st + pl, amount);
+                assert!(st as u128 * 10_000 <= amount as u128 * bps as u128);
             }
         }
     }
@@ -167,17 +187,17 @@ mod tests {
     }
 
     #[test]
-    fn emission_cannot_exceed_burn() {
-        // attacker is the only burner: pro-rata would give them everything
+    fn emission_cannot_exceed_sink() {
+        // attacker is the only spender: pro-rata would give them everything
         let e = world_emission(1_000_000, 100, 100, 9_000, 0).unwrap();
         assert_eq!(e, 90);
-        // proportional when many burners
+        // proportional when many spenders
         let e = world_emission(1_000, 1_000_000, 500_000, 9_000, 0).unwrap();
         assert_eq!(e, 500);
         // never above remaining
         let e = world_emission(1_000, 1_000, 1_000, 10_000, 990).unwrap();
         assert_eq!(e, 10);
-        // property: reward <= burn * cap for many inputs
+        // property: reward <= sink * cap for many inputs
         let mut x = 7u64;
         for _ in 0..10_000 {
             x ^= x << 13;

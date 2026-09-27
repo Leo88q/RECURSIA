@@ -39,7 +39,7 @@ export function WorldTree({ sb, current, onPick }: { sb: Sandbox; current: strin
 }
 
 // ------------------------------------------------------------------ pattern editor
-export function PatternEditor({ world, idx, onPlant, disabledReason, cost = "5 RCR" }: { world: MWorld; idx: number; onPlant: (p: bigint) => void; disabledReason: string | null; cost?: string }) {
+export function PatternEditor({ world, idx, onPlant, disabledReason, cost = "5 SKR" }: { world: MWorld; idx: number; onPlant: (p: bigint) => void; disabledReason: string | null; cost?: string }) {
   const [cells, setCells] = useState<boolean[][]>(() => cellsFromPattern(PATTERNS.acorn));
   const pattern = patternFromCells(cells);
   const forecast = useMemo(() => quantumForecast(world, idx, pattern), [world, world.generation, idx, pattern]);
@@ -62,7 +62,7 @@ export function PatternEditor({ world, idx, onPlant, disabledReason, cost = "5 R
           {forecast.lo !== forecast.hi && <div className="muted small"><Art name="quantum" size={14} /> квантовый разброс: точное будущее не вычислимо до появления энтропии слота</div>}
         </div>
         <button className="btn primary" disabled={!!disabledReason} title={disabledReason ?? ""} onClick={() => onPlant(pattern)}>
-          Посадить жизнь · {cost} (сжигается)
+          Посадить жизнь · {cost}
         </button>
         {disabledReason && <div className="muted small">{disabledReason}</div>}
       </div>
@@ -98,7 +98,7 @@ export function QuantumCard({ sb, world, idx, notify }: { sb: Sandbox; world: MW
   for (const w of m.worlds.values()) if (w.id !== world.id) w.territories.forEach((t, i) => { if (t.holder === YOU) partners.push([w.id, i, `${w.name} #${i}`]); });
   const entangle = ent ? { world: ent.split("|")[0], index: Number(ent.split("|")[1]) } : undefined;
   const stake = m.quantumStake(!!entangle);
-  const burn = m.params.plantCost * (entangle ? 2n : 1n);
+  const cost = m.params.plantCost * (entangle ? 2n : 1n);
   const why = sp ? null : m.canQuantumCommit(YOU, world.id, idx, entangle ?? null);
 
   if (sp) {
@@ -116,10 +116,10 @@ export function QuantumCard({ sb, world, idx, notify }: { sb: Sandbox; world: MW
         {sp.observed && preview && secret && (
           <p className="small">
             Прогноз коллапса: ветвь <b>{preview.branchA ? "A" : "B"}</b>{preview.tunnel ? <> + <Art name="energy" size={16} /> туннелирование в соседнюю клетку</> : ""}.
-            {" "}Раскрыть нужно в течение {Math.max(0, left)} слотов, иначе ставка сгорит.
+            {" "}Раскрыть нужно в течение {Math.max(0, left)} слотов, иначе ставка будет потеряна.
           </p>
         )}
-        {!secret && <p className="small danger-text">Секрет утерян: раскрыть невозможно, ставка сгорит при декогеренции.</p>}
+        {!secret && <p className="small danger-text">Секрет утерян: раскрыть невозможно, ставка уйдёт в пул наград при декогеренции.</p>}
         <button className="btn portal" disabled={!sp.observed || !secret} onClick={() => notify(sb.collapse(world.id, idx), "Волновая функция коллапсировала")}><Art name="quantum" size={18} /> Коллапс</button>
         {!sp.observed && <div className="muted small">Измерение делает любой наблюдатель (Хранитель/ИИ) за {100 / 20}% ставки.</div>}
       </div>
@@ -145,9 +145,9 @@ export function QuantumCard({ sb, world, idx, notify }: { sb: Sandbox; world: MW
           {partners.map(([w, i, label]) => <option key={`${w}|${i}`} value={`${w}|${i}`}>{label}</option>)}
         </select>
       </label>
-      <div className="muted small">Сжигается {fmtRcr(burn)}, в залог {fmtRcr(stake)} (вернётся при раскрытии; не раскроете за {QUANTUM_REVEAL_SLOTS.toLocaleString("ru-RU")} слотов — сгорит).</div>
+      <div className="muted small">Плата {fmtRcr(cost)} ({m.params.protocolBps / 100}% — студии, остальное — в пул наград), в залог {fmtRcr(stake)} (вернётся при раскрытии; не раскроете за {QUANTUM_REVEAL_SLOTS.toLocaleString("ru-RU")} слотов — уйдёт в пул наград).</div>
       <button className="btn portal" disabled={!!why} title={why ?? ""} onClick={() => notify(sb.superpose(world.id, idx, PATTERNS[a], PATTERNS[b], weight, entangle), "Клетка в суперпозиции ψ")}>
-        Суперпозиция · {fmtRcr(burn + stake)}
+        Суперпозиция · {fmtRcr(cost + stake)}
       </button>
       {why && <div className="muted small">{why === "cooldown" ? "Перезарядка до следующего тика" : why}</div>}
     </div>
@@ -179,7 +179,7 @@ export function SwapCard({ sb, world, idx, notify }: { sb: Sandbox; world: MWorl
   const myBlocks = world.territories.map((x, i) => [x, i] as const).filter(([x]) => x.holder === YOU).map(([, i]) => i);
   const [from, setFrom] = useState<number>(myBlocks[0] ?? -1);
   const [weight, setWeight] = useState(3_000);
-  const [premium, setPremium] = useState("2");
+  const [premium, setPremium] = useState("140");
   const related = [...m.swaps.values()].filter((s) => s.world === world.id && (s.indexA === idx || s.indexB === idx));
   const foreign = !!t.holder && t.holder !== YOU;
   const a = myBlocks.includes(from) ? from : myBlocks[0] ?? -1;
@@ -206,7 +206,7 @@ export function SwapCard({ sb, world, idx, notify }: { sb: Sandbox; world: MWorl
             <input type="range" min={500} max={10_000} step={500} value={weight} onChange={(e) => setWeight(Number(e.target.value))} />
           </label>
           {a >= 0 && <div className="small">Ожидание: {ev >= 0 ? "+" : ""}{ev.toFixed(1)} живых клеток для вас (#{a}: {world.alive[a]} ⇄ #{idx}: {world.alive[idx]})</div>}
-          <div className="muted small">Сбор {fmtRcr(m.swapFee(), 2)}: 80% сжигается, 20% — награда тому, кто разрешит обмен.</div>
+          <div className="muted small">Сбор {fmtRcr(m.swapFee(), 2)}: 80% — плата (студии и в пул наград), 20% — награда тому, кто разрешит обмен.</div>
           <button className="btn portal" disabled={!!why} title={why ?? ""} onClick={() => notify(sb.act(() => m.swapOffer(YOU, world.id, a, idx, weight, prem)), "Предложение SWAP отправлено")}>
             Предложить SWAP · {fmtRcr(m.swapFee() + prem, 2)}
           </button>
@@ -230,8 +230,8 @@ export function TerritoryPanel({ sb, world, idx, onDescend, notify }: { sb: Sand
   const [price, setPrice] = useState(() => fromUnits(quote.price * 2n > m.params.minPrice ? quote.price * 2n : m.params.minPrice));
   const [childName, setChildName] = useState("Моя симуляция");
   const [childModule, setChildModule] = useState(0);
-  const [childEnergy, setChildEnergy] = useState("400");
-  const [topup, setTopup] = useState("20");
+  const [childEnergy, setChildEnergy] = useState("28000");
+  const [topup, setTopup] = useState("1400");
   const newPrice = toUnits(price);
   const deposit = sb.defaultDeposit(newPrice > 0n ? newPrice : m.params.minPrice);
   const taxPerEpoch = epochTax(t.price, m.params.harbergerBps);
@@ -268,7 +268,7 @@ export function TerritoryPanel({ sb, world, idx, onDescend, notify }: { sb: Sand
               ? `Владелец обязан продать по своей цене. Вы платите ${fmtRcr(quote.price)} — цена зафиксирована как лимит (защита от фронтраннинга).`
               : `Свободная клетка стоит ${fmtRcr(quote.price)} — уходит в энергию мира.`}
           </p>
-          <label className="field">Ваша новая цена (RCR)
+          <label className="field">Ваша новая цена (SKR)
             <input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" />
           </label>
           <div className="muted small">Депозит: {fmtRcr(deposit, 2)} (налог {sb.m.params.harbergerBps / 100}% цены за эпоху × 3). Выше цена — выше налог, но дороже выкупить у вас.</div>
@@ -299,14 +299,14 @@ export function TerritoryPanel({ sb, world, idx, onDescend, notify }: { sb: Sand
           {!t.childWorld && (
             <div className="card">
               <div className="card-title"><Art name="nested" size={20} />Запустить симуляцию внутри клетки</div>
-              <p className="muted small">Новая вселенная живёт, пока жива эта клетка. {m.params.hostBps / 100}% каждого её тика приходит вам как хосту. Стоимость: {fmtRcr(m.params.worldCreateFee)} (50% сжигается) + стартовая энергия.</p>
+              <p className="muted small">Новая вселенная живёт, пока жива эта клетка. {m.params.hostBps / 100}% каждого её тика приходит вам как хосту. Стоимость: {fmtRcr(m.params.worldCreateFee)} ({m.params.protocolBps / 100}% — студии, остальное — в пул наград) + стартовая энергия.</p>
               <label className="field">Название<input value={childName} maxLength={24} onChange={(e) => setChildName(e.target.value)} /></label>
               <label className="field">Законы физики
                 <select value={childModule} onChange={(e) => setChildModule(Number(e.target.value))}>
                   {m.modules.map((mod) => <option key={mod.id} value={mod.id}>{mod.name} · {ruleString(mod.birth, mod.survive, mod.qBirth, mod.qSurvive, mod.qAmp)} · роялти {mod.royaltyBps / 100}%</option>)}
                 </select>
               </label>
-              <label className="field">Стартовая энергия (RCR)<input value={childEnergy} onChange={(e) => setChildEnergy(e.target.value)} /></label>
+              <label className="field">Стартовая энергия (SKR)<input value={childEnergy} onChange={(e) => setChildEnergy(e.target.value)} /></label>
               <button className="btn portal" onClick={() => run(() => { const w = m.createChildWorld(YOU, world.id, idx, childName, childModule, 1_000, toUnits(childEnergy)); onDescend(w.id); }, "Вселенная создана")}>
                 <Art name="nested" size={20} /> Создать вселенную
               </button>
@@ -337,7 +337,7 @@ export function WorldPanel({ sb, world, notify }: { sb: Sandbox; world: MWorld; 
   const ai = world.territories.filter((t) => t.holder && (m.players.get(t.holder)?.isAgent || t.agent)).length;
   const status = m.canTick(world.id);
   const split = splitTick(m.params.tickCost, m.params.crankerBps, m.params.protocolBps, m.params.hostBps, mod.royaltyBps, !!world.parent);
-  const [fund, setFund] = useState("100");
+  const [fund, setFund] = useState("7000");
   const ticksLeft = world.energy / m.params.tickCost;
   return (
     <div className="panel-body">
@@ -352,7 +352,7 @@ export function WorldPanel({ sb, world, notify }: { sb: Sandbox; world: MWorld; 
         <dt>Жители</dt><dd>{owned}/64 клеток занято · {ai} у ИИ</dd>
         <dt>Энергия</dt><dd>{fmtRcr(world.energy)} <span className="muted">≈ {ticksLeft.toString()} тиков</span></dd>
         <dt>Статус</dt><dd>{status === null || status === "too early" ? "живёт" : status === "dormant" ? "спит — клетка-хост мертва" : status === "no energy" ? "заморожен — нет энергии" : status}</dd>
-        <dt>Сожжено миром</dt><dd>{fmtRcr(world.totalBurned)}</dd>
+        <dt>Вклад мира в пул наград</dt><dd>{fmtRcr(world.totalSunk)}</dd>
       </dl>
       {world.parent && (
         <div className="card">
@@ -364,7 +364,7 @@ export function WorldPanel({ sb, world, notify }: { sb: Sandbox; world: MWorld; 
       <div className="card">
         <div className="card-title"><Glyph name="flow" size={17} />Куда уходит каждый тик ({fmtRcr(m.params.tickCost)})</div>
         <SplitBar parts={[
-          ["сжигание", split.burn, "#ff6b8b"], ["протокол", split.protocol, "#7c8cff"], ["хост", split.host, "#b98cff"],
+          ["пул наград", split.pool, "#ff6b8b"], ["студия", split.protocol, "#7c8cff"], ["хост", split.host, "#b98cff"],
           ["автор физики", split.royalty, "#7cf7d4"], ["кранкер", split.cranker, "#ffd66b"],
         ]} total={m.params.tickCost} />
       </div>
@@ -401,9 +401,9 @@ export function WalletPanel({ sb, notify }: { sb: Sandbox; notify: (e: string | 
   const m = sb.m;
   const me = m.players.get(YOU)!;
   const [pers, setPers] = useState<Personality>("gardener");
-  const [budget, setBudget] = useState("500");
-  const [limit, setLimit] = useState("150");
-  const [maxPrice, setMaxPrice] = useState("60");
+  const [budget, setBudget] = useState("35000");
+  const [limit, setLimit] = useState("10500");
+  const [maxPrice, setMaxPrice] = useState("4200");
   const holdings: Array<[MWorld, number]> = [];
   for (const w of m.worlds.values()) w.territories.forEach((t, i) => { if (t.holder === YOU) holdings.push([w, i]); });
   const pending = holdings.reduce((a, [w, i]) => a + w.pending[i], 0n);
@@ -464,14 +464,13 @@ export function WalletPanel({ sb, notify }: { sb: Sandbox; notify: (e: string | 
 // ------------------------------------------------------------------ economy
 export function EconomyStrip({ sb }: { sb: Sandbox }) {
   const m = sb.m;
-  const total = 1_000_000_000n * ONE;
   return (
     <div className="econ">
       <Stat icon={<Glyph name="clock" size={18} className="gold" />} label="Эпоха" value={`${m.curEpoch}`} sub={`${Math.round(((m.slot - m.epochStart) / Number(m.params.epochSlots)) * 100)}%`} />
-      <Stat icon={<Glyph name="flame" size={18} className="rose" />} label="Сожжено" value={short(m.totalBurned)} sub={`${(Number((m.totalBurned * 1_000_000n) / total) / 10_000).toFixed(4)}% эмиссии`} />
-      <Stat icon={<Art name="coin" size={22} />} label="Выплачено эмиссии" value={short(m.totalEmitted)} sub="≤ 90% сожжённого" />
+      <Stat icon={<Glyph name="flow" size={18} className="rose" />} label="В пул наград" value={short(m.totalSunk)} sub={`${100 - m.params.protocolBps / 100}% трат игроков`} />
+      <Stat icon={<Art name="coin" size={22} />} label="Выплачено игрокам" value={short(m.totalEmitted)} sub={`${m.params.emissionRateBps / 100}% пула за эпоху`} />
       <Stat icon={<Art name="energy" size={22} />} label="Пул наград" value={short(m.rewardPool)} />
-      <Stat icon={<Glyph name="vault" size={18} className="violet" />} label="Казна" value={short(m.treasury)} sub="таймлок 48ч" />
+      <Stat icon={<Glyph name="vault" size={18} className="violet" />} label="Студия" value={short(m.treasury)} sub={`${m.params.protocolBps / 100}% трат`} />
       <Stat icon={<Art name="nested" size={22} />} label="Вселенных" value={`${m.worlds.size}`} sub={`глубина ${Math.max(...[...m.worlds.values()].map((w) => w.depth))}`} />
     </div>
   );

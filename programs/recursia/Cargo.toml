@@ -16,6 +16,8 @@ cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
+# Pins `initialize` to the official SKR mint. Always on for mainnet builds.
+mainnet = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 [dependencies]

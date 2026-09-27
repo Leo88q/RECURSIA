@@ -33,7 +33,7 @@ function CreateWorldModal({ c, kind, hostIndex, onClose }: { c: ChainCtx; kind: 
   const [mod, setMod] = useState(() => mods[0]?.key.toBase58() ?? "");
   const [name, setName] = useState(kind === "neutral" ? "Нейтральная зона" : kind === "child" ? "Карманная вселенная" : "Новый космос");
   const [fee, setFee] = useState(500);
-  const [energy, setEnergy] = useState("200");
+  const [energy, setEnergy] = useState("14000");
   const e = amountOf(energy, { min: p.tickCost });
   const nameErr = (() => { try { encodeName(name); return null; } catch { return "имя 1..32 байта"; } })();
   const m = mods.find((x) => x.key.toBase58() === mod);
@@ -50,7 +50,7 @@ function CreateWorldModal({ c, kind, hostIndex, onClose }: { c: ChainCtx; kind: 
         `«${name.trim()}» · физика «${m!.acc.name}» ${ruleString(m!.acc.birth, m!.acc.survive, m!.acc.qBirth, m!.acc.qSurvive, m!.acc.qAmp)}`,
         ...(kind === "neutral" ? ["Без архитектора, навсегда свободен; открыт рынок квантовых SWAP"] : [`Ваша комиссия архитектора: ${fee / 100}% с каждого тика`]),
         ...(kind === "child" ? [`Живёт внутри клетки #${hostIndex} мира «${c.cur!.acc.name}»; спит, если клетка-хост мертва`] : []),
-        `Сбор создания: ${rcr(p.worldCreateFee)} (${p.feeBurnBps / 100}% сжигается)`, `Стартовая энергия: ${rcr(e!)}`,
+        `Сбор создания: ${rcr(p.worldCreateFee)} (${p.protocolBps / 100}% — студии, остальное — в пул наград игроков)`, `Стартовая энергия: ${rcr(e!)}`,
         ...(m!.acc.royaltyBps > 0 ? [`Роялти автору законов: ${m!.acc.royaltyBps / 100}% тиков`] : []),
       ],
       ixs: [ix], successText: "Вселенная создана",

@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import http from "node:http";
 import { PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
-import { accountDiscriminator, DEFAULT_PARAMS, Pdas, PROGRAM_ID, Writer, writeParams, writePending, GRID, TERRITORIES } from "@recursia/sdk";
+import { accountDiscriminator, DEFAULT_PARAMS, Pdas, PROGRAM_ID, SKR_MINT, Writer, writeParams, writePending, GRID, TERRITORIES } from "@recursia/sdk";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 HTMLCanvasElement.prototype.getContext = (() => new Proxy({}, { get: (_t, k) => (k === "canvas" ? null : () => {}), set: () => true })) as any;
@@ -22,7 +22,7 @@ const pda = new Pdas(PROGRAM_ID);
 const D = PublicKey.default;
 const holder = new PublicKey("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
 function config(): Uint8Array {
-  const b = new B().raw(accountDiscriminator("Config")).u8(1).u8(255).u8(0).u8(0).u8(0).u8(0).pk(holder).pk(pda.mint()).bool(true).bool(false);
+  const b = new B().raw(accountDiscriminator("Config")).u8(1).u8(255).u8(0).u8(0).u8(0).pk(holder).pk(SKR_MINT).bool(false);
   const w = new Writer(); writeParams(w, DEFAULT_PARAMS); writePending(w, { kind: "None" } as any); b.raw(w.done());
   b.u64(0n).u64(0n); // eta, nonce
   b.u64(2n).u64(2n).u64(1n).u64(3n).u64(0n).u64(0n).u64(0n).u64(0n).u64(0n).u64(5_000_000_000n).u64(0n);

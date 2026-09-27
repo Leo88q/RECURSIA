@@ -9,7 +9,7 @@ import { DEFAULT_PARAMS, QUANTUM_BOUNTY_DIV, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL
 export const ACCOUNT_BYTES = {
   player: 62,
   territory: 160,
-  /** SPL token account: your RCR wallet (ATA), a world vault, an agent vault. */
+  /** SPL token account: your SKR wallet (ATA), a world vault, an agent vault. */
   tokenAccount: 165,
   superposition: 214,
   swap: 152,
@@ -28,7 +28,7 @@ export const SIGNATURE_LAMPORTS = 5_000;
 export const SLOT_SECONDS = 0.4;
 
 export interface EntryCost {
-  /** RCR base units */
+  /** SKR base units */
   claim: bigint; deposit: bigint; depositWeek: bigint; plant: bigint; minTotal: bigint; weekTotal: bigint;
   /** lamports */
   rentPlayer: number; rentTerritory: number; rentAta: number; fees: number; solMax: number;
@@ -68,12 +68,12 @@ export function priceList(p: Params = DEFAULT_PARAMS, fmt: (v: bigint) => string
     { what: "Занять свободную клетку", rcr: `${fmt(p.minPrice)} (в энергию мира) + депозит налога ≥ 1 эпохи`, sol: `до ${sol(rentLamports(ACCOUNT_BYTES.player) + rentLamports(ACCOUNT_BYTES.territory))} аренды`, back: "депозит — да (кроме налога за прошедшее время)" },
     { what: "Выкупить занятую клетку", rcr: "цена, объявленная владельцем + депозит налога ≥ 1 эпохи", sol: `до ${sol(rentLamports(ACCOUNT_BYTES.player))}`, back: "цена целиком уходит продавцу" },
     { what: "Налог Харбергера", rcr: `${pct(p.harbergerBps)} вашей цены за эпоху (≈ сутки)`, sol: "—", back: "нет: до 30% — архитектору мира, остальное — в энергию мира" },
-    { what: "Посадить узор 8×8", rcr: `${fmt(p.plantCost)}, сжигаются`, sol: "только комиссия сети", back: "нет" },
-    { what: "Суперпозиция (2 узора сразу)", rcr: `${fmt(p.plantCost)} сжигаются + залог ${fmt(stake)}`, sol: sol(rentLamports(ACCOUNT_BYTES.superposition)), back: `залог минус ${fmt(stake / QUANTUM_BOUNTY_DIV)} наблюдателю; аренда SOL — да` },
-    { what: "Запутанная пара клеток", rcr: `${fmt(p.plantCost * 2n)} сжигаются + залог ${fmt(stake * 2n)}`, sol: sol(rentLamports(ACCOUNT_BYTES.superposition)), back: "так же, как у суперпозиции" },
-    { what: "Предложить SWAP исходов", rcr: `сбор ${fmt(p.plantCost)} (${pct(10_000n - 10_000n / SWAP_BOUNTY_DIV)} сгорает) + премия (сколько решите)`, sol: sol(rentLamports(ACCOUNT_BYTES.swap)), back: "премия — при отмене; аренда SOL — да" },
-    { what: "Открыть дочерний или нейтральный мир", rcr: `${fmt(p.worldCreateFee)} (${pct(p.feeBurnBps)} сгорает) + стартовая энергия (тик стоит ${fmt(p.tickCost)})`, sol: sol(worldRent), back: "нет — мир остаётся в сети навсегда" },
-    { what: "Опубликовать закон физики", rcr: `${fmt(p.moduleRegisterFee)} (${pct(p.feeBurnBps)} сгорает)`, sol: sol(rentLamports(ACCOUNT_BYTES.module)), back: "нет, зато роялти до 5% с каждого тика" },
+    { what: "Посадить узор 8×8", rcr: `${fmt(p.plantCost)} (${pct(p.protocolBps)} — студии, остальное — в пул наград)`, sol: "только комиссия сети", back: "нет" },
+    { what: "Суперпозиция (2 узора сразу)", rcr: `${fmt(p.plantCost)} плата + залог ${fmt(stake)}`, sol: sol(rentLamports(ACCOUNT_BYTES.superposition)), back: `залог минус ${fmt(stake / QUANTUM_BOUNTY_DIV)} наблюдателю; аренда SOL — да` },
+    { what: "Запутанная пара клеток", rcr: `${fmt(p.plantCost * 2n)} плата + залог ${fmt(stake * 2n)}`, sol: sol(rentLamports(ACCOUNT_BYTES.superposition)), back: "так же, как у суперпозиции" },
+    { what: "Предложить SWAP исходов", rcr: `сбор ${fmt(p.plantCost)} (${pct(10_000n / SWAP_BOUNTY_DIV)} — резолверу, остальное — плата) + премия (сколько решите)`, sol: sol(rentLamports(ACCOUNT_BYTES.swap)), back: "премия — при отмене; аренда SOL — да" },
+    { what: "Открыть дочерний или нейтральный мир", rcr: `${fmt(p.worldCreateFee)} (${pct(p.protocolBps)} — студии, остальное — в пул наград) + стартовая энергия (тик стоит ${fmt(p.tickCost)})`, sol: sol(worldRent), back: "нет — мир остаётся в сети навсегда" },
+    { what: "Опубликовать закон физики", rcr: `${fmt(p.moduleRegisterFee)} (${pct(p.protocolBps)} — студии, остальное — в пул наград)`, sol: sol(rentLamports(ACCOUNT_BYTES.module)), back: "нет, зато роялти до 5% с каждого тика" },
     { what: "Нанять ИИ-жителя (доверенность)", rcr: "бюджет, который вы сами положите в хранилище агента", sol: sol(rentLamports(ACCOUNT_BYTES.permit) + rentLamports(ACCOUNT_BYTES.tokenAccount)), back: "остаток бюджета и аренда — при отзыве" },
     { what: "Тикнуть мир / наблюдать / разрешить SWAP", rcr: "бесплатно, это заработок", sol: "только комиссия сети", back: `вы получаете ${pct(p.crankerBps)} тика, 5% залога или 20% сбора SWAP` },
   ];
@@ -91,5 +91,8 @@ export function slotsHuman(slots: number | bigint): string {
 
 export const QUANTUM_TIMING = { delay: QUANTUM_DELAY_SLOTS, reveal: QUANTUM_REVEAL_SLOTS, swapTtl: SWAP_OFFER_TTL_SLOTS };
 
-/** Mint PDA ["mint"] of the default program id (verified against the derivation in test/costs.test.ts). */
-export const DEFAULT_MINT = "AvmXU1QhvV89JThqB4eqxTpJkHdvm9Lt9eTHrPFSz1Gu";
+/** SKR price used for the rough fiat estimate on the landing (Solscan, 27 Sep 2026). */
+export const SKR_USD_APPROX = 0.019;
+export const SKR_USD_DATE = "сентябрь 2026";
+/** Rough USD value of an SKR amount (base units), rounded to whole dollars. */
+export const usdApprox = (v: bigint) => Math.round((Number(v) / 1e6) * SKR_USD_APPROX);

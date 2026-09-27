@@ -72,7 +72,6 @@ pub struct CreateRootWorld<'info> {
     pub architect: Signer<'info>,
     #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
-    #[account(mut)]
     pub mint: Box<Account<'info, Mint>>,
     #[account(mut)]
     pub module: Box<Account<'info, PhysicsModule>>,
@@ -90,6 +89,9 @@ pub struct CreateRootWorld<'info> {
     pub architect_token: Box<Account<'info, TokenAccount>>,
     #[account(mut, seeds = [SEED_TREASURY], bump = config.treasury_bump)]
     pub treasury: Box<Account<'info, TokenAccount>>,
+    /// Player reward pool (SKR). Receives the non-studio part of every spend.
+    #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
+    pub reward_pool: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
@@ -131,6 +133,7 @@ fn create_root_inner(
         &ctx.accounts.architect_token.to_account_info(),
         &ctx.accounts.architect.to_account_info(),
         &ctx.accounts.treasury.to_account_info(),
+        &ctx.accounts.reward_pool.to_account_info(),
         &mut ctx.accounts.config,
         p.world_create_fee,
     )?;
@@ -184,20 +187,20 @@ fn create_root_inner(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn pay_creation_fee<'info>(
     tp: &AccountInfo<'info>,
     mint: &AccountInfo<'info>,
     from: &AccountInfo<'info>,
     auth: &AccountInfo<'info>,
     treasury: &AccountInfo<'info>,
+    reward_pool: &AccountInfo<'info>,
     config: &mut Config,
     fee: u64,
 ) -> Result<()> {
-    let burn = math::bps_floor(fee, config.params.fee_burn_bps as u64)?;
-    user_burn(tp, mint, from, auth, burn)?;
-    user_transfer(tp, mint, from, treasury, auth, math::sub(fee, burn)?)?;
-    config.total_burned = math::add(config.total_burned, burn)?;
-    Ok(())
+    let (studio, to_pool) = math::split_spend(fee, config.params.protocol_bps)?;
+    record_pool_inflow(config, to_pool)?;
+    user_spend(tp, mint, from, auth, treasury, reward_pool, studio, to_pool)
 }
 
 // ---------------------------------------------------------------- create child
@@ -212,7 +215,6 @@ pub struct CreateChildWorld<'info> {
     pub architect: Signer<'info>,
     #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
-    #[account(mut)]
     pub mint: Box<Account<'info, Mint>>,
     #[account(mut)]
     pub module: Box<Account<'info, PhysicsModule>>,
@@ -241,6 +243,9 @@ pub struct CreateChildWorld<'info> {
     pub architect_token: Box<Account<'info, TokenAccount>>,
     #[account(mut, seeds = [SEED_TREASURY], bump = config.treasury_bump)]
     pub treasury: Box<Account<'info, TokenAccount>>,
+    /// Player reward pool (SKR). Receives the non-studio part of every spend.
+    #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
+    pub reward_pool: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
@@ -277,6 +282,7 @@ pub fn create_child_world(
         &ctx.accounts.architect_token.to_account_info(),
         &ctx.accounts.architect.to_account_info(),
         &ctx.accounts.treasury.to_account_info(),
+        &ctx.accounts.reward_pool.to_account_info(),
         &mut ctx.accounts.config,
         p.world_create_fee,
     )?;
@@ -369,7 +375,6 @@ pub struct Tick<'info> {
     pub cranker: Signer<'info>,
     #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
-    #[account(mut)]
     pub mint: Box<Account<'info, Mint>>,
     #[account(mut)]
     pub world: Box<Account<'info, World>>,
@@ -388,6 +393,9 @@ pub struct Tick<'info> {
     pub host_world: Option<Box<Account<'info, World>>>,
     #[account(mut)]
     pub host_vault: Option<Box<Account<'info, TokenAccount>>>,
+    /// Player reward pool (SKR). Receives the non-studio part of every spend.
+    #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
+    pub reward_pool: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
     /// CHECK: address-pinned to the SlotHashes sysvar; parsed read-only by
     /// `quantum::slot_hash_lookup` (bounds-checked). Only used by quantum worlds.
@@ -473,7 +481,7 @@ pub fn tick(ctx: Context<Tick>) -> Result<()> {
         }
         (w.generation, pop)
     };
-    record_burn(&mut ctx.accounts.world, &mut ctx.accounts.config, split.burn)?;
+    record_sink(&mut ctx.accounts.world, &mut ctx.accounts.config, split.pool)?;
     let m = &mut ctx.accounts.module;
     m.accrued = math::add(m.accrued, split.royalty)?;
     if is_child {
@@ -499,7 +507,7 @@ pub fn tick(ctx: Context<Tick>) -> Result<()> {
         let hv = ctx.accounts.host_vault.as_ref().ok_or(RecursiaError::Mismatch)?;
         vault_transfer(&tp, &mint, &vault, &hv.to_account_info(), &cfg, config_bump, split.host)?;
     }
-    vault_burn(&tp, &mint, &vault, &cfg, config_bump, split.burn)?;
+    vault_transfer(&tp, &mint, &vault, &ctx.accounts.reward_pool.to_account_info(), &cfg, config_bump, split.pool)?;
 
     ctx.accounts.world_vault.reload()?;
     assert_world_solvent(&ctx.accounts.world, ctx.accounts.world_vault.amount)?;
@@ -513,7 +521,7 @@ pub fn tick(ctx: Context<Tick>) -> Result<()> {
         world: world_key,
         generation,
         population: pop,
-        burned: split.burn,
+        to_pool: split.pool,
         host_tax: split.host,
         royalty: split.royalty,
         cranker: ctx.accounts.cranker.key(),
@@ -550,8 +558,8 @@ pub fn claim_world_epoch(ctx: Context<ClaimWorldEpoch>) -> Result<()> {
     );
     let reward = math::world_emission(
         config_ro.prev_emission,
-        config_ro.prev_total_burn,
-        w.burn_prev,
+        config_ro.prev_total_sink,
+        w.sink_prev,
         config_ro.params.rebate_cap_bps,
         config_ro.prev_claimed,
     )?;

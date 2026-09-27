@@ -78,6 +78,8 @@ jobs:
         continue-on-error: true
       - name: clippy
         run: scripts/ci-run.sh clippy cargo clippy -p recursia --all-targets -- -D warnings -A clippy::result_large_err -A unexpected_cfgs
+      - name: clippy (mainnet feature — official SKR mint pin)
+        run: scripts/ci-run.sh clippy-mainnet cargo clippy -p recursia --features mainnet -- -D warnings -A clippy::result_large_err -A unexpected_cfgs
       - name: unit tests (engine, math, cross-impl vectors)
         run: scripts/ci-run.sh cargo-test cargo test -p recursia
       - uses: actions/upload-artifact@v4

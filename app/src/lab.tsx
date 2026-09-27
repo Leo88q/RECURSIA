@@ -15,7 +15,8 @@ export interface LabModule {
 interface Props {
   modules: LabModule[];
   fee: bigint;
-  feeBurnBps: number;
+  /** Studio share of the fee (rest → player reward pool). */
+  studioBps: number;
   fmt: (v: bigint) => string;
   /** returns an error text or null */
   onPublish: (law: Law, name: string) => Promise<string | null> | string | null;
@@ -32,7 +33,7 @@ const ROWS: Array<[keyof Law, string, string]> = [
 ];
 const VERDICT_CLASS: Record<string, string> = { "жизнь": "ok", "стазис": "meh", "хаос": "meh", "вымирание": "bad", "взрыв": "bad" };
 
-export function PhysicsLab({ modules, fee, feeBurnBps, fmt, onPublish, onClaim, onUse, note }: Props) {
+export function PhysicsLab({ modules, fee, studioBps, fmt, onPublish, onClaim, onUse, note }: Props) {
   const [law, setLaw] = useState<Law>({ birth: 1 << 3, survive: (1 << 2) | (1 << 3), qBirth: 1 << 6, qSurvive: 0, qAmp: 1, royaltyBps: 250 });
   const [name, setName] = useState("Моя физика");
   const [text, setText] = useState("");
@@ -117,7 +118,7 @@ export function PhysicsLab({ modules, fee, feeBurnBps, fmt, onPublish, onClaim, 
           <label className="field">Роялти автора: {(law.royaltyBps / 100).toFixed(1)}% каждого тика (неизменяемо)
             <input type="range" min={0} max={MAX_ROYALTY_BPS} step={25} value={law.royaltyBps} onChange={(e) => setLaw({ ...law, royaltyBps: Number(e.target.value) })} />
           </label>
-          <div className="muted small">Регистрация: {fmt(fee)} ({feeBurnBps / 100}% сжигается). Выше роялти — меньше остаётся мирам, и рынок это учтёт.</div>
+          <div className="muted small">Регистрация: {fmt(fee)} ({studioBps / 100}% — студии, остальное — в пул наград игроков). Выше роялти — меньше остаётся мирам, и рынок это учтёт.</div>
           {duplicate && <div className="small danger-text">Такой закон уже есть: «{duplicate.name}». Публикация разрешена, но конкурировать придётся ценой роялти.</div>}
           {nameErr && <div className="small danger-text">{nameErr}</div>}
           {note && <div className="muted small">{note}</div>}

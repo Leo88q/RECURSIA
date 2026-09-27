@@ -4,7 +4,7 @@ import { Buffer } from "buffer";
 import { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, TransactionInstruction, type AccountMeta } from "@solana/web3.js";
 import { type Params } from "./constants.js";
 import { ixDiscriminator, Writer, writeParams, writePending, type PendingAction, encodeName } from "./layout.js";
-import { ASSOCIATED_TOKEN_PROGRAM_ID, ata, Pdas, PROGRAM_ID, SYSVAR_SLOT_HASHES, TOKEN_PROGRAM_ID } from "./pda.js";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, ata, Pdas, PROGRAM_ID, SKR_MINT, SYSVAR_SLOT_HASHES, TOKEN_PROGRAM_ID } from "./pda.js";
 
 const W = (pubkey: PublicKey): AccountMeta => ({ pubkey, isSigner: false, isWritable: true });
 const R = (pubkey: PublicKey): AccountMeta => ({ pubkey, isSigner: false, isWritable: false });
@@ -12,7 +12,12 @@ const S = (pubkey: PublicKey, writable = false): AccountMeta => ({ pubkey, isSig
 
 export class RecursiaIx {
   readonly pda: Pdas;
-  constructor(readonly programId: PublicKey = PROGRAM_ID) { this.pda = new Pdas(programId); }
+  /**
+   * @param mint the game currency. Mainnet: always the official SKR mint (the
+   * program itself refuses anything else). Devnet/localnet: the test mint the
+   * deployment was initialised with — read it from the Config account.
+   */
+  constructor(readonly programId: PublicKey = PROGRAM_ID, readonly mint: PublicKey = SKR_MINT) { this.pda = new Pdas(programId); }
 
   /** Anchor encodes a `None` optional account as the program id itself. */
   private opt(k: PublicKey | null | undefined, writable = true): AccountMeta {
@@ -25,20 +30,19 @@ export class RecursiaIx {
     return new TransactionInstruction({ programId: this.programId, keys, data: Buffer.from(w.done()) });
   }
 
-  private get mint() { return this.pda.mint(); }
-
   // ------------------------------------------------------------ governance
   initialize(authority: PublicKey, admin: PublicKey, params: Params) {
     const p = this.pda;
     return this.ix("initialize", [
-      S(authority, true), R(this.programId), R(p.programData()), W(p.config()), W(p.mint()), W(p.treasury()),
+      S(authority, true), R(this.programId), R(p.programData()), W(p.config()), R(this.mint), W(p.treasury()),
       W(p.rewardPool()), W(p.claims()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId), R(SYSVAR_RENT_PUBKEY),
     ], (w) => { w.pubkey(admin); writeParams(w, params); });
   }
 
-  genesis(admin: PublicKey, distribution: PublicKey) {
+  /** Anyone may top up the player reward pool (it can only flow out as epoch emission). */
+  fundRewardPool(funder: PublicKey, amount: bigint) {
     const p = this.pda;
-    return this.ix("genesis", [S(admin), W(p.config()), W(p.mint()), W(p.treasury()), W(p.rewardPool()), W(distribution), R(TOKEN_PROGRAM_ID)]);
+    return this.ix("fund_reward_pool", [S(funder), R(p.config()), R(this.mint), W(p.rewardPool()), W(ata(funder, this.mint)), R(TOKEN_PROGRAM_ID)], (w) => w.u64(amount));
   }
 
   propose(admin: PublicKey, action: PendingAction) {
@@ -58,8 +62,8 @@ export class RecursiaIx {
   registerModule(author: PublicKey, moduleId: bigint, birth: number, survive: number, royaltyBps: number, name: string, q: { qBirth: number; qSurvive: number; qAmp: number } = { qBirth: 0, qSurvive: 0, qAmp: 0 }) {
     const p = this.pda;
     return this.ix("register_module", [
-      S(author, true), W(p.config()), W(this.mint), W(p.module(moduleId)), W(ata(author, this.mint)), W(p.treasury()),
-      R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
+      S(author, true), W(p.config()), R(this.mint), W(p.module(moduleId)), W(ata(author, this.mint)), W(p.treasury()),
+      W(p.rewardPool()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
     ], (w) => w.u16(birth).u16(survive).u16(royaltyBps).bytes(encodeName(name)).u16(q.qBirth).u16(q.qSurvive).u8(q.qAmp));
   }
   claimModuleRoyalties(author: PublicKey, module: PublicKey) {
@@ -73,8 +77,8 @@ export class RecursiaIx {
     return {
       world,
       ix: this.ix("create_root_world", [
-        S(architect, true), W(p.config()), W(this.mint), W(module), W(world), W(p.worldVault(world)),
-        W(ata(architect, this.mint)), W(p.treasury()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
+        S(architect, true), W(p.config()), R(this.mint), W(module), W(world), W(p.worldVault(world)),
+        W(ata(architect, this.mint)), W(p.treasury()), W(p.rewardPool()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
       ], (w) => w.u16(feeBps).bytes(encodeName(name)).u64(initialEnergy)),
     };
   }
@@ -86,8 +90,8 @@ export class RecursiaIx {
     return {
       world,
       ix: this.ix("create_neutral_world", [
-        S(creator, true), W(p.config()), W(this.mint), W(module), W(world), W(p.worldVault(world)),
-        W(ata(creator, this.mint)), W(p.treasury()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
+        S(creator, true), W(p.config()), R(this.mint), W(module), W(world), W(p.worldVault(world)),
+        W(ata(creator, this.mint)), W(p.treasury()), W(p.rewardPool()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
       ], (w) => w.bytes(encodeName(name)).u64(initialEnergy)),
     };
   }
@@ -98,8 +102,8 @@ export class RecursiaIx {
     return {
       world,
       ix: this.ix("create_child_world", [
-        S(architect, true), W(p.config()), W(this.mint), W(module), W(hostWorld), W(p.territory(hostWorld, hostTerritory)),
-        W(world), W(p.worldVault(world)), W(ata(architect, this.mint)), W(p.treasury()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
+        S(architect, true), W(p.config()), R(this.mint), W(module), W(hostWorld), W(p.territory(hostWorld, hostTerritory)),
+        W(world), W(p.worldVault(world)), W(ata(architect, this.mint)), W(p.treasury()), W(p.rewardPool()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
       ], (w) => w.u8(hostTerritory).u16(feeBps).bytes(encodeName(name)).u64(initialEnergy)),
     };
   }
@@ -112,8 +116,8 @@ export class RecursiaIx {
   tick(cranker: PublicKey, world: PublicKey, module: PublicKey, hostWorld?: PublicKey | null) {
     const p = this.pda;
     return this.ix("tick", [
-      S(cranker), W(p.config()), W(this.mint), W(world), W(p.worldVault(world)), W(module), W(p.treasury()), W(p.claims()),
-      W(ata(cranker, this.mint)), this.opt(hostWorld), this.opt(hostWorld ? p.worldVault(hostWorld) : null), R(TOKEN_PROGRAM_ID),
+      S(cranker), W(p.config()), R(this.mint), W(world), W(p.worldVault(world)), W(module), W(p.treasury()), W(p.claims()),
+      W(ata(cranker, this.mint)), this.opt(hostWorld), this.opt(hostWorld ? p.worldVault(hostWorld) : null), W(p.rewardPool()), R(TOKEN_PROGRAM_ID),
       R(SYSVAR_SLOT_HASHES),
     ]);
   }
@@ -124,10 +128,10 @@ export class RecursiaIx {
     const p = this.pda;
     if (commitment.length !== 32) throw new Error("commitment must be 32 bytes");
     return this.ix("quantum_commit", [
-      S(holder, true), W(p.config()), W(this.mint), W(world), W(p.worldVault(world)), W(p.territory(world, index)),
+      S(holder, true), W(p.config()), R(this.mint), W(world), W(p.worldVault(world)), W(p.territory(world, index)),
       W(p.superposition(world, index)), W(ata(holder, this.mint)),
       this.opt(entangle?.world), this.opt(entangle ? p.territory(entangle.world, entangle.index) : null),
-      R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
+      W(p.treasury()), W(p.rewardPool()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
     ], (w) => w.u8(index).bytes(commitment));
   }
 
@@ -135,8 +139,8 @@ export class RecursiaIx {
   quantumObserve(observer: PublicKey, world: PublicKey, index: number) {
     const p = this.pda;
     return this.ix("quantum_observe", [
-      S(observer), W(p.config()), W(this.mint), W(world), W(p.worldVault(world)), W(p.superposition(world, index)),
-      W(ata(observer, this.mint)), R(SYSVAR_SLOT_HASHES), R(TOKEN_PROGRAM_ID),
+      S(observer), W(p.config()), R(this.mint), W(world), W(p.worldVault(world)), W(p.superposition(world, index)),
+      W(ata(observer, this.mint)), R(SYSVAR_SLOT_HASHES), W(p.rewardPool()), R(TOKEN_PROGRAM_ID),
     ]);
   }
 
@@ -150,12 +154,12 @@ export class RecursiaIx {
     ], (w) => w.u64(a).u64(b).u16(weightBps).bytes(salt));
   }
 
-  /** Permissionless after the reveal window: stake burned, caller gets stake/20. */
+  /** Permissionless after the reveal window: stake → reward pool, caller gets stake/20. */
   quantumDecohere(caller: PublicKey, world: PublicKey, index: number, owner: PublicKey) {
     const p = this.pda;
     return this.ix("quantum_decohere", [
-      S(caller), W(p.config()), W(this.mint), W(world), W(p.worldVault(world)), W(p.superposition(world, index)),
-      W(owner), W(ata(caller, this.mint)), R(TOKEN_PROGRAM_ID),
+      S(caller), W(p.config()), R(this.mint), W(world), W(p.worldVault(world)), W(p.superposition(world, index)),
+      W(owner), W(ata(caller, this.mint)), W(p.rewardPool()), R(TOKEN_PROGRAM_ID),
     ]);
   }
 
@@ -164,9 +168,9 @@ export class RecursiaIx {
   swapOffer(offerer: PublicKey, world: PublicKey, a: number, b: number, weightBps: number, premium: bigint) {
     const p = this.pda;
     return this.ix("swap_offer", [
-      S(offerer, true), W(p.config()), W(this.mint), W(world), W(p.worldVault(world)),
+      S(offerer, true), W(p.config()), R(this.mint), W(world), W(p.worldVault(world)),
       R(p.territory(world, a)), R(p.territory(world, b)), W(p.swap(world, a, b)), W(p.player(offerer)),
-      W(ata(offerer, this.mint)), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
+      W(ata(offerer, this.mint)), W(p.treasury()), W(p.rewardPool()), R(TOKEN_PROGRAM_ID), R(SystemProgram.programId),
     ], (w) => w.u8(a).u8(b).u16(weightBps).u64(premium));
   }
 
@@ -235,7 +239,7 @@ export class RecursiaIx {
 
   plant(holder: PublicKey, world: PublicKey, index: number, pattern: bigint) {
     const p = this.pda;
-    return this.ix("plant", [S(holder), W(p.config()), W(this.mint), W(world), W(p.territory(world, index)), W(ata(holder, this.mint)), R(TOKEN_PROGRAM_ID)], (w) => w.u64(pattern));
+    return this.ix("plant", [S(holder), W(p.config()), R(this.mint), W(world), W(p.territory(world, index)), W(ata(holder, this.mint)), W(p.treasury()), W(p.rewardPool()), R(TOKEN_PROGRAM_ID)], (w) => w.u64(pattern));
   }
 
   settle(world: PublicKey, index: number, holder: PublicKey) {
@@ -279,7 +283,7 @@ export class RecursiaIx {
   agentPlant(agent: PublicKey, owner: PublicKey, world: PublicKey, index: number, pattern: bigint) {
     const p = this.pda;
     const permit = p.permit(owner, agent);
-    return this.ix("agent_plant", [S(agent), W(p.config()), W(this.mint), W(permit), W(p.permitVault(permit)), W(world), W(p.territory(world, index)), R(TOKEN_PROGRAM_ID)], (w) => w.u64(pattern));
+    return this.ix("agent_plant", [S(agent), W(p.config()), R(this.mint), W(permit), W(p.permitVault(permit)), W(world), W(p.territory(world, index)), W(p.treasury()), W(p.rewardPool()), R(TOKEN_PROGRAM_ID)], (w) => w.u64(pattern));
   }
 
   agentAcquire(agent: PublicKey, owner: PublicKey, world: PublicKey, index: number, currentHolder: PublicKey | null, maxPrice: bigint, newPrice: bigint, deposit: bigint) {

@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { PublicKey } from "@solana/web3.js";
-import { DEFAULT_PARAMS, ONE, PROGRAM_ID_STR, WORLD_SPACE } from "@recursia/sdk";
-import { ACCOUNT_BYTES, DEFAULT_MINT, entryCost, priceList, rentLamports, slotsHuman } from "../src/lib/costs";
+import { DEFAULT_PARAMS, ONE, SKR_MINT_STR, WORLD_SPACE } from "@recursia/sdk";
+import { ACCOUNT_BYTES, SKR_USD_APPROX, entryCost, usdApprox, priceList, rentLamports, slotsHuman } from "../src/lib/costs";
+import { CONFIG } from "../src/lib/config";
 
 describe("entry cost (landing numbers)", () => {
   it("matches the on-chain defaults", () => {
     const c = entryCost();
-    expect(c.claim).toBe(10n * ONE);
-    expect(c.deposit).toBe(50_000n); // 0.05 RCR = 0.5% of 10 RCR per epoch
-    expect(c.plant).toBe(5n * ONE);
-    expect(c.minTotal).toBe(15_050_000n);
-    expect(c.weekTotal).toBe(15_350_000n);
+    expect(c.claim).toBe(700n * ONE);
+    expect(c.deposit).toBe(3_500_000n); // 3.5 SKR = 0.5% of 700 SKR per epoch
+    expect(c.plant).toBe(350n * ONE);
+    expect(c.minTotal).toBe(1_053_500_000n);
+    expect(c.weekTotal).toBe(1_074_500_000n);
+    // the user's target: a ~$20 minimum entry at the SKR price of the time
+    expect(usdApprox(c.minTotal)).toBe(20);
   });
   it("rent matches Solana's rent-exempt minimum for the program's accounts", () => {
     expect(rentLamports(0)).toBe(890_880); // well-known 0-byte minimum
@@ -34,8 +36,10 @@ describe("entry cost (landing numbers)", () => {
     expect(rows.map((r) => r.what).join("|")).toMatch(/клетку.*Посадить.*Суперпозиция.*SWAP.*мир.*закон.*ИИ/s);
     for (const r of rows) expect(r.rcr && r.sol && r.back).toBeTruthy();
   });
-  it("mint shown on the landing is the program's mint PDA", () => {
-    expect(PublicKey.findProgramAddressSync([new TextEncoder().encode("mint")], new PublicKey(PROGRAM_ID_STR))[0].toBase58()).toBe(DEFAULT_MINT);
+  it("the game token is the official Solana Mobile SKR mint", () => {
+    expect(SKR_MINT_STR).toBe("SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3");
+    expect(CONFIG.mint).toBe(SKR_MINT_STR);
+    expect(SKR_USD_APPROX).toBeGreaterThan(0);
   });
   it("durations", () => {
     expect(slotsHuman(150)).toBe("≈1 мин");

@@ -66,10 +66,10 @@ export default function Game({ route, go, headerSlot }: {
       {route.page === "lab" && (
         <main id="main" tabIndex={-1}>
           <PhysicsLab
-            modules={sb.labModules()} fee={sb.m.params.moduleRegisterFee} feeBurnBps={sb.m.params.feeBurnBps} fmt={(v) => fmtRcr(v, 2)}
+            modules={sb.labModules()} fee={sb.m.params.moduleRegisterFee} studioBps={sb.m.params.protocolBps} fmt={(v) => fmtRcr(v, 2)}
             onPublish={(law, name) => { const e = sb.publishLaw(law, name); bump(); return e; }}
             onClaim={(id) => { notify(sb.act(() => { sb.m.claimModuleRoyalties(YOU, id); }), "Роялти перенесены к выводу (Кошелёк → Вывести)"); bump(); }}
-            note="Песочница: публикация тратит тестовые RCR. ИИ-демиурги начнут использовать ваш закон, если он жизнеспособен."
+            note="Песочница: публикация тратит тестовые SKR. ИИ-демиурги начнут использовать ваш закон, если он жизнеспособен."
           />
         </main>
       )}

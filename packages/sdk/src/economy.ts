@@ -4,16 +4,22 @@ import { BPS, TERRITORIES } from "./constants.js";
 export const bpsFloor = (amount: bigint, bps: number | bigint) => (amount * BigInt(bps)) / BPS;
 const divCeil = (a: bigint, b: bigint) => (a + b - 1n) / b;
 
-export interface TickSplit { cranker: bigint; protocol: bigint; host: bigint; royalty: bigint; burn: bigint }
+export interface TickSplit { cranker: bigint; protocol: bigint; host: bigint; royalty: bigint; pool: bigint }
 
 export function splitTick(cost: bigint, crankerBps: number, protocolBps: number, hostBps: number, royaltyBps: number, hasHost: boolean): TickSplit {
   const cranker = bpsFloor(cost, crankerBps);
   const protocol = bpsFloor(cost, protocolBps);
   const host = hasHost ? bpsFloor(cost, hostBps) : 0n;
   const royalty = bpsFloor(cost, royaltyBps);
-  const burn = cost - cranker - protocol - host - royalty;
-  if (burn < 0n) throw new Error("split overflow");
-  return { cranker, protocol, host, royalty, burn };
+  const pool = cost - cranker - protocol - host - royalty;
+  if (pool < 0n) throw new Error("split overflow");
+  return { cranker, protocol, host, royalty, pool };
+}
+
+/** Player spend split: `studioBps` → studio treasury, remainder → player reward pool. */
+export function splitSpend(amount: bigint, studioBps: number): { studio: bigint; pool: bigint } {
+  const studio = bpsFloor(amount, studioBps);
+  return { studio, pool: amount - studio };
 }
 
 export function harbergerDue(price: bigint, rateBps: number, elapsed: bigint, epochSlots: bigint): bigint {
@@ -23,10 +29,10 @@ export function harbergerDue(price: bigint, rateBps: number, elapsed: bigint, ep
 
 export const epochTax = (price: bigint, rateBps: number) => divCeil(price * BigInt(rateBps), BPS);
 
-export function worldEmission(emission: bigint, totalBurn: bigint, burnW: bigint, rebateCapBps: number, alreadyClaimed: bigint): bigint {
-  if (totalBurn === 0n || burnW === 0n || emission === 0n) return 0n;
-  const proRata = (emission * burnW) / totalBurn;
-  const cap = bpsFloor(burnW, rebateCapBps);
+export function worldEmission(emission: bigint, totalSink: bigint, sinkW: bigint, rebateCapBps: number, alreadyClaimed: bigint): bigint {
+  if (totalSink === 0n || sinkW === 0n || emission === 0n) return 0n;
+  const proRata = (emission * sinkW) / totalSink;
+  const cap = bpsFloor(sinkW, rebateCapBps);
   const remaining = emission > alreadyClaimed ? emission - alreadyClaimed : 0n;
   return [proRata, cap, remaining].reduce((a, b) => (a < b ? a : b));
 }

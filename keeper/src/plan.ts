@@ -82,15 +82,14 @@ const isDefault = (k: PublicKey) => k.toBytes().every((b) => b === 0);
 
 /** Can this world's epoch window be claimed right now (mirrors roll_world_epoch + claim checks)? */
 export function claimable(w: WorldAccount, curEpoch: bigint): boolean {
-  if (w.epochId + 1n === curEpoch) return w.burnCur > 0n; // will roll into prev on-chain
-  if (w.epochId === curEpoch) return w.prevEpochId + 1n === curEpoch && !w.prevClaimed && w.burnPrev > 0n;
+  if (w.epochId + 1n === curEpoch) return w.sinkCur > 0n; // will roll into prev on-chain
+  if (w.epochId === curEpoch) return w.prevEpochId + 1n === curEpoch && !w.prevClaimed && w.sinkPrev > 0n;
   return false; // skipped ≥1 epoch: window is forfeited
 }
 
 export function plan(s: Snapshot, limits: PlanLimits = DEFAULT_LIMITS): Action[] {
   const out: Action[] = [];
   const c = s.config;
-  if (!c.genesisDone) return out;
   if (c.paused) return planQuantum(s, limits); // only settlement is crankable while paused
 
   const p = c.params;

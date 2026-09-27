@@ -5,6 +5,7 @@ import { PublicKey, type TransactionInstruction } from "@solana/web3.js";
 import { RecursiaIx, ruleString, type WorldAccount } from "@recursia/sdk";
 import { WorldCanvas } from "../WorldCanvas";
 import { CONFIG, CLUSTER_LABEL } from "../lib/config";
+import { MINT } from "./mint";
 import { compact, shortAddr } from "../lib/format";
 import type { Route } from "../lib/route";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
@@ -28,7 +29,7 @@ export function ChainView({ route, go }: { route: Extract<Route, { page: "chain"
   const { connection } = useConnection();
   const wallet = useWallet();
   const programId = useMemo(() => new PublicKey(CONFIG.programId), []);
-  const rx = useMemo(() => new RecursiaIx(programId), [programId]);
+  const rx = useMemo(() => new RecursiaIx(programId, MINT), [programId]);
   const data = useProgramData(connection, programId);
   const me = wallet.publicKey;
   const my = useMyData(connection, programId, me);
@@ -77,8 +78,19 @@ export function ChainView({ route, go }: { route: Extract<Route, { page: "chain"
           <summary>Технические детали (для операторов)</summary>
           {data.error && <p className="sim bad small">{data.error}</p>}
           <p className="small">Кластер: <b>{CLUSTER_LABEL[CONFIG.cluster]}</b><br />RPC: <code>{new URL(CONFIG.rpcUrl).host}</code><br />Program ID: <code>{CONFIG.programId}</code></p>
-          <p className="small muted">Развёртывание: <code>docs/DEPLOY.md</code> (мультисиг Squads как админ → <code>initialize</code> → <code>genesis</code>), переменные <code>VITE_PROGRAM_ID</code> / <code>VITE_RPC_URL</code> / <code>VITE_CLUSTER</code>.</p>
+          <p className="small muted">Развёртывание: <code>docs/DEPLOY.md</code> (мультисиг Squads как админ → <code>initialize</code> с mint SKR → <code>fund_reward_pool</code>), переменные <code>VITE_PROGRAM_ID</code> / <code>VITE_MINT</code> / <code>VITE_RPC_URL</code> / <code>VITE_CLUSTER</code>.</p>
         </details>
+      </div>
+    </div>
+  );
+
+  // Checklist: never sign against a contract bound to a different token (fake "SKR" with the same name).
+  if (!data.config.mint.equals(MINT)) return (
+    <div className="chain-empty art-screen" role="alert">
+      <div className="art-screen-body">
+        <h2><Art name="coin" size={30} />Контракт настроен на другой токен</h2>
+        <p>Программа {CONFIG.programId} работает с mint <code>{data.config.mint.toBase58()}</code>, а этот клиент — с <code>{MINT.toBase58()}</code>. Действия отключены, чтобы вы не подписали транзакцию с поддельным токеном.</p>
+        <a className="btn primary" href="#/play"><Art name="world" size={20} /> Играть в песочнице</a>
       </div>
     </div>
   );
@@ -110,7 +122,7 @@ export function ChainView({ route, go }: { route: Extract<Route, { page: "chain"
               superposed={[...detail.superpositions.keys()]} youKey={me?.toBase58()} />
             <div className="controls">
               <span className="muted small mono">{ruleString(cur.acc.birth, cur.acc.survive, cur.acc.qBirth, cur.acc.qSurvive, cur.acc.qAmp)}</span>
-              <span className="muted small">поколение {cur.acc.generation.toLocaleString("ru-RU")} · энергия {compact(cur.acc.energy)} RCR · слот {data.slot.toLocaleString("ru-RU")}</span>
+              <span className="muted small">поколение {cur.acc.generation.toLocaleString("ru-RU")} · энергия {compact(cur.acc.energy)} SKR · слот {data.slot.toLocaleString("ru-RU")}</span>
               {detail.loading && <Spinner label="Загрузка клеток" />}
             </div>
           </>
@@ -146,7 +158,7 @@ function ProtocolStatus({ c }: { c: ChainCtx }) {
   const cfg = c.config;
   return (
     <div className="proto">
-      <div className="muted small">Эпоха {cfg.curEpoch.toString()} · миров {cfg.totalWorlds.toString()} · сожжено {compact(cfg.totalBurned)} RCR</div>
+      <div className="muted small">Эпоха {cfg.curEpoch.toString()} · миров {cfg.totalWorlds.toString()} · в пул наград пришло {compact(cfg.totalSunk)} SKR</div>
       {cfg.paused && <div className="sim bad small" role="status">Протокол на паузе: новые действия недоступны, вывод средств работает.</div>}
       {cfg.pending.kind !== "None" && <div className="card danger-card small">Ожидает таймлока: <b>{cfg.pending.kind}</b> · не раньше {new Date(Number(cfg.pendingEta) * 1000).toLocaleString("ru-RU")}</div>}
       {c.data.error && <div className="sim bad small">RPC: {c.data.error}</div>}

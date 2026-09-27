@@ -20,10 +20,10 @@ export function toModel(key: PublicKey, w: WorldAccount, terr: Map<number, Terri
         votedRebellion: t?.votedRebellion ?? 0, agent: t?.agentManaged ?? false, childWorld: t && !t.childWorld.equals(def) ? t.childWorld.toBase58() : null,
       };
     }),
-    epochId: Number(w.epochId), burnCur: w.burnCur, scoresCur: w.scoresCur, prevEpochId: Number(w.prevEpochId), burnPrev: w.burnPrev,
+    epochId: Number(w.epochId), sinkCur: w.sinkCur, scoresCur: w.scoresCur, prevEpochId: Number(w.prevEpochId), sinkPrev: w.sinkPrev,
     scoresPrev: w.scoresPrev, prevClaimed: w.prevClaimed, resonance: w.resonance, children: [], rebellionId: w.rebellionId,
     rebellionVotes: w.rebellionVotes, rebellionDeadline: Number(w.rebellionDeadline), lastRebellionSlot: Number(w.lastRebellionSlot),
-    liberated: w.liberated, totalBurned: w.totalBurned, history: [],
+    liberated: w.liberated, totalSunk: w.totalSunk, history: [],
     key: key.toBytes(), qBirth: w.qBirth, qSurvive: w.qSurvive, qAmp: w.qAmp,
     entropy: w.entropy.some((b) => b !== 0) ? w.entropy : null, quantumEscrow: w.quantumEscrow, superpositions: w.superpositions,
     neutral: w.neutral,

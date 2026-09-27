@@ -9,6 +9,7 @@
  *   RPC_URL                 https RPC endpoint (required)
  *   KEEPER_KEYPAIR          path to a JSON keypair file (required, chmod 600)
  *   PROGRAM_ID              optional override of the program id
+ *   MINT                    game currency mint (default: official SKR; devnet test mint otherwise)
  *   INTERVAL_MS             round interval, default 4000
  *   MAX_PRIORITY_MICROLAMPORTS  priority-fee cap per CU, default 5000
  *   MIN_SOL                 stop when balance falls below, default 0.05
@@ -27,7 +28,7 @@ import {
 } from "@solana/web3.js";
 import bs58 from "bs58";
 import {
-  ASSOCIATED_TOKEN_PROGRAM_ID, PROGRAM_ID, RecursiaIx, accountDiscriminator,
+  ASSOCIATED_TOKEN_PROGRAM_ID, PROGRAM_ID, RecursiaIx, SKR_MINT, accountDiscriminator,
   decodeConfig, decodeSuperposition, decodeSwap, decodeTerritory, decodeWorld,
 } from "@recursia/sdk";
 import { DEFAULT_LIMITS, crankIncome, plan, type Snapshot } from "./plan.js";
@@ -47,6 +48,8 @@ if (!/^https:\/\//.test(RPC_URL) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?/
   console.error("RPC_URL must be https (or localhost)"); process.exit(2);
 }
 const programId = new PublicKey(env("PROGRAM_ID", PROGRAM_ID.toBase58()));
+/** Game currency. Mainnet: the official SKR mint; devnet/localnet: the deployment's test mint. */
+const MINT = new PublicKey(env("MINT", SKR_MINT.toBase58()));
 const INTERVAL = Number(env("INTERVAL_MS", "4000"));
 const MAX_PRIO = Number(env("MAX_PRIORITY_MICROLAMPORTS", "5000"));
 const MIN_LAMPORTS = Math.round(Number(env("MIN_SOL", "0.05")) * 1e9);
@@ -119,7 +122,7 @@ async function send(conn: Connection, payer: Keypair, ixs: TransactionInstructio
 async function main() {
   const payer = loadKeypair(env("KEEPER_KEYPAIR"));
   const conn = new Connection(RPC_URL, "confirmed");
-  const rx = new RecursiaIx(programId);
+  const rx = new RecursiaIx(programId, MINT);
   const prog = await conn.getAccountInfo(programId);
   if (!prog?.executable) throw new Error(`program ${programId.toBase58()} not deployed on this cluster`);
 
@@ -133,6 +136,8 @@ async function main() {
   process.on("exit", release);
 
   console.log(`keeper ${payer.publicKey.toBase58()} → ${programId.toBase58()}${DRY ? " (dry-run)" : ""}`);
+  const cfg0 = await snapshot(conn, rx);
+  if (!cfg0.config.mint.equals(MINT)) throw new Error(`program is configured for mint ${cfg0.config.mint.toBase58()}, keeper for ${MINT.toBase58()} — set MINT`);
   await send(conn, payer, [rx.createAtaIdempotent(payer.publicKey, payer.publicKey)], "ensure cranker ATA", 0);
 
   let backoff = INTERVAL;

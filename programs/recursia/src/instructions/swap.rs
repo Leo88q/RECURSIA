@@ -2,7 +2,7 @@
 //!
 //!  1. `swap_offer`   — holder of block A offers holder of block B a SWAP with
 //!     probability `w`. Pays a premium (escrowed) + an offer fee (= plant_cost:
-//!     4/5 burned, 1/5 escrowed as the resolver bounty).
+//!     4/5 is a player spend — studio share + reward pool, 1/5 escrowed as the resolver bounty).
 //!  2. `swap_accept`  — holder of B accepts; the measurement slot is fixed NOW
 //!     (`slot + QUANTUM_DELAY_SLOTS`), before its hash exists.
 //!  3. `swap_resolve` — permissionless after the target slot. roll =
@@ -47,7 +47,6 @@ pub struct SwapOffer<'info> {
     pub offerer: Signer<'info>,
     #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
-    #[account(mut)]
     pub mint: Box<Account<'info, Mint>>,
     #[account(mut)]
     pub world: Box<Account<'info, World>>,
@@ -73,6 +72,12 @@ pub struct SwapOffer<'info> {
     pub offerer_player: Box<Account<'info, Player>>,
     #[account(mut, token::mint = mint, token::authority = offerer)]
     pub offerer_token: Box<Account<'info, TokenAccount>>,
+    /// Studio treasury (SKR): `protocol_bps` of every player spend.
+    #[account(mut, seeds = [SEED_TREASURY], bump = config.treasury_bump)]
+    pub treasury: Box<Account<'info, TokenAccount>>,
+    /// Player reward pool (SKR). Receives the non-studio part of every spend.
+    #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
+    pub reward_pool: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
@@ -94,7 +99,7 @@ pub fn swap_offer(ctx: Context<SwapOffer>, index_a: u8, index_b: u8, weight_bps:
     require_keys_neq!(acceptor, offerer, RecursiaError::SelfSwap);
     let fee = p.plant_cost;
     let bounty = fee / SWAP_BOUNTY_DIV;
-    let burn = math::sub(fee, bounty)?;
+    let (studio, to_pool) = math::split_spend(math::sub(fee, bounty)?, p.protocol_bps)?;
     let escrow = math::add(premium, bounty)?;
 
     // ---- effects
@@ -109,7 +114,7 @@ pub fn swap_offer(ctx: Context<SwapOffer>, index_a: u8, index_b: u8, weight_bps:
     {
         let snapshot = Config::clone(&ctx.accounts.config);
         roll_world_epoch(&mut ctx.accounts.world, &snapshot);
-        record_burn(&mut ctx.accounts.world, &mut ctx.accounts.config, burn)?;
+        record_sink(&mut ctx.accounts.world, &mut ctx.accounts.config, to_pool)?;
         let w = &mut ctx.accounts.world;
         w.quantum_escrow = math::add(w.quantum_escrow, escrow)?;
     }
@@ -132,7 +137,11 @@ pub fn swap_offer(ctx: Context<SwapOffer>, index_a: u8, index_b: u8, weight_bps:
     let mint = ctx.accounts.mint.to_account_info();
     let from = ctx.accounts.offerer_token.to_account_info();
     let auth = ctx.accounts.offerer.to_account_info();
-    user_burn(&tp, &mint, &from, &auth, burn)?;
+    user_spend(
+        &tp, &mint, &from, &auth,
+        &ctx.accounts.treasury.to_account_info(), &ctx.accounts.reward_pool.to_account_info(),
+        studio, to_pool,
+    )?;
     user_transfer(&tp, &mint, &from, &ctx.accounts.world_vault.to_account_info(), &auth, escrow)?;
     ctx.accounts.world_vault.reload()?;
     assert_world_solvent(&ctx.accounts.world, ctx.accounts.world_vault.amount)?;
@@ -230,7 +239,6 @@ pub struct SwapResolve<'info> {
 
 /// Works while paused: it settles positions that were already agreed.
 pub fn swap_resolve(ctx: Context<SwapResolve>) -> Result<()> {
-    require!(ctx.accounts.config.genesis_done, RecursiaError::GenesisPending);
     let slot = Clock::get()?.slot;
     let s = QuantumSwap::clone(&ctx.accounts.swap);
     let swap_key = ctx.accounts.swap.key();

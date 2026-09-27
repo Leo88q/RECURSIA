@@ -1,6 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::spl_token::instruction::AuthorityType;
-use anchor_spl::token::{self, Mint, MintTo, SetAuthority, Token, TokenAccount};
+use anchor_spl::token::{Mint, Token, TokenAccount};
 
 use crate::constants::*;
 use crate::errors::RecursiaError;
@@ -24,9 +23,13 @@ pub struct Initialize<'info> {
     pub program_data: Account<'info, ProgramData>,
     #[account(init, payer = authority, space = 8 + Config::INIT_SPACE, seeds = [SEED_CONFIG], bump)]
     pub config: Box<Account<'info, Config>>,
-    /// Program-owned mint. No freeze authority from birth; mint authority is
-    /// revoked in `genesis`.
-    #[account(init, payer = authority, seeds = [SEED_MINT], bump, mint::decimals = DECIMALS, mint::authority = config)]
+    /// The SKR mint (external, classic SPL Token — `Account<Mint>` enforces
+    /// the Tokenkeg owner, so Token-2022 extensions can't sneak in, #12).
+    /// No freeze authority: nobody can freeze the game's vaults (#11).
+    #[account(
+        constraint = mint.decimals == DECIMALS @ RecursiaError::BadMint,
+        constraint = mint.freeze_authority.is_none() @ RecursiaError::BadMint,
+    )]
     pub mint: Box<Account<'info, Mint>>,
     #[account(init, payer = authority, seeds = [SEED_TREASURY], bump, token::mint = mint, token::authority = config)]
     pub treasury: Box<Account<'info, TokenAccount>>,
@@ -40,18 +43,19 @@ pub struct Initialize<'info> {
 }
 
 pub fn initialize(ctx: Context<Initialize>, admin: Pubkey, params: Params) -> Result<()> {
+    // Mainnet builds accept only the official SKR mint (counterfeits exist).
+    #[cfg(feature = "mainnet")]
+    require_keys_eq!(ctx.accounts.mint.key(), SKR_MINT, RecursiaError::BadMint);
     params.validate()?;
     require!(admin != Pubkey::default(), RecursiaError::Unauthorized);
     let c = &mut ctx.accounts.config;
     c.version = ACCOUNT_VERSION;
     c.bump = ctx.bumps.config;
-    c.mint_bump = ctx.bumps.mint;
     c.treasury_bump = ctx.bumps.treasury;
     c.reward_pool_bump = ctx.bumps.reward_pool;
     c.claims_bump = ctx.bumps.claims_vault;
     c.admin = admin;
     c.mint = ctx.accounts.mint.key();
-    c.genesis_done = false;
     c.paused = false;
     c.params = params;
     c.pending = PendingAction::None;
@@ -62,68 +66,35 @@ pub fn initialize(ctx: Context<Initialize>, admin: Pubkey, params: Params) -> Re
     Ok(())
 }
 
-// ---------------------------------------------------------------- genesis
+// ---------------------------------------------------------------- reward pool
 
+/// Anyone (studio, partners, sponsors) may top up the player reward pool.
+/// SKR sent here can never be withdrawn by the admin: the only way out of the
+/// pool is epoch emission to worlds (checklist #10/#53).
 #[derive(Accounts)]
-pub struct Genesis<'info> {
-    pub admin: Signer<'info>,
-    #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = admin, has_one = mint)]
+pub struct FundRewardPool<'info> {
+    pub funder: Signer<'info>,
+    #[account(seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
-    #[account(mut, seeds = [SEED_MINT], bump = config.mint_bump)]
     pub mint: Box<Account<'info, Mint>>,
-    #[account(mut, seeds = [SEED_TREASURY], bump = config.treasury_bump)]
-    pub treasury: Box<Account<'info, TokenAccount>>,
     #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
     pub reward_pool: Box<Account<'info, TokenAccount>>,
-    /// Genesis distribution account (should be owned by the team multisig /
-    /// vesting program). Must be an RCR token account.
-    #[account(mut, token::mint = mint)]
-    pub distribution: Box<Account<'info, TokenAccount>>,
+    #[account(mut, token::mint = mint, token::authority = funder)]
+    pub funder_token: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
 }
 
-pub fn genesis(ctx: Context<Genesis>) -> Result<()> {
-    require!(!ctx.accounts.config.genesis_done, RecursiaError::GenesisDone);
-    let pool = math::bps_floor(TOTAL_SUPPLY, REWARD_POOL_BPS)?;
-    let treasury = math::bps_floor(TOTAL_SUPPLY, TREASURY_BPS)?;
-    let dist = math::sub(math::sub(TOTAL_SUPPLY, pool)?, treasury)?;
-    let bump = [ctx.accounts.config.bump];
-    let seeds: &[&[u8]] = &[SEED_CONFIG, &bump];
-    let tp = ctx.accounts.token_program.to_account_info();
-    let mint = ctx.accounts.mint.to_account_info();
-    let auth = ctx.accounts.config.to_account_info();
-    for (to, amt) in [
-        (ctx.accounts.reward_pool.to_account_info(), pool),
-        (ctx.accounts.treasury.to_account_info(), treasury),
-        (ctx.accounts.distribution.to_account_info(), dist),
-    ] {
-        token::mint_to(
-            CpiContext::new_with_signer(
-                tp.clone(),
-                MintTo { mint: mint.clone(), to, authority: auth.clone() },
-                &[seeds],
-            ),
-            amt,
-        )?;
-    }
-    // Revoke mint authority forever (checklist #11). Freeze authority was
-    // never set.
-    token::set_authority(
-        CpiContext::new_with_signer(
-            tp,
-            SetAuthority { current_authority: auth, account_or_mint: mint },
-            &[seeds],
-        ),
-        AuthorityType::MintTokens,
-        None,
+pub fn fund_reward_pool(ctx: Context<FundRewardPool>, amount: u64) -> Result<()> {
+    require!(amount > 0, RecursiaError::ZeroAmount);
+    user_transfer(
+        &ctx.accounts.token_program.to_account_info(),
+        &ctx.accounts.mint.to_account_info(),
+        &ctx.accounts.funder_token.to_account_info(),
+        &ctx.accounts.reward_pool.to_account_info(),
+        &ctx.accounts.funder.to_account_info(),
+        amount,
     )?;
-    ctx.accounts.mint.reload()?;
-    require!(ctx.accounts.mint.mint_authority.is_none(), RecursiaError::InvariantViolated);
-    require!(ctx.accounts.mint.freeze_authority.is_none(), RecursiaError::InvariantViolated);
-    require!(ctx.accounts.mint.supply == TOTAL_SUPPLY, RecursiaError::InvariantViolated);
-    let c = &mut ctx.accounts.config;
-    c.genesis_done = true;
-    c.epoch_start_slot = Clock::get()?.slot;
+    emit!(RewardPoolFunded { funder: ctx.accounts.funder.key(), amount });
     Ok(())
 }
 
@@ -243,24 +214,23 @@ pub struct AdvanceEpoch<'info> {
 pub fn advance_epoch(ctx: Context<AdvanceEpoch>) -> Result<()> {
     let slot = Clock::get()?.slot;
     let c = &mut ctx.accounts.config;
-    require!(c.genesis_done, RecursiaError::GenesisPending);
     let end = c
         .epoch_start_slot
         .checked_add(c.params.epoch_slots)
         .ok_or(RecursiaError::MathOverflow)?;
     require!(slot >= end, RecursiaError::EpochNotOver);
     let pool = ctx.accounts.reward_pool.amount;
-    let emission = if c.cur_total_burn == 0 {
+    let emission = if c.cur_total_sink == 0 {
         0
     } else {
         math::bps_floor(pool, c.params.emission_rate_bps as u64)?
     };
-    c.prev_total_burn = c.cur_total_burn;
+    c.prev_total_sink = c.cur_total_sink;
     c.prev_emission = emission;
     c.prev_claimed = 0;
-    c.cur_total_burn = 0;
+    c.cur_total_sink = 0;
     c.cur_epoch = c.cur_epoch.checked_add(1).ok_or(RecursiaError::MathOverflow)?;
     c.epoch_start_slot = slot;
-    emit!(EpochAdvanced { epoch: c.cur_epoch - 1, total_burn: c.prev_total_burn, emission });
+    emit!(EpochAdvanced { epoch: c.cur_epoch - 1, total_sink: c.prev_total_sink, emission });
     Ok(())
 }

@@ -27,9 +27,9 @@ export function WalletPanel({ c }: { c: ChainCtx }) {
       {my.sol !== null && my.sol < 5_000_000 && <div className="sim bad small">Мало SOL: нужно ~0.005 SOL на комиссии и ренту аккаунтов.{c.config && " "}На devnet: <code>solana airdrop 1</code>.</div>}
       {my.rcr === null && (
         <div className="card">
-          <div className="card-title"><Glyph name="vault" size={17} />Нет RCR-аккаунта</div>
-          <p className="small muted">Создаётся один раз (рента ≈ 0.002 SOL). Без него нельзя получать и тратить RCR.</p>
-          <button className="btn primary" onClick={() => c.run({ title: "Создание RCR-аккаунта", lines: ["Идемпотентное создание вашего ассоциированного токен-аккаунта RCR"], ixs: [rx.createAtaIdempotent(me, me)] })}>Создать</button>
+          <div className="card-title"><Glyph name="vault" size={17} />Нет SKR-аккаунта</div>
+          <p className="small muted">Создаётся один раз (рента ≈ 0.002 SOL). Без него нельзя получать и тратить SKR.</p>
+          <button className="btn primary" onClick={() => c.run({ title: "Создание SKR-аккаунта", lines: ["Идемпотентное создание вашего ассоциированного токен-аккаунта SKR"], ixs: [rx.createAtaIdempotent(me, me)] })}>Создать</button>
         </div>
       )}
       <div className="card">
@@ -38,7 +38,7 @@ export function WalletPanel({ c }: { c: ChainCtx }) {
         <AmountField label="Сумма" value={amt} onChange={setAmt} max={claimable} hint={!amt ? "пусто = всё" : undefined} />
         <button className="btn primary" disabled={claimable === 0n || (amt !== "" && w === null) || !!blocked(c, { paused: false })} onClick={() => {
           const v = amt ? w! : claimable;
-          c.run({ title: "Вывод RCR", lines: [`${rcr(v)} → ваш кошелёк`], ixs: c.withAta([rx.withdraw(me, v)]), successText: `Выведено ${rcr(v)}` }).then((r) => r.ok && setAmt(""));
+          c.run({ title: "Вывод SKR", lines: [`${rcr(v)} → ваш кошелёк`], ixs: c.withAta([rx.withdraw(me, v)]), successText: `Выведено ${rcr(v)}` }).then((r) => r.ok && setAmt(""));
         }}>Вывести {amt ? "" : rcr(claimable)}</button>
       </div>
       {myModules.length > 0 && (
@@ -71,9 +71,9 @@ export function AgentsPanel({ c }: { c: ChainCtx }) {
   const [agent, setAgent] = useState("");
   const [scope, setScope] = useState(PERMIT_PLANT | PERMIT_ACQUIRE);
   const [onlyHere, setOnlyHere] = useState(true);
-  const [budget, setBudget] = useState("200");
-  const [limit, setLimit] = useState("50");
-  const [maxPrice, setMaxPrice] = useState("20");
+  const [budget, setBudget] = useState("14000");
+  const [limit, setLimit] = useState("3500");
+  const [maxPrice, setMaxPrice] = useState("1400");
   const [days, setDays] = useState(7);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   if (!me) return <div className="panel-body muted">Подключите кошелёк</div>;

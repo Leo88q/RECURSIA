@@ -16,7 +16,7 @@ export interface ChainCtx {
   detail: WorldDetail;
   slot: number;
   run: (r: TxRequest) => Promise<TxResult>;
-  /** Prepends idempotent ATA creation when the wallet has no RCR account yet. */
+  /** Prepends idempotent ATA creation when the wallet has no SKR account yet. */
   withAta: (ixs: TransactionInstruction[]) => TransactionInstruction[];
   openWorld: (key: string, cell?: number) => void;
   selectCell: (i: number | null) => void;
@@ -27,6 +27,6 @@ export function blocked(c: ChainCtx, opts: { spend?: bigint; paused?: boolean } 
   if (!c.me) return "Подключите кошелёк";
   if ((opts.paused ?? true) && c.config.paused) return "Протокол на паузе (вывод средств доступен)";
   if (c.my.sol !== null && c.my.sol < 10_000) return "Нужно немного SOL на комиссию сети";
-  if (opts.spend !== undefined && opts.spend > 0n && (c.my.rcr ?? 0n) < opts.spend) return "Недостаточно RCR на кошельке";
+  if (opts.spend !== undefined && opts.spend > 0n && (c.my.rcr ?? 0n) < opts.spend) return "Недостаточно SKR на кошельке";
   return null;
 }

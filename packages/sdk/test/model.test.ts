@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { P } from "./params.js";
 import { GameModel } from "../src/model.js";
 import { AIAgent, type Personality } from "../src/agents.js";
-import { DEFAULT_PARAMS, ONE, PHYSICS_PRESETS, TOTAL_SUPPLY } from "../src/constants.js";
+import { ONE, PHYSICS_PRESETS } from "../src/constants.js";
 import { epochTax } from "../src/economy.js";
 
 function setup() {
-  const m = new GameModel();
+  const m = new GameModel(P);
   m.addPlayer("dev", 1_000_000n * ONE);
   for (const p of PHYSICS_PRESETS) m.registerModule("dev", p.name, p.birth, p.survive, p.royaltyBps);
   m.addPlayer("alice", 100_000n * ONE);
@@ -17,7 +18,7 @@ function setup() {
 describe("game model", () => {
   it("full lifecycle keeps supply invariant", () => {
     const { m, w } = setup();
-    const dep = epochTax(100n * ONE, DEFAULT_PARAMS.harbergerBps) * 5n;
+    const dep = epochTax(100n * ONE, P.harbergerBps) * 5n;
     m.acquire("bob", w.id, 5, 10n * ONE, 100n * ONE, dep);
     m.advanceSlots(200);
     m.tick("bob", w.id);
@@ -26,7 +27,7 @@ describe("game model", () => {
     m.acquire("alice", w.id, 5, 100n * ONE, 150n * ONE, dep * 2n);
     expect(m.players.get("bob")!.claimable).toBeGreaterThan(100n * ONE - 1n);
     m.withdraw("bob", m.players.get("bob")!.claimable);
-    expect(m.circulating() + m.totalBurned).toBe(TOTAL_SUPPLY);
+    expect(m.circulating()).toBe(m.supply);
   });
 
   it("slippage guard rejects front-run price raise", () => {
@@ -45,7 +46,7 @@ describe("game model", () => {
   it("foreclosure when deposit runs out", () => {
     const { m, w } = setup();
     m.acquire("bob", w.id, 3, 10n * ONE, 100n * ONE, epochTax(100n * ONE, 50));
-    m.advanceSlots(Number(DEFAULT_PARAMS.epochSlots) + 10);
+    m.advanceSlots(Number(P.epochSlots) + 10);
     m.settle(w.id, 3);
     expect(w.territories[3].holder).toBeNull();
   });
@@ -57,7 +58,7 @@ describe("game model", () => {
     const c = m.createChildWorld("bob", w.id, 9, "Inner", 1, 1_000, 1_000n * ONE);
     m.advanceSlots(200);
     m.tick("alice", c.id);
-    expect(w.pending[9]).toBe(DEFAULT_PARAMS.tickCost * 1500n / 10_000n);
+    expect(w.pending[9]).toBe(P.tickCost * 1500n / 10_000n);
     // kill host block
     m.advanceSlots(200);
     m.tick("alice", w.id);
@@ -71,10 +72,10 @@ describe("game model", () => {
     m.acquire("bob", w.id, 0, 10n * ONE, 20n * ONE, 5n * ONE);
     const before = m.players.get("alice")!.wallet + m.players.get("bob")!.wallet;
     for (let i = 0; i < 50; i++) { m.advanceSlots(160); m.tick("alice", w.id); }
-    m.advanceSlots(Number(DEFAULT_PARAMS.epochSlots));
+    m.advanceSlots(Number(P.epochSlots));
     m.advanceEpoch();
     const r = m.claimWorldEpoch(w.id);
-    expect(r <= w.burnPrev * 9_000n / 10_000n).toBe(true);
+    expect(r <= w.sinkPrev * 9_000n / 10_000n).toBe(true);
     void before;
   });
 
@@ -106,6 +107,6 @@ describe("game model", () => {
       if (m.canAdvanceEpoch()) m.advanceEpoch();
       m.check();
     }
-    expect(m.circulating() + m.totalBurned).toBe(TOTAL_SUPPLY);
+    expect(m.circulating()).toBe(m.supply);
   });
 });

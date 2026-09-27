@@ -20,7 +20,7 @@ import energy from "../assets/art/energy.webp";
 /**
  * Two kinds of icons, one visual language (neon on the void):
  *  - <Art>: painted raster icons (app/src/assets/art, built by scripts/build-art.sh)
- *    for the key game concepts — world kinds, quantum, lab, RCR coin, AI agent, cell,
+ *    for the key game concepts — world kinds, quantum, lab, SKR coin, AI agent, cell,
  *    SWAP, rebellion, architect, breach, observer, planting, laws, energy, the logo.
  *  - <Glyph>: crisp line icons for actions and small UI affordances. They inherit
  *    `currentColor` and get the same glow via CSS, and never fall back to tofu

@@ -6,14 +6,14 @@
 import {
   BREACH_POPULATION, BREACH_RESONANCE, DEFAULT_PARAMS, MAX_ARCHITECT_FEE_BPS, MAX_DEPTH, MAX_PRICE, ONE,
   PLANT_COOLDOWN_TICKS, PRICE_CHANGE_COOLDOWN_SLOTS, REBELLION_COOLDOWN_SLOTS, REBELLION_MIN_VOTES,
-  REBELLION_THRESHOLD_BPS, REWARD_POOL_BPS, TERRITORIES, TOTAL_SUPPLY, TREASURY_BPS, type Params,
+  REBELLION_THRESHOLD_BPS, SKR_SUPPLY_APPROX, TERRITORIES, type Params,
 } from "./constants.js";
-import { bpsFloor, distribute, epochTax, harbergerDue, splitTick, worldEmission } from "./economy.js";
+import { bpsFloor, distribute, epochTax, harbergerDue, splitSpend, splitTick, worldEmission } from "./economy.js";
 import { bigbang, GLIDER, orBlock, population, stepNQ, swapBlocks, territoryCounts, writeBlock, type Grid } from "./sim.js";
 import { sha256 } from "@noble/hashes/sha256";
 import {
   collapse as qCollapse, commitment as qCommitment, neighbour, quantumRuleError, quantumSeed,
-  QUANTUM_BOUNTY_DIV, QUANTUM_DELAY_SLOTS, QUANTUM_REARM_BURN_BPS, QUANTUM_REVEAL_SLOTS, QUANTUM_STAKE_MULT, SLOT_HASHES_MAX,
+  QUANTUM_BOUNTY_DIV, QUANTUM_DELAY_SLOTS, QUANTUM_REARM_PENALTY_BPS, QUANTUM_REVEAL_SLOTS, QUANTUM_STAKE_MULT, SLOT_HASHES_MAX,
   SWAP_BOUNTY_DIV, SWAP_OFFER_TTL_SLOTS, swapRoll,
 } from "./quantum.js";
 
@@ -36,8 +36,8 @@ export interface MWorld {
   module: number; birth: number; survive: number; grid: Grid; generation: number; tickCount: number; lastTickSlot: number;
   energy: bigint; rewardsReserved: bigint; deposits: bigint; architectAccrued: bigint; vault: bigint;
   alive: number[]; pending: bigint[]; territories: MTerritory[];
-  epochId: number; burnCur: bigint; scoresCur: number[]; prevEpochId: number; burnPrev: bigint; scoresPrev: number[]; prevClaimed: boolean;
-  resonance: number; children: string[]; rebellionId: number; rebellionVotes: number; rebellionDeadline: number; lastRebellionSlot: number; liberated: boolean; totalBurned: bigint;
+  epochId: number; sinkCur: bigint; scoresCur: number[]; prevEpochId: number; sinkPrev: bigint; scoresPrev: number[]; prevClaimed: boolean;
+  resonance: number; children: string[]; rebellionId: number; rebellionVotes: number; rebellionDeadline: number; lastRebellionSlot: number; liberated: boolean; totalSunk: bigint;
   history: number[];
   // quantum layer
   key: Uint8Array; qBirth: number; qSurvive: number; qAmp: number; entropy: Uint8Array | null; quantumEscrow: bigint; superpositions: number;
@@ -63,8 +63,10 @@ export class GameModel {
   permits = new Map<string, MPermit>();
   rootCount = 0;
   // global token ledgers
-  rewardPool: bigint; treasury: bigint; claims = 0n; distribution: bigint; totalBurned = 0n; totalEmitted = 0n;
-  curEpoch = 1; epochStart = 0; curTotalBurn = 0n; prevTotalBurn = 0n; prevEmission = 0n; prevClaimed = 0n;
+  /** SKR is external: `supply` is the whole SKR supply, `distribution` = SKR held outside the game. */
+  readonly supply: bigint;
+  rewardPool: bigint; treasury: bigint; claims = 0n; distribution: bigint; totalSunk = 0n; totalEmitted = 0n;
+  curEpoch = 1; epochStart = 0; curTotalSink = 0n; prevTotalSink = 0n; prevEmission = 0n; prevClaimed = 0n;
   events: GameEvent[] = [];
   paused = false;
   superpositions = new Map<string, MSuperposition>();
@@ -72,11 +74,18 @@ export class GameModel {
   /** Salt of the simulated cluster's slot hashes (sandbox); fixed = reproducible runs. */
   chainSalt: Uint8Array = new Uint8Array(32);
 
-  constructor(params: Params = DEFAULT_PARAMS) {
+  /**
+   * @param opts.supply   total SKR in existence (default ≈ 10.62B)
+   * @param opts.poolSeed SKR the studio puts into the reward pool at launch
+   *                      (`fund_reward_pool`); the treasury starts empty.
+   */
+  constructor(params: Params = DEFAULT_PARAMS, opts: { supply?: bigint; poolSeed?: bigint } = {}) {
     this.params = params;
-    this.rewardPool = bpsFloor(TOTAL_SUPPLY, REWARD_POOL_BPS);
-    this.treasury = bpsFloor(TOTAL_SUPPLY, TREASURY_BPS);
-    this.distribution = TOTAL_SUPPLY - this.rewardPool - this.treasury;
+    this.supply = opts.supply ?? SKR_SUPPLY_APPROX;
+    this.rewardPool = opts.poolSeed ?? 0n;
+    req(this.rewardPool >= 0n && this.rewardPool <= this.supply, "pool seed");
+    this.treasury = 0n;
+    this.distribution = this.supply - this.rewardPool;
   }
 
   private log(kind: string, text: string, world?: string) {
@@ -94,7 +103,23 @@ export class GameModel {
   }
   private pl(id: string) { const p = this.players.get(id); req(p, "unknown player"); return p; }
   private spend(id: string, amount: bigint) { const p = this.pl(id); req(p.wallet >= amount, "insufficient funds"); p.wallet -= amount; }
-  private burn(amount: bigint) { this.totalBurned += amount; }
+  /**
+   * A player spend (nothing is burned — SKR is not ours to burn):
+   * `studioBps` → studio treasury, the rest → player reward pool. Only the pool
+   * part is the world's emission weight. Returns the pool part.
+   */
+  private sink(w: MWorld | null, amount: bigint, studioBps: number): bigint {
+    const { studio, pool } = splitSpend(amount, studioBps);
+    this.treasury += studio; this.rewardPool += pool; this.totalSunk += pool;
+    if (w) { w.sinkCur += pool; w.totalSunk += pool; this.curTotalSink += pool; }
+    return pool;
+  }
+  /** Anyone may top up the reward pool (mirror of `fund_reward_pool`). */
+  fundRewardPool(id: string, amount: bigint) {
+    req(amount > 0n, "zero amount");
+    this.spend(id, amount); this.rewardPool += amount;
+    this.check();
+  }
 
   withdraw(id: string, amount: bigint) {
     const p = this.pl(id);
@@ -111,8 +136,7 @@ export class GameModel {
     const fee = this.params.moduleRegisterFee;
     req(this.pl(author).wallet >= fee, "insufficient funds");
     this.spend(author, fee);
-    const burn = bpsFloor(fee, this.params.feeBurnBps);
-    this.burn(burn); this.treasury += fee - burn;
+    this.sink(null, fee, this.params.protocolBps);
     this.pl(author).spentFees += fee;
     const id = this.modules.length;
     this.modules.push({ id, author, name, birth, survive, royaltyBps, accrued: 0n, totalEarned: 0n, worldsUsing: 0, qBirth: q.qBirth, qSurvive: q.qSurvive, qAmp: q.qAmp });
@@ -136,8 +160,8 @@ export class GameModel {
       energy: 0n, rewardsReserved: 0n, deposits: 0n, architectAccrued: 0n, vault: 0n,
       alive: territoryCounts(grid), pending: new Array(TERRITORIES).fill(0n),
       territories: Array.from({ length: TERRITORIES }, () => ({ holder: null, price: 0n, deposit: 0n, lastTaxSlot: 0, lastPriceChange: 0, nextPlantTick: 0, acquiredSlot: 0, votedRebellion: 0, agent: false, childWorld: null })),
-      epochId: this.curEpoch, burnCur: 0n, scoresCur: new Array(TERRITORIES).fill(0), prevEpochId: this.curEpoch - 1, burnPrev: 0n, scoresPrev: new Array(TERRITORIES).fill(0), prevClaimed: true,
-      resonance: 0, children: [], rebellionId: 0, rebellionVotes: 0, rebellionDeadline: 0, lastRebellionSlot: 0, liberated: false, totalBurned: 0n,
+      epochId: this.curEpoch, sinkCur: 0n, scoresCur: new Array(TERRITORIES).fill(0), prevEpochId: this.curEpoch - 1, sinkPrev: 0n, scoresPrev: new Array(TERRITORIES).fill(0), prevClaimed: true,
+      resonance: 0, children: [], rebellionId: 0, rebellionVotes: 0, rebellionDeadline: 0, lastRebellionSlot: 0, liberated: false, totalSunk: 0n,
       history: [population(grid)],
       key: keyBytes, qBirth: m.qBirth, qSurvive: m.qSurvive, qAmp: m.qAmp, entropy: null, quantumEscrow: 0n, superpositions: 0,
       neutral: false,
@@ -150,8 +174,7 @@ export class GameModel {
   private payCreation(who: string) {
     const fee = this.params.worldCreateFee;
     this.spend(who, fee);
-    const burn = bpsFloor(fee, this.params.feeBurnBps);
-    this.burn(burn); this.treasury += fee - burn;
+    this.sink(null, fee, this.params.protocolBps);
     this.pl(who).spentFees += fee;
   }
 
@@ -217,16 +240,13 @@ export class GameModel {
   private rollEpoch(w: MWorld) {
     if (w.epochId >= this.curEpoch) return;
     if (w.epochId + 1 === this.curEpoch) {
-      w.prevEpochId = w.epochId; w.burnPrev = w.burnCur; w.scoresPrev = w.scoresCur; w.prevClaimed = false;
+      w.prevEpochId = w.epochId; w.sinkPrev = w.sinkCur; w.scoresPrev = w.scoresCur; w.prevClaimed = false;
     } else {
-      w.prevEpochId = this.curEpoch - 1; w.burnPrev = 0n; w.scoresPrev = new Array(TERRITORIES).fill(0); w.prevClaimed = true;
+      w.prevEpochId = this.curEpoch - 1; w.sinkPrev = 0n; w.scoresPrev = new Array(TERRITORIES).fill(0); w.prevClaimed = true;
     }
-    w.epochId = this.curEpoch; w.burnCur = 0n; w.scoresCur = new Array(TERRITORIES).fill(0);
+    w.epochId = this.curEpoch; w.sinkCur = 0n; w.scoresCur = new Array(TERRITORIES).fill(0);
   }
 
-  private recordBurn(w: MWorld, amount: bigint) {
-    w.burnCur += amount; w.totalBurned += amount; this.curTotalBurn += amount; this.burn(amount);
-  }
 
   canTick(id: string): string | null {
     const w = this.world(id);
@@ -261,7 +281,7 @@ export class GameModel {
     const pop = population(w.grid);
     w.history.push(pop); if (w.history.length > 240) w.history.shift();
     if (host && pop >= BREACH_POPULATION) w.resonance = Math.min(BREACH_RESONANCE, w.resonance + 1);
-    this.recordBurn(w, s.burn);
+    this.sink(w, s.pool, 0);
     m.accrued += s.royalty; this.claims += s.royalty;
     this.pl(cranker).wallet += s.cranker;
     this.treasury += s.protocol;
@@ -278,16 +298,16 @@ export class GameModel {
   canAdvanceEpoch() { return this.slot >= this.epochStart + Number(this.params.epochSlots); }
   advanceEpoch() {
     req(this.canAdvanceEpoch(), "epoch not over");
-    const emission = this.curTotalBurn === 0n ? 0n : bpsFloor(this.rewardPool, this.params.emissionRateBps);
-    this.prevTotalBurn = this.curTotalBurn; this.prevEmission = emission; this.prevClaimed = 0n;
-    this.curTotalBurn = 0n; this.curEpoch++; this.epochStart = this.slot;
-    this.log("epoch", `Эпоха ${this.curEpoch - 1} закрыта: сожжено ${fmtT(this.prevTotalBurn)}, потолок эмиссии ${fmtT(emission)} (мир получает ≤ ${this.params.rebateCapBps / 100}% своего сжигания)`);
+    const emission = this.curTotalSink === 0n ? 0n : bpsFloor(this.rewardPool, this.params.emissionRateBps);
+    this.prevTotalSink = this.curTotalSink; this.prevEmission = emission; this.prevClaimed = 0n;
+    this.curTotalSink = 0n; this.curEpoch++; this.epochStart = this.slot;
+    this.log("epoch", `Эпоха ${this.curEpoch - 1} закрыта: в пул наград пришло ${fmtT(this.prevTotalSink)}, к раздаче ${fmtT(emission)} (мир получает ≤ ${this.params.rebateCapBps / 100}% своего вклада в пул)`);
   }
   claimWorldEpoch(id: string): bigint {
     const w = this.world(id);
     this.rollEpoch(w);
     req(!w.prevClaimed && w.prevEpochId + 1 === this.curEpoch, "claim window");
-    const reward = worldEmission(this.prevEmission, this.prevTotalBurn, w.burnPrev, this.params.rebateCapBps, this.prevClaimed);
+    const reward = worldEmission(this.prevEmission, this.prevTotalSink, w.sinkPrev, this.params.rebateCapBps, this.prevClaimed);
     req(reward > 0n, "nothing to claim");
     w.prevClaimed = true;
     const owned = w.territories.map((t) => !!t.holder);
@@ -471,7 +491,7 @@ export class GameModel {
     this.rollEpoch(w);
     writeBlock(w.grid, idx, pattern);
     w.alive = territoryCounts(w.grid);
-    this.recordBurn(w, cost);
+    this.sink(w, cost, this.params.protocolBps);
     this.check();
   }
 
@@ -587,12 +607,12 @@ export class GameModel {
     req(commitment.length === 32 && commitment.some((b) => b !== 0), "commitment");
     const w = this.world(worldId); const t = w.territories[idx];
     const n = entangle ? 2n : 1n;
-    const burn = this.params.plantCost * n, stake = this.quantumStake(!!entangle);
+    const spendAmt = this.params.plantCost * n, stake = this.quantumStake(!!entangle);
     // effects
     this.accrueTax(w, idx); t.nextPlantTick = w.tickCount + PLANT_COOLDOWN_TICKS;
     if (entangle) { const w2 = this.world(entangle.world); this.accrueTax(w2, entangle.index); w2.territories[entangle.index].nextPlantTick = w2.tickCount + PLANT_COOLDOWN_TICKS; }
-    this.spend(holder, burn + stake);
-    this.rollEpoch(w); this.recordBurn(w, burn);
+    this.spend(holder, spendAmt + stake);
+    this.rollEpoch(w); this.sink(w, spendAmt, this.params.protocolBps);
     w.quantumEscrow += stake; w.vault += stake; w.superpositions++;
     this.superpositions.set(`${worldId}:${idx}`, {
       owner: holder, world: worldId, index: idx, world2: entangle?.world ?? null, index2: entangle?.index ?? 0, commitment: commitment.slice(),
@@ -617,10 +637,10 @@ export class GameModel {
     const sp = this.superposition(worldId, idx)!; const w = this.world(worldId);
     this.pl(observer);
     if (this.slot - sp.targetSlot >= SLOT_HASHES_MAX) {
-      const burned = (sp.stake * QUANTUM_REARM_BURN_BPS) / 10_000n;
-      sp.stake -= burned; w.quantumEscrow -= burned; w.vault -= burned; this.burn(burned);
+      const penalty = (sp.stake * QUANTUM_REARM_PENALTY_BPS) / 10_000n;
+      sp.stake -= penalty; w.quantumEscrow -= penalty; w.vault -= penalty; this.sink(null, penalty, 0);
       sp.targetSlot = this.slot + QUANTUM_DELAY_SLOTS; sp.rearms++;
-      this.log("quantum", `Измерение клетки #${idx} «${w.name}» просрочено — перевзведено, сожжено ${fmtT(burned)}`, worldId);
+      this.log("quantum", `Измерение клетки #${idx} «${w.name}» просрочено — перевзведено, штраф ${fmtT(penalty)} ушёл в пул наград`, worldId);
       this.check();
       return "rearmed";
     }
@@ -681,11 +701,11 @@ export class GameModel {
     const why = this.canDecohere(worldId, idx); req(!why, why ?? "");
     const sp = this.superposition(worldId, idx)!; const w = this.world(worldId);
     this.pl(caller);
-    const bounty = sp.stake / QUANTUM_BOUNTY_DIV; const burned = sp.stake - bounty;
+    const bounty = sp.stake / QUANTUM_BOUNTY_DIV; const penalty = sp.stake - bounty;
     w.quantumEscrow -= sp.stake; w.vault -= sp.stake; w.superpositions--;
-    this.pl(caller).wallet += bounty; this.burn(burned);
+    this.pl(caller).wallet += bounty; this.sink(null, penalty, 0);
     this.superpositions.delete(`${worldId}:${idx}`);
-    this.log("quantum", `Декогеренция: клетка #${idx} «${w.name}» не раскрыта вовремя — сожжено ${fmtT(burned)}`, worldId);
+    this.log("quantum", `Декогеренция: клетка #${idx} «${w.name}» не раскрыта вовремя — ${fmtT(penalty)} ушло в пул наград`, worldId);
     this.check();
   }
 
@@ -713,10 +733,10 @@ export class GameModel {
   swapOffer(offerer: string, worldId: string, a: number, b: number, weightBps: number, premium: bigint): MSwap {
     const why = this.canSwapOffer(offerer, worldId, a, b, weightBps, premium); req(!why, why ?? "");
     const w = this.world(worldId);
-    const fee = this.swapFee(); const bounty = fee / SWAP_BOUNTY_DIV; const burn = fee - bounty;
+    const fee = this.swapFee(); const bounty = fee / SWAP_BOUNTY_DIV; const spendAmt = fee - bounty;
     this.spend(offerer, fee + premium);
     this.pl(offerer).spentFees += fee;
-    this.rollEpoch(w); this.recordBurn(w, burn);
+    this.rollEpoch(w); this.sink(w, spendAmt, this.params.protocolBps);
     w.quantumEscrow += premium + bounty; w.vault += premium + bounty;
     const s: MSwap = {
       key: this.swapKey(worldId, a, b), world: worldId, offerer, acceptor: w.territories[b].holder!, indexA: a, indexB: b, weightBps,
@@ -807,10 +827,10 @@ export class GameModel {
     return v;
   }
 
-  /** total_supply == all balances + burned; each vault covers its ledgers. */
+  /** Exact SKR conservation (nothing is minted or burned); each vault covers its ledgers. */
   check() {
-    const sum = this.circulating() + this.totalBurned;
-    if (sum !== TOTAL_SUPPLY) throw new Error(`supply invariant broken: ${sum} != ${TOTAL_SUPPLY}`);
+    const sum = this.circulating();
+    if (sum !== this.supply) throw new Error(`supply invariant broken: ${sum} != ${this.supply}`);
     for (const w of this.worlds.values()) {
       const need = w.energy + w.rewardsReserved + w.deposits + w.architectAccrued + w.quantumEscrow;
       let esc = 0n; let n = 0;
@@ -834,5 +854,5 @@ export const isQuantum = (w: { qAmp: number; qBirth: number; qSurvive: number })
 
 export const fmtT = (v: bigint) => {
   const whole = v / ONE; const frac = (v % ONE) / 10_000n;
-  return `${whole.toLocaleString("ru-RU")}${frac ? "," + frac.toString().padStart(2, "0") : ""} RCR`;
+  return `${whole.toLocaleString("ru-RU")}${frac ? "," + frac.toString().padStart(2, "0") : ""} SKR`;
 };

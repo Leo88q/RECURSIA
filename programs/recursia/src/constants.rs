@@ -9,16 +9,16 @@ pub const TERRITORIES: usize = 64; // (64/8)^2
 pub const MAX_DEPTH: u8 = 7;
 
 // ---------------- token ----------------
+/// The game currency is SKR — the native token of the Solana Mobile ecosystem
+/// (classic SPL Token program, 6 decimals, freeze authority = none).  RECURSIA
+/// never mints or burns it: every player spend is split between the studio
+/// treasury and the player reward pool (see `common::user_spend`).
 pub const DECIMALS: u8 = 6;
 pub const ONE: u64 = 1_000_000; // 10^DECIMALS
-/// Fixed total supply: 1,000,000,000 RCR. Minted once at genesis, then the
-/// mint authority is revoked forever (checklist #11).
-pub const TOTAL_SUPPLY: u64 = 1_000_000_000 * ONE;
-/// 45% of supply seeds the emission pool; the remainder goes to the
-/// genesis-distribution multisig (liquidity, team vesting, ecosystem grants).
-pub const REWARD_POOL_BPS: u64 = 4_500;
-/// 10% seeds the protocol treasury (timelocked spend only).
-pub const TREASURY_BPS: u64 = 1_000;
+/// Official SKR mint.  Mainnet builds (`--features mainnet`) refuse any other
+/// mint in `initialize`: counterfeit "SKR" mints exist (checklist #11/#39).
+pub const SKR_MINT: anchor_lang::prelude::Pubkey =
+    anchor_lang::solana_program::pubkey!("SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3");
 
 pub const BPS: u64 = 10_000;
 
@@ -26,14 +26,17 @@ pub const BPS: u64 = 10_000;
 /// Timelock can never be set below 48h (checklist #20/#82 — Drift lesson).
 pub const MIN_TIMELOCK_SECS: i64 = 48 * 60 * 60;
 pub const MAX_TIMELOCK_SECS: i64 = 30 * 24 * 60 * 60;
-/// Burn share of every tick can never go below 30%.
-pub const MIN_TICK_BURN_BPS: u64 = 3_000;
+/// Share of every tick that flows back to the player reward pool can never
+/// go below 30% (the part that used to be burned in the RCR design).
+pub const MIN_TICK_POOL_BPS: u64 = 3_000;
+/// Studio share of any player spend can never exceed 25%.
+pub const MAX_PROTOCOL_BPS: u64 = 2_500;
 pub const MAX_ROYALTY_BPS: u16 = 500;
 pub const MAX_ARCHITECT_FEE_BPS: u16 = 3_000;
-/// Emission rebate for a world can never exceed what it actually burned
+/// Emission rebate for a world can never exceed what it actually paid into the pool
 /// => self-farming is always net-negative (checklist #48/#58).
 pub const MAX_REBATE_BPS: u64 = 10_000;
-pub const MAX_EMISSION_RATE_BPS: u64 = 200; // ≤2% of pool per epoch
+pub const MAX_EMISSION_RATE_BPS: u64 = 2_000; // ≤20% of pool per epoch
 pub const MAX_HARBERGER_BPS: u64 = 500; // ≤5% of price per epoch
 pub const MAX_GENS_PER_TICK: u8 = 8;
 pub const MIN_EPOCH_SLOTS: u64 = 9_000; // ~1h
@@ -60,7 +63,6 @@ pub const MAX_PERMIT_SLOTS: u64 = 216_000 * 30; // permits expire in ≤ ~30 day
 
 // ---------------- seeds ----------------
 pub const SEED_CONFIG: &[u8] = b"config";
-pub const SEED_MINT: &[u8] = b"mint";
 pub const SEED_TREASURY: &[u8] = b"treasury";
 pub const SEED_REWARD_POOL: &[u8] = b"reward_pool";
 pub const SEED_CLAIMS: &[u8] = b"claims";
@@ -87,9 +89,9 @@ pub const QUANTUM_REVEAL_SLOTS: u64 = 21_600;
 pub const QUANTUM_STAKE_MULT: u64 = 4;
 /// Observer / decoherence bounty = stake / this.
 pub const QUANTUM_BOUNTY_DIV: u64 = 20;
-/// Part of the stake burned when an expired measurement must be re-armed
-/// (punishes an owner who hopes nobody observes an unfavourable outcome).
-pub const QUANTUM_REARM_BURN_BPS: u64 = 2_500;
+/// Part of the stake sent to the reward pool when an expired measurement must
+/// be re-armed (punishes an owner who hopes nobody observes a bad outcome).
+pub const QUANTUM_REARM_PENALTY_BPS: u64 = 2_500;
 /// Probability (x/256) that a collapsing pattern also tunnels into a neighbour block.
 pub const TUNNEL_CHANCE_256: u8 = 16;
 /// SlotHashes sysvar keeps at most this many recent entries.
@@ -97,7 +99,7 @@ pub const SLOT_HASHES_MAX: usize = 512;
 
 // ---------------------------------------------------------------- neutral worlds / quantum swap
 pub const SEED_SWAP: &[u8] = b"swap";
-/// Offer fee = plant_cost: 1/SWAP_BOUNTY_DIV goes to whoever resolves/cancels, rest burned.
+/// Offer fee = plant_cost: 1/SWAP_BOUNTY_DIV goes to whoever resolves/cancels, rest is a player spend (studio share → treasury, remainder → reward pool).
 pub const SWAP_BOUNTY_DIV: u64 = 5;
 /// An unaccepted offer expires after this many slots (then anyone may cancel it).
 pub const SWAP_OFFER_TTL_SLOTS: u64 = 21_600;

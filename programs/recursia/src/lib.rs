@@ -33,8 +33,8 @@ pub mod recursia {
     pub fn initialize(ctx: Context<Initialize>, admin: Pubkey, params: Params) -> Result<()> {
         admin::initialize(ctx, admin, params)
     }
-    pub fn genesis(ctx: Context<Genesis>) -> Result<()> {
-        admin::genesis(ctx)
+    pub fn fund_reward_pool(ctx: Context<FundRewardPool>, amount: u64) -> Result<()> {
+        admin::fund_reward_pool(ctx, amount)
     }
     pub fn propose(ctx: Context<AdminOnly>, action: PendingAction) -> Result<()> {
         admin::propose(ctx, action)

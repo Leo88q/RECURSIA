@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { P } from "./params.js";
 import { GameModel, idBytes } from "../src/model.js";
-import { DEFAULT_PARAMS, ONE, PHYSICS_PRESETS, TOTAL_SUPPLY } from "../src/constants.js";
+import { ONE, PHYSICS_PRESETS } from "../src/constants.js";
 import { epochTax } from "../src/economy.js";
 import { bigbang, getCell, quantumMask, step, stepNQ, type Grid, type Quantum } from "../src/sim.js";
 import { collapse, commitment, neighbour, quantumRuleError, slotHashLookup, QUANTUM_DELAY_SLOTS, QUANTUM_REVEAL_SLOTS, SWAP_OFFER_TTL_SLOTS } from "../src/quantum.js";
@@ -81,7 +82,7 @@ describe("quantum primitives", () => {
 
 // ---------------------------------------------------------------- model
 function setup() {
-  const m = new GameModel();
+  const m = new GameModel(P);
   m.addPlayer("dev", 1_000_000n * ONE);
   const foam = PHYSICS_PRESETS.find((p) => p.name === "Quantum Foam")!;
   m.registerModule("dev", foam.name, foam.birth, foam.survive, foam.royaltyBps, foam);
@@ -91,7 +92,7 @@ function setup() {
   m.addPlayer("keeper", 0n);
   const w = m.createRootWorld("alice", "Foam", 0, 1_000, 5_000n * ONE);
   const w2 = m.createRootWorld("alice", "Other", 1, 1_000, 5_000n * ONE);
-  const dep = epochTax(100n * ONE, DEFAULT_PARAMS.harbergerBps) * 5n;
+  const dep = epochTax(100n * ONE, P.harbergerBps) * 5n;
   m.acquire("bob", w.id, 5, 10n * ONE, 100n * ONE, dep);
   m.acquire("bob", w2.id, 9, 10n * ONE, 100n * ONE, dep);
   return { m, w, w2 };
@@ -114,7 +115,7 @@ describe("quantum game model", () => {
     const before = m.players.get("bob")!.wallet;
     m.quantumCommit("bob", w.id, 5, c, { world: w2.id, index: 9 });
     const stake = m.quantumStake(true);
-    expect(before - m.players.get("bob")!.wallet).toBe(stake + 2n * DEFAULT_PARAMS.plantCost);
+    expect(before - m.players.get("bob")!.wallet).toBe(stake + 2n * P.plantCost);
     expect(() => m.quantumObserve("keeper", w.id, 5)).toThrow(/not measurable/);
     m.advanceSlots(QUANTUM_DELAY_SLOTS + 1);
     expect(m.quantumObserve("keeper", w.id, 5)).toBe("observed");
@@ -124,7 +125,7 @@ describe("quantum game model", () => {
     expect(res.branchA).toBe(pv.branchA);
     expect(m.superposition(w.id, 5)).toBeUndefined();
     expect(w.quantumEscrow).toBe(0n);
-    expect(m.circulating() + m.totalBurned).toBe(TOTAL_SUPPLY);
+    expect(m.circulating()).toBe(m.supply);
   });
 
   it("wrong preimage / other owner / copied commitment are rejected", () => {
@@ -154,9 +155,9 @@ describe("quantum game model", () => {
     m.quantumObserve("keeper", w.id, 5);
     expect(m.canDecohere(w.id, 5)).toMatch(/coherent/);
     m.advanceSlots(QUANTUM_REVEAL_SLOTS + 1);
-    const burned0 = m.totalBurned;
+    const pool0 = m.rewardPool;
     m.quantumDecohere("keeper", w.id, 5);
-    expect(m.totalBurned).toBeGreaterThan(burned0);
+    expect(m.rewardPool).toBeGreaterThan(pool0); // forfeited stake is recycled to players, not burned
     expect(m.superposition(w.id, 5)).toBeUndefined();
     expect(() => m.quantumCollapse("bob", w.id, 5, A, B, 5_000, salt)).toThrow(/no superposition/);
   });
@@ -175,7 +176,7 @@ describe("quantum game model", () => {
   it("territory sold mid-superposition: grid untouched, owner still refunded", () => {
     const { m, w } = setup();
     m.quantumCommit("bob", w.id, 5, m.commitFor("bob", w.id, 5, A, B, 5_000, salt));
-    m.acquire("alice", w.id, 5, 100n * ONE, 120n * ONE, epochTax(120n * ONE, DEFAULT_PARAMS.harbergerBps) * 3n);
+    m.acquire("alice", w.id, 5, 100n * ONE, 120n * ONE, epochTax(120n * ONE, P.harbergerBps) * 3n);
     m.advanceSlots(QUANTUM_DELAY_SLOTS + 1);
     m.quantumObserve("keeper", w.id, 5);
     const grid = w.grid.slice();
@@ -199,7 +200,7 @@ describe("quantum game model", () => {
 describe("AI agents in a quantum world", () => {
   it("superpose, observe, collapse; invariants hold; no superposition leaks", async () => {
     const { AIAgent } = await import("../src/agents.js");
-    const m = new GameModel();
+    const m = new GameModel(P);
     m.addPlayer("dev", 1_000_000n * ONE);
     for (const p of PHYSICS_PRESETS) m.registerModule("dev", p.name, p.birth, p.survive, p.royaltyBps, p);
     const qi = PHYSICS_PRESETS.findIndex((p) => p.name === "Quantum Foam");
@@ -219,7 +220,7 @@ describe("AI agents in a quantum world", () => {
     expect(commits).toBeGreaterThan(3);
     expect(collapses).toBeGreaterThan(0);
     expect(m.superpositions.size).toBeLessThanOrEqual(agents.length * 2);
-    expect(m.circulating() + m.totalBurned).toBe(TOTAL_SUPPLY);
+    expect(m.circulating()).toBe(m.supply);
   });
 });
 
@@ -246,14 +247,14 @@ describe("neutral-world SWAP", () => {
 
 describe("neutral world + SWAP market (model)", () => {
   const setup = () => {
-    const m = new GameModel();
+    const m = new GameModel(P);
     m.addPlayer("dev", 1_000_000n * ONE);
     const foam = PHYSICS_PRESETS.find((p) => p.name === "Quantum Foam")!;
     m.registerModule("dev", foam.name, foam.birth, foam.survive, foam.royaltyBps, foam);
     m.registerModule("dev", "Life", 8, 12, 100);
     for (const p of ["alice", "bob", "carol", "keeper"]) m.addPlayer(p, 100_000n * ONE);
     const w = m.createNeutralWorld("carol", "Нейтраль", 0, 5_000n * ONE);
-    const dep = epochTax(100n * ONE, DEFAULT_PARAMS.harbergerBps) * 5n;
+    const dep = epochTax(100n * ONE, P.harbergerBps) * 5n;
     m.acquire("alice", w.id, 3, 10n * ONE, 100n * ONE, dep);
     m.acquire("bob", w.id, 40, 10n * ONE, 100n * ONE, dep);
     return { m, w };
@@ -274,9 +275,11 @@ describe("neutral world + SWAP market (model)", () => {
       m.chainSalt = new Uint8Array(32).fill(i);
       const pa = blockPatternOf(w.grid, 3), pb = blockPatternOf(w.grid, 40);
       const bobClaim = m.players.get("bob")!.claimable;
-      const burned = m.totalBurned;
+      const sunk = m.totalSunk, studio = m.treasury;
       m.swapOffer("alice", w.id, 3, 40, 5_000, 7n * ONE);
-      expect(m.totalBurned - burned).toBe(DEFAULT_PARAMS.plantCost - DEFAULT_PARAMS.plantCost / 5n);
+      const spent = P.plantCost - P.plantCost / 5n; // 4/5 of the fee; 1/5 = resolver bounty
+      expect(m.treasury - studio).toBe(spent * BigInt(P.protocolBps) / 10_000n);
+      expect(m.totalSunk - sunk).toBe(spent - (m.treasury - studio));
       expect(m.canSwapAccept("carol", w.id, 3, 40)).toMatch(/not addressed/);
       m.swapAccept("bob", w.id, 3, 40);
       expect(m.canSwapResolve(w.id, 3, 40)).toMatch(/not measurable/);
@@ -305,7 +308,7 @@ describe("neutral world + SWAP market (model)", () => {
   it("a new holder of block A never inherits an un-accepted offer", () => {
     const { m, w } = setup();
     m.swapOffer("alice", w.id, 3, 40, 5_000, 0n);
-    m.acquire("carol", w.id, 3, 1_000n * ONE, 100n * ONE, epochTax(100n * ONE, DEFAULT_PARAMS.harbergerBps) * 5n);
+    m.acquire("carol", w.id, 3, 1_000n * ONE, 100n * ONE, epochTax(100n * ONE, P.harbergerBps) * 5n);
     expect(m.canSwapAccept("bob", w.id, 3, 40)).toMatch(/offerer lost/);
   });
 });
@@ -313,7 +316,7 @@ describe("neutral world + SWAP market (model)", () => {
 describe("AI in a neutral world", () => {
   it("agents trade swaps, crank them, invent laws; invariants hold; no escrow leaks", async () => {
     const { AIAgent } = await import("../src/agents.js");
-    const m = new GameModel();
+    const m = new GameModel(P);
     m.addPlayer("dev", 1_000_000n * ONE);
     for (const p of PHYSICS_PRESETS) m.registerModule("dev", p.name, p.birth, p.survive, p.royaltyBps, p);
     const qi = PHYSICS_PRESETS.findIndex((p) => p.name === "Tunnel Life");

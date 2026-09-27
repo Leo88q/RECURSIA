@@ -441,7 +441,6 @@ pub struct Plant<'info> {
     pub holder: Signer<'info>,
     #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
-    #[account(mut)]
     pub mint: Box<Account<'info, Mint>>,
     #[account(mut)]
     pub world: Box<Account<'info, World>>,
@@ -452,6 +451,12 @@ pub struct Plant<'info> {
     pub territory: Box<Account<'info, Territory>>,
     #[account(mut, token::mint = mint, token::authority = holder)]
     pub holder_token: Box<Account<'info, TokenAccount>>,
+    /// Studio treasury (SKR): `protocol_bps` of every player spend.
+    #[account(mut, seeds = [SEED_TREASURY], bump = config.treasury_bump)]
+    pub treasury: Box<Account<'info, TokenAccount>>,
+    /// Player reward pool (SKR). Receives the non-studio part of every spend.
+    #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
+    pub reward_pool: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -469,20 +474,25 @@ fn plant_effects(world: &mut World, territory: &mut Territory, config: &mut Conf
     let idx = territory.index;
     sim::write_block(&mut world.grid, idx, pattern);
     world.territory_alive[idx as usize] = block_count(&world.grid, idx as usize);
-    record_burn(world, config, p.plant_cost)
+    let (_, to_pool) = math::split_spend(p.plant_cost, p.protocol_bps)?;
+    record_sink(world, config, to_pool)
 }
 
 pub fn plant(ctx: Context<Plant>, pattern: u64) -> Result<()> {
     require_top_level()?;
     require_active(&ctx.accounts.config)?;
-    let cost = ctx.accounts.config.params.plant_cost;
+    let p = ctx.accounts.config.params;
+    let (studio, to_pool) = math::split_spend(p.plant_cost, p.protocol_bps)?;
     plant_effects(&mut ctx.accounts.world, &mut ctx.accounts.territory, &mut ctx.accounts.config, pattern)?;
-    user_burn(
+    user_spend(
         &ctx.accounts.token_program.to_account_info(),
         &ctx.accounts.mint.to_account_info(),
         &ctx.accounts.holder_token.to_account_info(),
         &ctx.accounts.holder.to_account_info(),
-        cost,
+        &ctx.accounts.treasury.to_account_info(),
+        &ctx.accounts.reward_pool.to_account_info(),
+        studio,
+        to_pool,
     )?;
     emit!(Planted { world: ctx.accounts.world.key(), index: ctx.accounts.territory.index, pattern, by_agent: false });
     Ok(())
@@ -493,7 +503,6 @@ pub struct AgentPlant<'info> {
     pub agent: Signer<'info>,
     #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
-    #[account(mut)]
     pub mint: Box<Account<'info, Mint>>,
     #[account(mut, seeds = [SEED_PERMIT, permit.owner.as_ref(), agent.key().as_ref()], bump = permit.bump, has_one = agent)]
     pub permit: Box<Account<'info, AgentPermit>>,
@@ -506,6 +515,12 @@ pub struct AgentPlant<'info> {
         constraint = territory.holder == permit.owner @ RecursiaError::NotHolder
     )]
     pub territory: Box<Account<'info, Territory>>,
+    /// Studio treasury (SKR): `protocol_bps` of every player spend.
+    #[account(mut, seeds = [SEED_TREASURY], bump = config.treasury_bump)]
+    pub treasury: Box<Account<'info, TokenAccount>>,
+    /// Player reward pool (SKR). Receives the non-studio part of every spend.
+    #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
+    pub reward_pool: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -513,19 +528,24 @@ pub fn agent_plant(ctx: Context<AgentPlant>, pattern: u64) -> Result<()> {
     require_top_level()?;
     require_active(&ctx.accounts.config)?;
     let slot = Clock::get()?.slot;
-    let cost = ctx.accounts.config.params.plant_cost;
+    let p = ctx.accounts.config.params;
+    let cost = p.plant_cost;
+    let (studio, to_pool) = math::split_spend(cost, p.protocol_bps)?;
     let world_key = ctx.accounts.world.key();
     let snapshot = Config::clone(&ctx.accounts.config);
     charge_permit(&mut ctx.accounts.permit, &snapshot, &world_key, PERMIT_PLANT, cost, slot)?;
     plant_effects(&mut ctx.accounts.world, &mut ctx.accounts.territory, &mut ctx.accounts.config, pattern)?;
     let bump = ctx.accounts.config.bump;
-    vault_burn(
+    vault_spend(
         &ctx.accounts.token_program.to_account_info(),
         &ctx.accounts.mint.to_account_info(),
         &ctx.accounts.permit_vault.to_account_info(),
+        &ctx.accounts.treasury.to_account_info(),
+        &ctx.accounts.reward_pool.to_account_info(),
         &ctx.accounts.config.to_account_info(),
         bump,
-        cost,
+        studio,
+        to_pool,
     )?;
     emit!(Planted { world: world_key, index: ctx.accounts.territory.index, pattern, by_agent: true });
     Ok(())

@@ -37,7 +37,7 @@ export class Writer {
 }
 
 export function writeParams(w: Writer, p: Params) {
-  w.i64(p.timelockSecs).u64(p.worldCreateFee).u64(p.moduleRegisterFee).u16(p.feeBurnBps)
+  w.i64(p.timelockSecs).u64(p.worldCreateFee).u64(p.moduleRegisterFee)
     .u64(p.tickCost).u64(p.tickIntervalSlots).u8(p.gensPerTick).u16(p.crankerBps).u16(p.protocolBps)
     .u16(p.hostBps).u64(p.epochSlots).u16(p.emissionRateBps).u16(p.rebateCapBps).u16(p.harbergerBps)
     .u64(p.minPrice).u64(p.plantCost);
@@ -45,7 +45,7 @@ export function writeParams(w: Writer, p: Params) {
 
 export function readParams(r: Reader): Params {
   return {
-    timelockSecs: r.i64(), worldCreateFee: r.u64(), moduleRegisterFee: r.u64(), feeBurnBps: r.u16(),
+    timelockSecs: r.i64(), worldCreateFee: r.u64(), moduleRegisterFee: r.u64(),
     tickCost: r.u64(), tickIntervalSlots: r.u64(), gensPerTick: r.u8(), crankerBps: r.u16(), protocolBps: r.u16(),
     hostBps: r.u16(), epochSlots: r.u64(), emissionRateBps: r.u16(), rebateCapBps: r.u16(), harbergerBps: r.u16(),
     minPrice: r.u64(), plantCost: r.u64(),
@@ -87,23 +87,23 @@ function checkDisc(data: Uint8Array, name: string): Reader {
 }
 
 export interface ConfigAccount {
-  version: number; bump: number; admin: PublicKey; mint: PublicKey; genesisDone: boolean; paused: boolean;
+  version: number; bump: number; admin: PublicKey; mint: PublicKey; paused: boolean;
   params: Params; pending: PendingAction; pendingEta: bigint; pendingNonce: bigint;
   rootWorlds: bigint; totalWorlds: bigint; modules: bigint; curEpoch: bigint; epochStartSlot: bigint;
-  curTotalBurn: bigint; prevTotalBurn: bigint; prevEmission: bigint; prevClaimed: bigint;
-  totalBurned: bigint; totalEmitted: bigint;
+  curTotalSink: bigint; prevTotalSink: bigint; prevEmission: bigint; prevClaimed: bigint;
+  totalSunk: bigint; totalEmitted: bigint;
 }
 
 export function decodeConfig(data: Uint8Array): ConfigAccount {
   const r = checkDisc(data, "Config");
   const version = r.u8(), bump = r.u8();
-  r.u8(); r.u8(); r.u8(); r.u8();
+  r.u8(); r.u8(); r.u8(); // treasury / reward_pool / claims bumps
   return {
-    version, bump, admin: r.pubkey(), mint: r.pubkey(), genesisDone: r.bool(), paused: r.bool(),
+    version, bump, admin: r.pubkey(), mint: r.pubkey(), paused: r.bool(),
     params: readParams(r), pending: readPending(r), pendingEta: r.i64(), pendingNonce: r.u64(),
     rootWorlds: r.u64(), totalWorlds: r.u64(), modules: r.u64(), curEpoch: r.u64(), epochStartSlot: r.u64(),
-    curTotalBurn: r.u64(), prevTotalBurn: r.u64(), prevEmission: r.u64(), prevClaimed: r.u64(),
-    totalBurned: r.u64(), totalEmitted: r.u64(),
+    curTotalSink: r.u64(), prevTotalSink: r.u64(), prevEmission: r.u64(), prevClaimed: r.u64(),
+    totalSunk: r.u64(), totalEmitted: r.u64(),
   };
 }
 
@@ -113,9 +113,9 @@ export interface WorldAccount {
   name: string; grid: BigUint64Array; generation: bigint; tickCount: bigint; lastTickSlot: bigint; createdSlot: bigint;
   energy: bigint; rewardsReserved: bigint; deposits: bigint; architectAccrued: bigint;
   territoryAlive: number[]; territoryPending: bigint[]; ownedMask: bigint;
-  epochId: bigint; burnCur: bigint; scoresCur: number[]; prevEpochId: bigint; burnPrev: bigint; scoresPrev: number[];
+  epochId: bigint; sinkCur: bigint; scoresCur: number[]; prevEpochId: bigint; sinkPrev: bigint; scoresPrev: number[];
   prevClaimed: boolean; resonance: number; childCount: number; rebellionId: number; rebellionVotes: number;
-  rebellionDeadline: bigint; lastRebellionSlot: bigint; liberated: boolean; totalBurned: bigint;
+  rebellionDeadline: bigint; lastRebellionSlot: bigint; liberated: boolean; totalSunk: bigint;
   qBirth: number; qSurvive: number; qAmp: number; entropy: Uint8Array; quantumEscrow: bigint; superpositions: number;
   /** Neutral quantum world: no architect, SWAP market enabled. */
   neutral: boolean;
@@ -135,11 +135,11 @@ export function decodeWorld(data: Uint8Array): WorldAccount {
   w.territoryAlive = arr(TERRITORIES, () => r.u16());
   w.territoryPending = arr(TERRITORIES, () => r.u64());
   w.ownedMask = r.u64();
-  w.epochId = r.u64(); w.burnCur = r.u64(); w.scoresCur = arr(TERRITORIES, () => r.u32());
-  w.prevEpochId = r.u64(); w.burnPrev = r.u64(); w.scoresPrev = arr(TERRITORIES, () => r.u32());
+  w.epochId = r.u64(); w.sinkCur = r.u64(); w.scoresCur = arr(TERRITORIES, () => r.u32());
+  w.prevEpochId = r.u64(); w.sinkPrev = r.u64(); w.scoresPrev = arr(TERRITORIES, () => r.u32());
   w.prevClaimed = r.bool(); w.resonance = r.u16(); w.childCount = r.u16();
   w.rebellionId = r.u32(); w.rebellionVotes = r.u8(); w.rebellionDeadline = r.u64(); w.lastRebellionSlot = r.u64();
-  w.liberated = r.bool(); w.totalBurned = r.u64();
+  w.liberated = r.bool(); w.totalSunk = r.u64();
   w.qBirth = r.u16(); w.qSurvive = r.u16(); w.qAmp = r.u8(); w.entropy = r.bytes(32); w.quantumEscrow = r.u64(); w.superpositions = r.u16();
   w.neutral = r.bool();
   return w as WorldAccount;

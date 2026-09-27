@@ -1,6 +1,6 @@
 // Build-time configuration (Vite env). Validated once; the UI shows a
 // readable error screen instead of crashing on a bad deploy config.
-import { PROGRAM_ID_STR } from "@recursia/sdk";
+import { PROGRAM_ID_STR, SKR_MINT_STR } from "@recursia/sdk";
 
 export type Cluster = "devnet" | "testnet" | "mainnet-beta" | "localnet";
 const CLUSTERS: Cluster[] = ["devnet", "testnet", "mainnet-beta", "localnet"];
@@ -17,6 +17,8 @@ export interface AppConfig {
   rpcUrl: string;
   wsUrl?: string;
   programId: string;
+  /** Game currency mint: always the official SKR on mainnet; a test mint on devnet/localnet. */
+  mint: string;
   /** µ-lamports per CU hard cap for priority fees. */
   maxPriorityFee: number;
   errors: string[];
@@ -36,9 +38,13 @@ export function readConfig(env: Record<string, string | undefined>): AppConfig {
   if (wsUrl) { try { if (!/^wss?:$/.test(new URL(wsUrl).protocol)) errors.push("VITE_WS_URL должен быть ws(s)://"); } catch { errors.push("VITE_WS_URL — некорректный URL"); } }
   const programId = env.VITE_PROGRAM_ID || PROGRAM_ID_STR;
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(programId)) errors.push("VITE_PROGRAM_ID — некорректный base58-адрес");
+  const mint = env.VITE_MINT || SKR_MINT_STR;
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) errors.push("VITE_MINT — некорректный base58-адрес");
+  // anti-counterfeit: tokens called "SKR" exist on other mints — mainnet accepts only the official one
+  if (cluster === "mainnet-beta" && mint !== SKR_MINT_STR) errors.push(`VITE_MINT: в мейннете допустим только официальный SKR (${SKR_MINT_STR})`);
   const maxPriorityFee = Number(env.VITE_MAX_PRIORITY_FEE ?? 500_000);
   if (!Number.isFinite(maxPriorityFee) || maxPriorityFee < 0 || maxPriorityFee > 50_000_000) errors.push("VITE_MAX_PRIORITY_FEE вне диапазона 0..50 000 000 µ-lamports/CU");
-  return { cluster: CLUSTERS.includes(cluster) ? cluster : "devnet", rpcUrl, wsUrl, programId, maxPriorityFee, errors };
+  return { cluster: CLUSTERS.includes(cluster) ? cluster : "devnet", rpcUrl, wsUrl, programId, mint, maxPriorityFee, errors };
 }
 
 export const CONFIG: AppConfig = readConfig(import.meta.env as unknown as Record<string, string | undefined>);
