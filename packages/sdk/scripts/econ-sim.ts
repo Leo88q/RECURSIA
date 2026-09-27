@@ -42,7 +42,15 @@ const QUICK = flag("quick");
 const SEEDS = opt("seeds", QUICK ? 2 : 6);
 const EPOCHS = opt("epochs", QUICK ? 8 : 22); // ≥ 8 so at least one 7-epoch season closes
 const STEP = 300;
-const PARAMS: Params = { ...DEFAULT_PARAMS, epochSlots: 9_000n };
+// Calibration flags (what-if experiments): --emission BPS --rebate BPS --protocol BPS --sponsor U --only NAME
+const PARAMS: Params = {
+  ...DEFAULT_PARAMS, epochSlots: 9_000n,
+  emissionRateBps: opt("emission", DEFAULT_PARAMS.emissionRateBps),
+  rebateCapBps: opt("rebate", DEFAULT_PARAMS.rebateCapBps),
+  protocolBps: opt("protocol", DEFAULT_PARAMS.protocolBps),
+};
+const ONLY = argv.includes("--only") ? argv[argv.indexOf("--only") + 1] : null;
+const SPONSOR_OVERRIDE = argv.includes("--sponsor") ? BigInt(opt("sponsor", 0)) : null;
 /** Scenario amounts are written in price units (plant_cost / 5 = 70 SKR at the default SKR price list). */
 const U = PARAMS.plantCost / 5n;
 
@@ -328,7 +336,9 @@ function run(sc: Scenario, seed: number): Result {
   const pnls = [...start.entries()].map(([id, s0]) => wealth(m, id) - s0).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const byRole = new Map<string, bigint[]>();
   for (const [id, s0] of start) { const r = role.get(id) ?? "delegate"; if (!byRole.has(r)) byRole.set(r, []); byRole.get(r)!.push(wealth(m, id) - s0); }
-  const roles = [...byRole.entries()].map(([r, a]) => roleLine(r, a)).filter(Boolean).join(" | ")
+  const players = [...start.entries()].filter(([id]) => role.get(id) !== "newcomer" || true);
+  const winners = players.filter(([id, s0]) => wealth(m, id) > s0).length;
+  const roles = `в плюсе ${Math.round((100 * winners) / Math.max(1, players.length))}% из ${players.length} | ` + [...byRole.entries()].map(([r, a]) => roleLine(r, a)).filter(Boolean).join(" | ")
     + ` | keeper +${fmt(m.players.get("keeper")!.wallet - keeper0)} | founder ${fmt(wealth(m, "founder") - founder0)}`;
   const ls = m.lastSeason;
   const season = `сезоны: закрыто ${m.seasonId - 1}, фонд ${fmt(m.totalSeasonFunded)}, выплачено ${fmt(m.totalSeasonPaid)}`
@@ -345,7 +355,9 @@ const t0 = Date.now();
 let bad = 0;
 console.log(`RECURSIA econ sim — ${SCENARIOS.length} scenarios × ${SEEDS} seeds × ${EPOCHS} epochs${QUICK ? " (quick)" : ""}\n`);
 console.log(["scenario".padEnd(18), "seed", "worlds", "to pool".padStart(12), "emitted".padStart(12), "emit/pool", "studio".padStart(11), "farmer PnL".padStart(12), "median AI PnL".padStart(14), "best AI PnL".padStart(12)].join("  "));
-for (const sc of SCENARIOS) {
+for (const sc0 of SCENARIOS) {
+  if (ONLY && !sc0.name.includes(ONLY)) continue;
+  const sc = SPONSOR_OVERRIDE === null ? sc0 : { ...sc0, sponsor: SPONSOR_OVERRIDE };
   for (let seed = 1; seed <= SEEDS; seed++) {
     let r: Result;
     try { r = run(sc, seed); } catch (e) {
