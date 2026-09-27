@@ -545,3 +545,36 @@ details.tech code { word-break: break-all; }
   .l-subnav { justify-content: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) { .landing { scroll-behavior: auto; } }
+
+/* ───────────── landing illustrations ───────────── */
+.l-illo { display: block; width: 100%; height: auto; aspect-ratio: 1376 / 768; object-fit: cover; border-radius: 14px; background: #0d0b1c; }
+.landing > .l-backdrop { max-width: none; background-size: cover; background-position: center; background-repeat: no-repeat; position: relative; }
+.l-backdrop::before { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, var(--bg) 0%, rgba(7,6,15,0.35) 12%, rgba(7,6,15,0.35) 88%, var(--bg) 100%); pointer-events: none; }
+.l-backdrop > .l-section { position: relative; max-width: 1120px; margin: 0 auto; padding-bottom: 48px; }
+.l-philo { display: grid; gap: 28px; }
+.l-philo-row { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 28px; align-items: center; }
+.l-philo-row.flip .l-illo { order: 2; }
+.l-philo-row .l-illo { border: 1px solid var(--line); box-shadow: 0 20px 60px rgba(0,0,0,0.55), 0 0 40px rgba(124,110,255,0.14); }
+.l-philo-text h3 { margin: 4px 0 10px; font-size: clamp(20px, 2.6vw, 26px); }
+.l-philo-text p { margin: 0; line-height: 1.7; color: #d9d6f5; font-size: 15.5px; }
+.l-philo-n { font-family: "JetBrains Mono", ui-monospace, monospace; color: var(--mint); letter-spacing: 0.2em; font-size: 13px; }
+.l-principles { margin-top: 28px; }
+.l-principles .card { padding: 16px; background: rgba(13,11,28,0.8); backdrop-filter: blur(6px); }
+.l-principles p { color: #cfcbef; font-size: 14px; line-height: 1.55; }
+.l-pr-h { display: flex; align-items: center; gap: 10px; }
+.l-rule-cards { margin-bottom: 8px; }
+.l-rule-card { padding: 0; gap: 0; align-content: start; transition: border-color 0.2s, transform 0.2s; }
+.l-rule-card:hover { border-color: rgba(185,140,255,0.45); transform: translateY(-2px); }
+.l-rule-card .l-illo { border-radius: 12px 12px 0 0; }
+.l-rule-card-body { padding: 12px 14px 14px; display: grid; gap: 6px; }
+.l-rule-card h4 { margin: 0; font-size: 15.5px; }
+.l-rule-card p { margin: 0; font-size: 13.5px; line-height: 1.5; color: #cfcbef; }
+.l-more { justify-self: start; background: none; border: 0; padding: 4px 0; color: var(--mint); font-size: 13px; display: inline-flex; align-items: center; gap: 5px; }
+.l-more:hover { text-decoration: underline; }
+.l-final { max-width: none !important; background-size: cover; background-position: center; }
+@media (max-width: 900px) {
+  .l-philo-row { grid-template-columns: 1fr; gap: 14px; }
+  .l-philo-row.flip .l-illo { order: 0; }
+}
+@media (min-width: 901px) and (max-width: 1100px) { .l-rule-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (prefers-reduced-motion: reduce) { .l-rule-card, .l-rule-card:hover { transition: none; transform: none; } }

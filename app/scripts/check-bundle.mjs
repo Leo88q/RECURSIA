@@ -26,13 +26,24 @@ for (const f of lazy) {
   if (g > BUDGET.lazyChunkGz) { console.error(`✗ ${f} over lazy-chunk budget ${kb(BUDGET.lazyChunkGz)}`); fail++; }
 }
 // art: painted icons/backdrops are self-hosted, content-hashed (immutable cache) and budgeted separately
-const imgs = assets.filter((f) => /\.(webp|png|jpe?g|avif|svg)$/.test(f));
+// landing illustrations (src/assets/landing) are loading="lazy" — below the fold, never part of the first
+// paint — so they get their own budget. Matched by content (names like bg/quantum also exist among the icons).
+const landDir = fileURLToPath(new URL("../src/assets/landing/", import.meta.url));
+const landBlobs = readdirSync(landDir).map((f) => readFileSync(landDir + f));
+const landingImgs = assets.filter((f) => /\.webp$/.test(f) && landBlobs.some((b) => b.equals(readFileSync(dist + "assets/" + f))));
+const landingSet = new Set(landingImgs);
+const imgs = assets.filter((f) => /\.(webp|png|jpe?g|avif|svg)$/.test(f) && !landingSet.has(f));
 const imgTotal = imgs.reduce((a, f) => a + statSync(dist + "assets/" + f).size, 0);
 console.log(`images (${imgs.length}): ${kb(imgTotal)} [budget 400.0 KB, ≤ 160 KB each]`);
 if (imgTotal > 400 * 1024) { console.error("✗ images over budget"); fail++; }
 for (const f of imgs) { const sz = statSync(dist + "assets/" + f).size; if (sz > 160 * 1024) { console.error(`✗ ${f} ${kb(sz)} > 160 KB — re-run scripts/build-art.sh`); fail++; } }
-const total = assets.reduce((a, f) => a + statSync(dist + "assets/" + f).size, 0);
-console.log(`total assets: ${kb(total)} raw [budget ${kb(BUDGET.totalRaw)}]`);
+const landTotal = landingImgs.reduce((a, f) => a + statSync(dist + "assets/" + f).size, 0);
+console.log(`landing illustrations (${landingImgs.length}, lazy): ${kb(landTotal)} [budget 700.0 KB, ≤ 110 KB each]`);
+if (landingImgs.length !== landBlobs.length) { console.error(`✗ expected ${landBlobs.length} landing illustrations in dist, found ${landingImgs.length}`); fail++; }
+if (landTotal > 700 * 1024) { console.error("✗ landing illustrations over budget"); fail++; }
+for (const f of landingImgs) { const sz = statSync(dist + "assets/" + f).size; if (sz > 110 * 1024) { console.error(`✗ ${f} ${kb(sz)} > 110 KB — re-run scripts/build-art.sh`); fail++; } }
+const total = assets.filter((f) => !landingSet.has(f)).reduce((a, f) => a + statSync(dist + "assets/" + f).size, 0);
+console.log(`total assets (without landing art): ${kb(total)} raw [budget ${kb(BUDGET.totalRaw)}]`);
 if (total > BUDGET.totalRaw) { console.error("✗ total over budget"); fail++; }
 if (assets.some((f) => f.endsWith(".map"))) { console.error("✗ source maps must not ship"); fail++; }
 if (!readdirSync(dist).includes("_headers")) { console.error("✗ dist/_headers missing"); fail++; }

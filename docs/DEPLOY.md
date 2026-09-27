@@ -98,7 +98,9 @@ npm -w app run check:bundle     # бюджет бандла, CSP-meta, _headers,
 Open Graph-картинка — в `app/public/icons`, `app/public/og.jpg`. Исходники (PNG ~17 МБ) в git не хранятся; оптимизированные
 файлы собираются воспроизводимо: `app/scripts/build-art.sh <папка с PNG>` (ImageMagick с WebP; можно подать только часть исходников — например, новые `i-*.png` — обновятся только они). Чёрный фон неоновых иконок
 превращается в настоящую прозрачность (альфа из яркости + un-premultiply). Бюджет: все картинки ≤ 400 KB, каждая ≤ 160 KB
-(`check:bundle`). Мелкие UI-глифы — inline-SVG (`app/src/ui/Icon.tsx`), без emoji: они превращаются в «тофу» на системах без шрифта.
+(`check:bundle`). Иллюстрации лендинга — исходники `land-<имя>.png` (философия: `recursion`, `emergence`, `quantum`; правила:
+`harberger`, `energy`, `rewards`, `breach`, `rebellion`, `swap`; фон `bg`) → `app/src/assets/landing/*.webp` (720–960 px, фон 1600 px).
+Они грузятся лениво (`loading="lazy"`), не входят в первый экран и имеют отдельный бюджет: ≤ 700 KB всего, ≤ 110 KB каждая. Мелкие UI-глифы — inline-SVG (`app/src/ui/Icon.tsx`), без emoji: они превращаются в «тофу» на системах без шрифта.
 
 ### Заголовки безопасности
 Единый источник — `app/security.mjs` (CSP, HSTS, X-Frame-Options, Referrer-Policy, Permissions-Policy, COOP/CORP).

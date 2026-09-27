@@ -12,6 +12,20 @@ describe("landing", () => {
     for (const id of ["sec-about", "sec-start", "sec-price", "sec-rules", "sec-safety", "sec-faq"]) expect(html).toContain(`id="${id}"`);
     for (const t of ["Как начать играть", "Сколько стоит вход", "Правила игры", "Частые вопросы", "Налог Харбергера", "Квантовый слой", "SWAP", "Восстание", "Дочерние миры", "Прорыв", "Лаборатория", "ИИ-жители", "Эпохи и награды"]) expect(text).toContain(t);
   });
+  it("philosophy and rules are illustrated; every image is lazy, sized and described", () => {
+    expect(html).toContain('id="sec-philosophy"');
+    for (const t of ["Философия игры", "Мир внутри мира", "Сложность из простоты", "Будущее не написано", "Правила в картинках"]) expect(text).toContain(t);
+    const illos = [...html.matchAll(/<img class="l-illo[^"]*"[^>]*>/g)].map((m) => m[0]);
+    expect(illos.length).toBe(9); // 3 philosophy + 6 rule cards
+    for (const tag of illos) {
+      expect(tag).toMatch(/loading="lazy"/);
+      expect(tag).toMatch(/width="\d+" height="\d+"/); // no layout shift
+      expect(tag).toMatch(/alt="[^"]{20,}"/); // meaningful alt text, not decorative
+    }
+    // each "Подробнее" button opens a rule that exists
+    for (const m of html.matchAll(/aria-controls="(rule-[a-z]+)"/g)) expect(html).toContain(`id="${m[1]}"`);
+    expect([...html.matchAll(/aria-controls="rule-/g)].length).toBe(6);
+  });
   it("states the entry cost computed from the protocol params", () => {
     expect(text).toMatch(/от 15,05 RCR/);
     expect(text).toMatch(/до 0,00538 SOL/);

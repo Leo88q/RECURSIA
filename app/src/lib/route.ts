@@ -1,7 +1,7 @@
 // Tiny hash router: static hosting friendly (no server rewrites needed, works
 // on IPFS/Arweave mirrors too) and shareable deep links.
 //   #/                        → landing (rules, how to start, entry cost)
-//   #/start | #/price | #/rules | #/faq → landing, scrolled to that section
+//   #/philosophy | #/start | #/price | #/rules | #/faq → landing, scrolled to that section
 //   #/play                    → sandbox
 //   #/sandbox/<worldId>/<cell>
 //   #/lab
@@ -10,7 +10,7 @@
 //   #/chain/lab
 import { useCallback, useEffect, useState } from "react";
 
-export const LANDING_SECTIONS = ["start", "price", "rules", "faq"] as const;
+export const LANDING_SECTIONS = ["philosophy", "start", "price", "rules", "faq"] as const;
 export type LandingSection = (typeof LANDING_SECTIONS)[number];
 
 export type Route =

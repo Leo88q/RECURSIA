@@ -42,6 +42,21 @@ have logo.png && keyblack "$SRC/logo.png" 160 "$ART/logo.webp"
 have bg.png && $IM "$SRC/bg.png" -resize '1920x>' -modulate 125,115 -strip -quality 84 -define webp:method=6 "$ART/bg.webp"
 have hero.png && $IM "$SRC/hero.png" -resize '1200x>' -strip -quality 76 -define webp:method=6 "$ART/hero.webp"
 
+# landing illustrations (opaque, lazy-loaded, own budget in check-bundle): land-<name>.png → assets/landing/<name>.webp
+LAND="$HERE/src/assets/landing"; mkdir -p "$LAND"
+for f in "$SRC"/land-*.png; do
+  [ -f "$f" ] || continue
+  n="$(basename "$f" .png)"; n="${n#land-}"
+  if [ "$n" = bg ]; then
+    # section backdrop: wide, slightly darkened so text on top stays readable
+    $IM "$f" -resize '1600x>' -modulate 80,105 -strip -quality 66 -define webp:method=6 "$LAND/$n.webp"
+  else
+    # philosophy rows are shown up to ~560 px wide, rule cards ~360 px: 2× for retina
+    case "$n" in recursion|emergence|quantum) w=960 ;; *) w=720 ;; esac
+    $IM "$f" -resize "${w}x>" -strip -quality 70 -define webp:method=6 "$LAND/$n.webp"
+  fi
+done
+
 # PWA / favicon / social (stable URLs → public/)
 if have logo.png; then
 for s in 32 180 192 512; do

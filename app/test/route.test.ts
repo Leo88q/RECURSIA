@@ -9,6 +9,7 @@ describe("hash router", () => {
     expect(parseRoute("#/")).toEqual({ page: "landing" });
     expect(parseRoute("#/price")).toEqual({ page: "landing", section: "price" });
     expect(parseRoute("#/rules")).toEqual({ page: "landing", section: "rules" });
+    expect(parseRoute("#/philosophy")).toEqual({ page: "landing", section: "philosophy" });
     expect(parseRoute("#/play")).toEqual({ page: "sandbox" });
     expect(parseRoute("#/sandbox")).toEqual({ page: "sandbox" });
     expect(parseRoute("#/lab")).toEqual({ page: "lab" });
