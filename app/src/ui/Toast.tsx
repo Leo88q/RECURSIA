@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Glyph } from "./Icon";
 
 export type ToastKind = "ok" | "bad" | "info";
 export interface ToastInput { kind?: ToastKind; title: string; body?: string; href?: string; hrefLabel?: string; ttl?: number }
@@ -33,7 +34,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div className="toast-main">
               <div className="toast-title">{t.title}</div>
               {t.body && <div className="toast-body">{t.body}</div>}
-              {t.href && <a className="toast-link" href={t.href} target="_blank" rel="noopener noreferrer">{t.hrefLabel ?? "Открыть в эксплорере ↗"}</a>}
+              {t.href && <a className="toast-link" href={t.href} target="_blank" rel="noopener noreferrer">{t.hrefLabel ?? "Открыть в эксплорере"} <Glyph name="external" size={12} /></a>}
             </div>
             <button className="toast-x" onClick={() => dismiss(t.id)} aria-label="Закрыть уведомление">×</button>
           </div>

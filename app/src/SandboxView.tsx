@@ -5,9 +5,10 @@ import { Chronicle, TerritoryPanel, WalletPanel, WorldPanel, WorldTree } from ".
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { useNotify } from "./ui/Toast";
 import type { Route } from "./lib/route";
+import { Art, Glyph } from "./ui/Icon";
 
 type Tab = "cell" | "world" | "wallet";
-const TABS: Array<[Tab, string]> = [["cell", "Клетка"], ["world", "Мир"], ["wallet", "Кошелёк и ИИ"]];
+const TABS: Array<[Tab, string, React.ReactNode]> = [["cell", "Клетка", <Glyph name="cell" size={16} />], ["world", "Мир", <Art name="world" size={18} />], ["wallet", "Кошелёк и ИИ", <Art name="coin" size={18} />]];
 const SPEEDS = [0, 1, 2, 5, 10];
 
 export function SandboxView({ sb, route, go, speed, setSpeed, frame, bump }: {
@@ -47,7 +48,7 @@ export function SandboxView({ sb, route, go, speed, setSpeed, frame, bump }: {
   return (
     <div className="layout">
       <aside className="left" aria-label="Мультивселенная">
-        <div className="panel-title">Мультивселенная</div>
+        <div className="panel-title"><Art name="nested" size={18} />Мультивселенная</div>
         <WorldTree sb={sb} current={world.id} onPick={(id) => { setWorld(id); setTab("world"); }} />
         <div className="legend-box">
           <div><span className="dot live" /> живёт</div>
@@ -70,8 +71,8 @@ export function SandboxView({ sb, route, go, speed, setSpeed, frame, bump }: {
         <WorldCanvas world={world} selected={selected} onSelect={select} onDescend={descend} frame={frame} zoomFrom={zoomFrom} superposed={sb.superposedIn(world.id)} youKey={YOU} />
         <div className="controls" role="toolbar" aria-label="Скорость времени">
           <span className="muted small">Время:</span>
-          {SPEEDS.map((s) => <button key={s} className={speed === s ? "chip on" : "chip"} aria-pressed={speed === s} onClick={() => setSpeed(s)} aria-label={s === 0 ? "пауза" : `скорость ×${s}`}>{s === 0 ? "⏸" : `×${s}`}</button>)}
-          <button className="chip" onClick={() => { sb.step(); bump(); }}>шаг</button>
+          {SPEEDS.map((s) => <button key={s} className={speed === s ? "chip on" : "chip"} aria-pressed={speed === s} onClick={() => setSpeed(s)} aria-label={s === 0 ? "пауза" : `скорость ×${s}`}>{s === 0 ? <Glyph name="pause" size={14} /> : `×${s}`}</button>)}
+          <button className="chip" onClick={() => { sb.step(); bump(); }} aria-label="один шаг"><Glyph name="step" size={13} /> шаг</button>
           <span className="muted small">слот {sb.m.slot.toLocaleString("ru-RU")}</span>
         </div>
         <Chronicle sb={sb} worldId={world.id} />
@@ -79,12 +80,12 @@ export function SandboxView({ sb, route, go, speed, setSpeed, frame, bump }: {
 
       <aside className="right" aria-label="Действия">
         <div className="tabs" role="tablist">
-          {TABS.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? "on" : ""} onClick={() => setTab(id)}>{label}</button>)}
+          {TABS.map(([id, label, ico]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? "on" : ""} onClick={() => setTab(id)}>{ico}<span>{label}</span></button>)}
         </div>
         <div role="tabpanel">
           <ErrorBoundary label={`sandbox-${tab}`} compact key={`${tab}-${world.id}-${selected}`}>
             {tab === "cell" && (selected === null
-              ? <div className="panel-body muted">Выберите клетку 8×8 на карте (или стрелками с клавиатуры). Двойной клик / Enter по фиолетовому порталу — войти во вложенную вселенную. Пробел — пауза.</div>
+              ? <div className="panel-body empty-state"><Glyph name="cell" size={44} className="empty-ico" /><p>Выберите клетку 8×8 на карте (или стрелками с клавиатуры).</p><p className="muted small"><Art name="nested" size={16} /> Двойной клик / Enter по фиолетовому порталу — войти во вложенную вселенную. <kbd>Пробел</kbd> — пауза.</p></div>
               : <TerritoryPanel key={`${world.id}-${selected}`} sb={sb} world={world} idx={selected} onDescend={descend} notify={notify} />)}
             {tab === "world" && <WorldPanel sb={sb} world={world} notify={notify} />}
             {tab === "wallet" && <WalletPanel sb={sb} notify={notify} />}

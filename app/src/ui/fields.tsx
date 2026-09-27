@@ -1,6 +1,7 @@
 import { useId, useState, type ReactNode } from "react";
 import { formatAmount, parseAmount, shortAddr, toInput } from "../lib/format";
 import { explorerUrl } from "../lib/config";
+import { Glyph } from "./Icon";
 
 /** Controlled RCR amount field: strict parsing, inline error, optional "макс". */
 export function AmountField({ label, value, onChange, max, min, allowZero, hint, suffix = "RCR" }: {
@@ -33,7 +34,7 @@ export function Address({ value, label }: { value: string; label?: string }) {
   return (
     <span className="addr">
       <a href={explorerUrl("address", value)} target="_blank" rel="noopener noreferrer" className="mono" title={value}>{label ?? shortAddr(value)}</a>
-      <button type="button" className="icon-btn tiny" aria-label="Скопировать адрес" onClick={() => { navigator.clipboard?.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1200); }}>{copied ? "✓" : "⧉"}</button>
+      <button type="button" className="icon-btn tiny" aria-label="Скопировать адрес" onClick={() => { navigator.clipboard?.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1200); }}>{copied ? <Glyph name="check" size={12} /> : <Glyph name="copy" size={12} />}</button>
     </span>
   );
 }

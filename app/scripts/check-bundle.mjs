@@ -25,6 +25,12 @@ for (const f of lazy) {
   console.log(`lazy ${f}: ${kb(g)} gz`);
   if (g > BUDGET.lazyChunkGz) { console.error(`✗ ${f} over lazy-chunk budget ${kb(BUDGET.lazyChunkGz)}`); fail++; }
 }
+// art: painted icons/backdrops are self-hosted, content-hashed (immutable cache) and budgeted separately
+const imgs = assets.filter((f) => /\.(webp|png|jpe?g|avif|svg)$/.test(f));
+const imgTotal = imgs.reduce((a, f) => a + statSync(dist + "assets/" + f).size, 0);
+console.log(`images (${imgs.length}): ${kb(imgTotal)} [budget 400.0 KB, ≤ 160 KB each]`);
+if (imgTotal > 400 * 1024) { console.error("✗ images over budget"); fail++; }
+for (const f of imgs) { const sz = statSync(dist + "assets/" + f).size; if (sz > 160 * 1024) { console.error(`✗ ${f} ${kb(sz)} > 160 KB — re-run scripts/build-art.sh`); fail++; } }
 const total = assets.reduce((a, f) => a + statSync(dist + "assets/" + f).size, 0);
 console.log(`total assets: ${kb(total)} raw [budget ${kb(BUDGET.totalRaw)}]`);
 if (total > BUDGET.totalRaw) { console.error("✗ total over budget"); fail++; }

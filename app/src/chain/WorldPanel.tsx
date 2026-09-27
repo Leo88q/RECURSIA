@@ -5,6 +5,7 @@ import { rcr, slotsToHuman } from "../lib/format";
 import { worldEpochClaimable } from "../lib/epoch";
 import { AmountField, Address, amountOf } from "../ui/fields";
 import { blocked, type ChainCtx } from "./ctx";
+import { Glyph, WorldIcon } from "../ui/Icon";
 
 export function WorldPanel({ c }: { c: ChainCtx }) {
   const { cur, config, me } = c;
@@ -24,7 +25,7 @@ export function WorldPanel({ c }: { c: ChainCtx }) {
   return (
     <div className="panel-body">
       <div className="kv-head">
-        <div className="title">{w.neutral ? "⚖ " : w.depth ? "⧉ " : "◈ "}{w.name}</div>
+        <div className="title"><WorldIcon neutral={w.neutral} depth={w.depth} size={26} />{w.name}</div>
         {w.liberated && !w.neutral && <span className="tag free">свободен</span>}
         {w.neutral && <span className="tag quantum">нейтральный</span>}
       </div>
@@ -42,7 +43,7 @@ export function WorldPanel({ c }: { c: ChainCtx }) {
       </dl>
 
       <div className="card">
-        <div className="card-title">Время мира</div>
+        <div className="card-title"><Glyph name="clock" size={17} />Время мира</div>
         <p className="muted small">Мир живёт только когда кто-то «тикает» его. Тик стоит {rcr(p.tickCost)} из энергии мира; кранкер получает {p.crankerBps / 100}%.</p>
         <button className="btn primary" disabled={nextTick > 0 || w.energy < p.tickCost || !!blocked(c)} onClick={() => c.run({
           title: "Тик мира", lines: [`Мир «${w.name}»: +${p.gensPerTick} поколения`, `Стоимость ${rcr(p.tickCost)} из энергии мира`, `Ваша награда: ${rcr(p.tickCost * BigInt(p.crankerBps) / 10_000n, 4)}`],
@@ -53,28 +54,28 @@ export function WorldPanel({ c }: { c: ChainCtx }) {
       </div>
 
       <div className="card">
-        <div className="card-title">Эпоха {config.curEpoch.toString()}</div>
+        <div className="card-title"><Glyph name="clock" size={17} className="gold" />Эпоха {config.curEpoch.toString()}</div>
         <p className="muted small">По окончании эпохи мир забирает свою долю эмиссии пропорционально сожжённому; она распределяется между живыми клетками. Вызвать может любой.</p>
         <button className="btn" disabled={!epochClaimable || !me} onClick={() => c.run({ title: "Эмиссия эпохи для мира", lines: [`Мир «${w.name}» получает долю пула наград за прошлую эпоху`], ixs: [c.rx.claimWorldEpoch(k)] })}>Забрать эмиссию мира</button>
       </div>
 
       {me && hasArchitect && w.architect.equals(me) && (
         <div className="card">
-          <div className="card-title">Вы — архитектор</div>
+          <div className="card-title"><Glyph name="crown" size={17} className="gold" />Вы — архитектор</div>
           <div className="small">Накоплено: <b>{rcr(w.architectAccrued)}</b></div>
           <button className="btn" disabled={w.architectAccrued === 0n} onClick={() => c.run({ title: "Доход архитектора", lines: [`${rcr(w.architectAccrued)} → ваш баланс к выводу`], ixs: [c.rx.claimArchitect(me, k)] })}>Забрать</button>
         </div>
       )}
       {rebellionActive && hasArchitect && (
         <div className="card danger-card">
-          <div className="card-title">✊ Восстание #{w.rebellionId}</div>
+          <div className="card-title"><Glyph name="rebel" size={18} className="rose" />Восстание #{w.rebellionId}</div>
           <div className="small">Голосов: {w.rebellionVotes} (нужно ≥⅔ владельцев и не меньше {REBELLION_MIN_VOTES})</div>
           <button className="btn danger" disabled={!me} onClick={() => c.run({ title: "Исполнить восстание", lines: [`Мир «${w.name}» становится свободным навсегда`, "Накопления архитектора уходят ему на вывод, комиссия обнуляется"], ixs: [c.rx.executeRebellion(me!, k, w.architect)] })}>Исполнить</button>
         </div>
       )}
       {parent && w.resonance >= BREACH_RESONANCE && (
         <div className="card">
-          <div className="card-title">🌌 Прорыв</div>
+          <div className="card-title"><Glyph name="breach" size={18} className="violet" />Прорыв</div>
           <p className="small">Вложенный мир накопил резонанс: его жизнь может «просочиться» в клетку-хост родителя.</p>
           <button className="btn portal" disabled={!me} onClick={() => c.run({ title: "Прорыв в родительский мир", lines: [`«${w.name}» → ${parentName ?? "родитель"} #${w.parentTerritory}`], ixs: [c.rx.breach(k, parent)] })}>Прорыв</button>
         </div>

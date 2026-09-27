@@ -318,3 +318,136 @@ code, .mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-size:
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* ───────────── Art layer: painted icons, backdrop, key art ───────────── */
+/* Backdrop: painted cosmos on a fixed layer (cheaper than background-attachment:fixed on mobile). */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(1200px 700px at 70% -10%, rgba(124, 140, 255, 0.12), transparent 60%),
+    radial-gradient(900px 600px at -10% 110%, rgba(185, 140, 255, 0.10), transparent 60%),
+    linear-gradient(rgba(7, 6, 15, 0.05), rgba(7, 6, 15, 0.35)),
+    url("./assets/art/bg.webp") center / cover no-repeat,
+    var(--bg);
+}
+body { background: transparent; } /* html carries the base colour; an opaque body would cover the fixed backdrop */
+
+.art { display: inline-block; vertical-align: middle; flex: none; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+.glyph { display: inline-block; vertical-align: -0.18em; flex: none; filter: drop-shadow(0 0 4px currentColor); }
+.glyph.mint { color: var(--mint); } .glyph.gold { color: var(--gold); } .glyph.rose { color: var(--rose); } .glyph.violet { color: var(--violet); }
+.inline-ico { margin-left: 5px; vertical-align: -0.15em; }
+.ok-text { color: var(--mint); display: inline-flex; align-items: center; gap: 5px; }
+
+/* Brand */
+.logo { width: 40px; height: 40px; filter: drop-shadow(0 0 10px rgba(124, 247, 212, 0.45)); transition: transform 0.6s cubic-bezier(.2,.8,.2,1), filter 0.3s; }
+.brand:hover .logo { transform: rotate(90deg) scale(1.06); filter: drop-shadow(0 0 16px rgba(185, 140, 255, 0.7)); }
+.name { background: linear-gradient(90deg, #e8e6ff, #b9f7e8 45%, #cdb4ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* Mode switch with icons */
+.modes button { display: inline-flex; align-items: center; gap: 7px; transition: color 0.15s, background 0.2s; }
+.modes button:hover:not(.on) { color: var(--text); background: rgba(255, 255, 255, 0.04); }
+.mode-ico { position: relative; display: inline-flex; line-height: 0; }
+.mode-ico .art { opacity: 0.8; transition: opacity 0.15s, transform 0.2s; }
+.modes button.on .mode-ico .art, .modes button:hover .mode-ico .art { opacity: 1; transform: scale(1.08); }
+.ico-badge { position: absolute; right: -5px; bottom: -3px; }
+.me-pill { display: inline-flex; align-items: center; gap: 6px; background: rgba(255, 214, 107, 0.06); }
+
+/* Tabs with icons */
+.tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; transition: color 0.15s; }
+.tabs button .art, .tabs button .glyph { opacity: 0.65; transition: opacity 0.15s; }
+.tabs button.on .art, .tabs button.on .glyph, .tabs button:hover .art, .tabs button:hover .glyph { opacity: 1; }
+.tabs button.on { background: linear-gradient(to top, rgba(185, 140, 255, 0.12), transparent 70%); }
+
+/* Section headers */
+.panel-title { display: flex; align-items: center; gap: 8px; }
+.panel-title .art, .panel-title .glyph { opacity: 0.9; }
+.card-title { display: flex; align-items: center; gap: 8px; }
+.card { position: relative; overflow: hidden; }
+.card::before { /* faint top highlight — gives panels a lit edge */
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(185, 140, 255, 0.35), rgba(124, 247, 212, 0.25), transparent);
+}
+.left, .right { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 20px 50px rgba(0, 0, 0, 0.25); }
+
+/* World tree */
+.tree-node { transition: background 0.15s, border-color 0.15s; }
+.world-ico { filter: drop-shadow(0 0 3px rgba(124, 247, 212, 0.3)); }
+.tree-node.active .world-ico { filter: drop-shadow(0 0 6px rgba(185, 140, 255, 0.8)); }
+.tag-ico { animation: qflicker 2.4s infinite; }
+.title { display: flex; align-items: center; gap: 10px; }
+
+/* Buttons carrying art */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.btn .art { margin: -3px 0; }
+.btn.portal { box-shadow: 0 0 0 0 rgba(185, 140, 255, 0); transition: box-shadow 0.25s, transform 0.15s, background 0.15s; }
+.btn.portal:hover:not(:disabled) { box-shadow: 0 0 22px rgba(185, 140, 255, 0.35); transform: translateY(-1px); }
+.btn.portal:hover:not(:disabled) .art { animation: spin-in 0.7s cubic-bezier(.2,.8,.2,1); }
+.btn.primary { box-shadow: 0 8px 24px rgba(124, 110, 255, 0.35); }
+.chip { display: inline-flex; align-items: center; gap: 4px; }
+.icon-btn .glyph { filter: none; }
+kbd { font: 11px/1 ui-monospace, monospace; padding: 2px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; color: var(--text); }
+
+/* Empty states */
+.empty-state { display: grid; justify-items: center; text-align: center; gap: 6px; padding: 36px 22px; color: var(--text); }
+.empty-state p { margin: 0; max-width: 300px; line-height: 1.5; }
+.empty-ico { color: var(--violet); opacity: 0.85; margin-bottom: 6px; animation: float 5s ease-in-out infinite; }
+
+/* Intro: painted key art header */
+.modal.intro { padding-top: 0; overflow: hidden; max-width: 620px; }
+.intro-hero { margin: 0 -22px 2px; height: 190px; overflow: hidden; position: relative; order: -1; }
+.intro-hero img { width: 100%; height: 100%; object-fit: cover; object-position: center 45%; display: block; animation: hero-zoom 24s ease-in-out infinite alternate; }
+.intro-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(17, 14, 38, 0) 40%, #110e26 100%); }
+.modal.intro .modal-head { margin-top: -54px; position: relative; z-index: 1; }
+.intro-title { display: inline-flex; align-items: center; gap: 10px; text-shadow: 0 2px 16px rgba(0, 0, 0, 0.8); }
+.intro-title .art { filter: drop-shadow(0 0 10px rgba(124, 247, 212, 0.6)); }
+.modal.intro .icon-btn { background: rgba(7, 6, 15, 0.6); }
+.modal ul:has(.ico-li) { list-style: none; padding-left: 0; gap: 9px; }
+.ico-li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start; }
+.ico-li > .art, .ico-li > .glyph { margin-top: 1px; color: var(--mint); }
+
+/* Chain / config empty screens get the key art too */
+.chain-empty { position: relative; overflow: hidden; }
+
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes spin-in { from { transform: rotate(-90deg) scale(0.7); } to { transform: none; } }
+@keyframes hero-zoom { from { transform: scale(1); } to { transform: scale(1.08); } }
+
+@media (max-width: 760px) {
+  .mode-label { display: none; }
+  .modes button.on .mode-label { display: inline; }
+  .intro-hero { height: 140px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .intro-hero img, .empty-ico, .tag-ico, .btn.portal:hover .art { animation: none !important; }
+  .brand:hover .logo { transform: none; }
+}
+
+/* layout polish after art pass */
+@media (min-width: 1101px) { .layout { grid-template-columns: 272px minmax(0, 1fr) 380px; } }
+.tree-node { gap: 5px; }
+.tree-name { min-width: 3.2em; }
+.spark { width: 30px; flex: none; }
+.tree-pop { min-width: 30px; flex: none; }
+.tabs button { white-space: nowrap; padding-inline: 4px; }
+
+/* key-art screens (connecting / not deployed / RPC down) */
+.art-screen { padding: 0; overflow: hidden; max-width: 680px; gap: 0; }
+.art-screen-hero { height: 210px; position: relative; overflow: hidden; }
+.art-screen-hero img { width: 100%; height: 100%; object-fit: cover; display: block; animation: hero-zoom 24s ease-in-out infinite alternate; }
+.art-screen-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, transparent 35%, rgba(20, 17, 42, 0.98)); }
+.art-screen-body { padding: 0 26px 24px; margin-top: -40px; position: relative; display: grid; gap: 12px; }
+.art-screen-body h2 { display: flex; align-items: center; gap: 12px; font-size: 22px; }
+.art-screen-body p { margin: 0; line-height: 1.55; }
+.btn[href] { text-decoration: none; color: inherit; }
+.btn.primary[href] { color: white; }
+details.tech { border-top: 1px solid var(--line); padding-top: 10px; }
+details.tech summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+details.tech[open] summary { margin-bottom: 8px; }
+details.tech code { word-break: break-all; }
+@media (max-width: 760px) { .art-screen-hero { height: 150px; } }
+@media (prefers-reduced-motion: reduce) { .art-screen-hero img { animation: none; } }
+.tag-free { flex: none; }
+/* tall dialogs on small screens: never clip the top, scroll the backdrop instead */
+.modal-back { overflow-y: auto; place-items: safe center; }
+@supports not (align-items: safe center) { .modal-back { align-items: start; } }
+.modal { max-height: none; margin-block: auto; }

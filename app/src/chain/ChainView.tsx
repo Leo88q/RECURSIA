@@ -18,6 +18,8 @@ import { WorldPanel } from "./WorldPanel";
 import { AgentsPanel, WalletPanel } from "./WalletPanel";
 import { CreateWorldButton } from "./CreateWorld";
 import { ChainLab } from "./ChainLab";
+import { Art, WorldIcon } from "../ui/Icon";
+import hero from "../assets/art/hero.webp";
 
 type Tab = "cell" | "world" | "wallet" | "agents";
 const TABS: Array<[Tab, string]> = [["cell", "Клетка"], ["world", "Мир"], ["wallet", "Кошелёк"], ["agents", "ИИ-агенты"]];
@@ -53,15 +55,31 @@ export function ChainView({ route, go }: { route: Extract<Route, { page: "chain"
   const selectCell = useCallback((i: number | null) => { if (worldKey) go({ page: "chain", world: worldKey, cell: i ?? undefined }, true); if (i !== null) setTab("cell"); }, [go, worldKey]);
   const withAta = useCallback((ixs: TransactionInstruction[]) => (me && my.rcr === null ? [rx.createAtaIdempotent(me, me), ...ixs] : ixs), [me, my.rcr, rx]);
 
-  if (data.config === undefined) return <div className="chain-empty" aria-busy="true"><Spinner /> Подключение к {CLUSTER_LABEL[CONFIG.cluster]}…<Skeleton lines={4} /></div>;
+  if (data.config === undefined) return (
+    <div className="chain-empty art-screen" aria-busy="true">
+      <div className="art-screen-hero" aria-hidden="true"><img src={hero} alt="" width={1200} height={593} /></div>
+      <div className="art-screen-body"><div className="row-wrap"><Spinner /> Подключение к {CLUSTER_LABEL[CONFIG.cluster]}…</div><Skeleton lines={3} /></div>
+    </div>
+  );
   if (data.config === null) return (
-    <div className="chain-empty">
-      <h2>{data.error ? "RPC недоступен" : "Программа не найдена на этом кластере"}</h2>
-      {data.error && <p className="sim bad">{data.error}</p>}
-      <p>Кластер: <b>{CLUSTER_LABEL[CONFIG.cluster]}</b><br />RPC: <code>{new URL(CONFIG.rpcUrl).host}</code><br />Program ID: <code>{CONFIG.programId}</code></p>
-      <p>Разверните контракт по <code>docs/DEPLOY.md</code> (мультисиг Squads как админ → <code>initialize</code> → <code>genesis</code>) и укажите <code>VITE_PROGRAM_ID</code> / <code>VITE_RPC_URL</code> / <code>VITE_CLUSTER</code>.</p>
-      <p className="muted">Пока можно играть в «Песочнице» — там те же правила, что и в контракте.</p>
-      <div className="row-wrap"><button className="btn" onClick={() => data.refresh()}>Повторить</button><a className="btn" href="#/">В песочницу</a></div>
+    <div className="chain-empty art-screen">
+      <div className="art-screen-hero" aria-hidden="true"><img src={hero} alt="" width={1200} height={593} /></div>
+      <div className="art-screen-body">
+        <h2><Art name="coin" size={30} />{data.error ? "Сеть сейчас недоступна" : `Мультивселенная ещё не открыта в ${CLUSTER_LABEL[CONFIG.cluster]}`}</h2>
+        <p>{data.error
+          ? "Не удалось связаться с узлом Solana. Проверьте подключение или повторите через минуту — ваши средства в сети не зависят от этого сайта."
+          : "Контракт RECURSIA на этом кластере ещё не развёрнут. Пока можно играть в «Песочнице» — там те же правила, что и в контракте, только время идёт быстрее."}</p>
+        <div className="row-wrap">
+          <a className="btn primary" href="#/"><Art name="world" size={20} /> Играть в песочнице</a>
+          <button className="btn" onClick={() => data.refresh()}>Повторить</button>
+        </div>
+        <details className="tech">
+          <summary>Технические детали (для операторов)</summary>
+          {data.error && <p className="sim bad small">{data.error}</p>}
+          <p className="small">Кластер: <b>{CLUSTER_LABEL[CONFIG.cluster]}</b><br />RPC: <code>{new URL(CONFIG.rpcUrl).host}</code><br />Program ID: <code>{CONFIG.programId}</code></p>
+          <p className="small muted">Развёртывание: <code>docs/DEPLOY.md</code> (мультисиг Squads как админ → <code>initialize</code> → <code>genesis</code>), переменные <code>VITE_PROGRAM_ID</code> / <code>VITE_RPC_URL</code> / <code>VITE_CLUSTER</code>.</p>
+        </details>
+      </div>
     </div>
   );
 
@@ -72,7 +90,7 @@ export function ChainView({ route, go }: { route: Extract<Route, { page: "chain"
   return (
     <div className="chain">
       <aside className="left" aria-label="Список вселенных">
-        <div className="panel-title">Ончейн-вселенные</div>
+        <div className="panel-title"><Art name="coin" size={18} />Ончейн-вселенные</div>
         <ProtocolStatus c={c} />
         <WorldList worlds={data.worlds} current={worldKey} onPick={(k) => openWorld(k)} />
         <div className="stack">
@@ -149,8 +167,8 @@ function WorldList({ worlds, current, onPick }: { worlds: Array<Keyed<WorldAccou
       <li key={k}>
         <button className={`tree-node ${k === current ? "active" : ""}`} aria-current={k === current ? "page" : undefined} onClick={() => onPick(k)}>
           <span className={`dot ${w.acc.energy > 0n ? "live" : "dead"}`} />
-          <span className="tree-name">{w.acc.neutral ? "⚖ " : w.acc.depth ? "⧉ " : "◈ "}{w.acc.name}</span>
-          {w.acc.qAmp > 0 && <span className="tag quantum" title="квантовые законы">⚛</span>}
+          <WorldIcon neutral={w.acc.neutral} depth={w.acc.depth} /><span className="tree-name">{w.acc.name}</span>
+          {w.acc.qAmp > 0 && <Art name="quantum" size={15} className="tag-ico" title="квантовые законы" />}
           <span className="tree-pop">{pop}</span>
         </button>
         {kids.length > 0 && !filter && <ul>{kids.map(node)}</ul>}

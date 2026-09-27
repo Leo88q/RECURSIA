@@ -11,6 +11,7 @@ import { AmountField, Address, amountOf, Skeleton } from "../ui/fields";
 import { useToast } from "../ui/Toast";
 import { blocked, type ChainCtx } from "./ctx";
 import { CreateWorldButton } from "./CreateWorld";
+import { Art, Glyph } from "../ui/Icon";
 
 export function CellPanel({ c, idx }: { c: ChainCtx; idx: number }) {
   const { cur, model, detail, me, config } = c;
@@ -27,7 +28,7 @@ export function CellPanel({ c, idx }: { c: ChainCtx; idx: number }) {
       <div className="kv-head">
         <div className="title">Клетка #{idx}</div>
         {mine && <span className="tag mine">ваша</span>}
-        {t.agent && <span className="tag">🤖 агент</span>}
+        {t.agent && <span className="tag"><Glyph name="agent" size={12} /> агент</span>}
       </div>
       <dl className="kv">
         <dt>Владелец</dt><dd>{t.holder ? <Address value={t.holder} /> : "свободна"}</dd>
@@ -37,7 +38,7 @@ export function CellPanel({ c, idx }: { c: ChainCtx; idx: number }) {
         {t.holder && <><dt>Налог / эпоху</dt><dd>{rcr(tax)}</dd></>}
         <dt>Награды</dt><dd>{rcr(model.pending[idx], 4)}</dd>
       </dl>
-      {t.childWorld && <button className="btn portal" onClick={() => c.openWorld(t.childWorld!)}>⧉ Войти во вложенную вселенную</button>}
+      {t.childWorld && <button className="btn portal" onClick={() => c.openWorld(t.childWorld!)}><Art name="nested" size={20} /> Войти во вложенную вселенную <Glyph name="arrow" size={14} /></button>}
 
       {!mine && <AcquireCard c={c} idx={idx} />}
       {mine && <HolderCards c={c} idx={idx} />}
@@ -62,7 +63,7 @@ function AcquireCard({ c, idx }: { c: ChainCtx; idx: number }) {
   const why = blocked(c, { spend: total ?? 0n }) ?? (np === null || dep === null ? "Проверьте поля" : null);
   return (
     <div className="card">
-      <div className="card-title">{t.holder ? "Выкупить по налогу Харбергера" : "Занять свободную клетку"}</div>
+      <div className="card-title"><Glyph name="tag" size={17} className="gold" />{t.holder ? "Выкупить по налогу Харбергера" : "Занять свободную клетку"}</div>
       <p className="muted small">Вы платите текущую цену {t.holder ? "владельцу" : "в мир"}, затем сами назначаете новую — с неё платится налог {p.harbergerBps / 100}% за эпоху. Лимит цены = текущая цена: если кто-то перебьёт её до вас, транзакция не пройдёт.</p>
       <AmountField label="Ваша новая цена" value={newPrice} onChange={setNewPrice} min={p.minPrice} hint={np !== null ? `налог ${rcr(epochTax(np, p.harbergerBps), 4)} / эпоху` : undefined} />
       <AmountField label="Депозит налога" value={deposit} onChange={setDeposit} allowZero hint={np !== null && dep !== null && epochTax(np, p.harbergerBps) > 0n ? `хватит на ${(Number(dep) / Number(epochTax(np, p.harbergerBps))).toFixed(1)} эпох` : undefined} />
@@ -91,12 +92,12 @@ function HolderCards({ c, idx }: { c: ChainCtx; idx: number }) {
   return (
     <>
       <div className="card">
-        <div className="card-title">Посадить жизнь</div>
+        <div className="card-title"><Glyph name="sprout" size={18} className="mint" />Посадить жизнь</div>
         <PatternEditor world={c.model!} idx={idx} cost={rcr(p.plantCost, 0)} disabledReason={plantBlocked}
           onPlant={(pat) => c.run({ title: "Посадка паттерна", lines: [`Клетка #${idx}`, `Сжигается ${rcr(p.plantCost)}`, "Паттерн заменит содержимое вашего блока 8×8"], ixs: [c.rx.plant(c.me!, k, idx, pat)], successText: "Жизнь посажена" })} />
       </div>
       <div className="card">
-        <div className="card-title">Награды и депозит</div>
+        <div className="card-title"><Art name="coin" size={20} />Награды и депозит</div>
         <button className="btn" disabled={c.model!.pending[idx] === 0n || !!blocked(c, { paused: false })} onClick={() => c.run({
           title: "Сбор наград", lines: [`${rcr(c.model!.pending[idx], 4)} → ваш баланс к выводу`, "Сначала списывается налог с депозита"], ixs: c.withAta([c.rx.collect(c.me!, k, idx)]),
         })}>Собрать {rcr(c.model!.pending[idx], 2)}</button>
@@ -107,7 +108,7 @@ function HolderCards({ c, idx }: { c: ChainCtx; idx: number }) {
         </div>
       </div>
       <div className="card">
-        <div className="card-title">Цена клетки</div>
+        <div className="card-title"><Glyph name="tag" size={17} className="gold" />Цена клетки</div>
         <AmountField label="Новая цена" value={price} onChange={setPrice} min={p.minPrice} hint={np !== null ? `налог ${rcr(epochTax(np, p.harbergerBps), 4)} / эпоху. Высокая цена — дорогой налог, низкая — вас выкупят` : undefined} />
         <button className="btn" disabled={np === null || np === t.price || cooldown > 0 || !!blocked(c)} onClick={() => c.run({ title: "Смена цены", lines: [`${rcr(t.price)} → ${rcr(np!)}`, `Налог: ${rcr(epochTax(np!, p.harbergerBps), 4)} / эпоху`], ixs: [c.rx.setPrice(c.me!, k, idx, np!)] })}>Установить</button>
         {cooldown > 0 && <div className="field-hint">Кулдаун смены цены: {slotsToHuman(cooldown)}</div>}
@@ -132,7 +133,7 @@ function SuperposeCard({ c, idx }: { c: ChainCtx; idx: number }) {
   const worldName = (k: PublicKey) => c.data.worlds.find((x) => x.key.equals(k))?.acc.name ?? shortAddr(k.toBase58());
   return (
     <div className="card quantum-card">
-      <div className="card-title">⚛ Суперпозиция</div>
+      <div className="card-title"><Art name="quantum" size={20} />Суперпозиция</div>
       <p className="muted small">|ψ⟩ = √w·|A⟩ + √(1−w)·|B⟩. Выбор скрыт хешем, исход решит энтропия слота через {QUANTUM_DELAY_SLOTS} слотов. Секрет хранится только в этом браузере — скачайте его после подписи.</p>
       <div className="row-wrap">
         <label className="field inline">A<select value={a} onChange={(e) => setA(e.target.value)}>{PATTERN_OPTIONS.map((n) => <option key={n} value={n}>{PATTERN_NAMES[n] ?? n}</option>)}</select></label>
@@ -180,27 +181,27 @@ function SuperpositionCard({ c, idx, sp }: { c: ChainCtx; idx: number; sp: Super
   const ent = sp.world2.equals(PublicKey.default) ? null : { world: sp.world2, index: sp.index2 };
   return (
     <div className="card quantum-card">
-      <div className="card-title">ψ Суперпозиция {isOwner ? "(ваша)" : `(${shortAddr(sp.owner.toBase58())})`}</div>
+      <div className="card-title"><Art name="quantum" size={20} />Суперпозиция {isOwner ? "(ваша)" : `(${shortAddr(sp.owner.toBase58())})`}</div>
       <dl className="kv">
         <dt>Состояние</dt><dd>{sp.observed ? `наблюдали, раскрыть до слота ${sp.revealDeadline}` : measurable ? "готова к наблюдению" : `ждёт слота ${sp.targetSlot}`}</dd>
         <dt>Залог</dt><dd>{rcr(sp.stake)}</dd>
         {sp.observed && !decoherable && <><dt>Осталось</dt><dd>{slotsToHuman(sp.revealDeadline - slot)}</dd></>}
       </dl>
-      {pv && <div className="small">Исход: ветвь <b>{pv.branchA ? "A" : "B"}</b>{pv.tunnel ? " + ⚡ туннелирование" : ""}</div>}
+      {pv && <div className="small">Исход: ветвь <b>{pv.branchA ? "A" : "B"}</b>{pv.tunnel ? <> + <Glyph name="energy" size={13} className="gold" /> туннелирование</> : ""}</div>}
       <div className="row-wrap">
-        {measurable && <button className="btn" disabled={!!blocked(c, { paused: false })} onClick={() => c.run({ title: "Наблюдение", lines: ["Фиксирует энтропию слота для суперпозиции", `Награда наблюдателя: ${rcr(sp.stake / 20n)}`], ixs: c.withAta([c.rx.quantumObserve(me!, k, idx)]) })}>👁 Наблюдать · +{rcr(sp.stake / 20n)}</button>}
+        {measurable && <button className="btn" disabled={!!blocked(c, { paused: false })} onClick={() => c.run({ title: "Наблюдение", lines: ["Фиксирует энтропию слота для суперпозиции", `Награда наблюдателя: ${rcr(sp.stake / 20n)}`], ixs: c.withAta([c.rx.quantumObserve(me!, k, idx)]) })}><Glyph name="eye" size={15} /> Наблюдать · +{rcr(sp.stake / 20n)}</button>}
         {isOwner && secret && sp.observed && !decoherable && <button className="btn portal" onClick={async () => {
           const r = await c.run({ title: "Коллапс волновой функции", lines: [`Раскрытие коммита клетки #${idx}`, `Возврат залога ${rcr(sp.stake)}`], ixs: c.withAta([c.rx.quantumCollapse(me!, k, idx, secret.a, secret.b, secret.w, secret.salt, ent)]), successText: "Волновая функция коллапсировала" });
           if (r.ok) removeSecret(k.toBase58(), idx, me!.toBase58());
-        }}>⚛ Коллапс</button>}
+        }}><Art name="quantum" size={18} /> Коллапс</button>}
         {decoherable && me && <button className="btn" onClick={() => c.run({ title: "Декогеренция", lines: ["Окно раскрытия истекло", `Награда: ${rcr(sp.stake / 20n)}, остаток залога сжигается`], ixs: c.withAta([c.rx.quantumDecohere(me, k, idx, sp.owner)]) })}>Декогеренция · +{rcr(sp.stake / 20n)}</button>}
       </div>
       {isOwner && (
         <div className="row-wrap">
-          {secret && <button className="btn" onClick={() => exportSecret(k.toBase58(), idx, me!.toBase58())}>⬇ Скачать секрет</button>}
+          {secret && <button className="btn" onClick={() => exportSecret(k.toBase58(), idx, me!.toBase58())}><Glyph name="download" size={15} /> Скачать секрет</button>}
           {!secret && <>
             <span className="small danger-text">Секрета нет в этом браузере — импортируйте файл, иначе залог сгорит.</span>
-            <button className="btn" onClick={() => file.current?.click()}>⬆ Импорт секрета</button>
+            <button className="btn" onClick={() => file.current?.click()}><Glyph name="upload" size={15} /> Импорт секрета</button>
             <input ref={file} type="file" accept="application/json" hidden onChange={async (e) => {
               const f = e.target.files?.[0]; if (!f) return;
               const err = importSecret(await f.text(), k.toBase58(), idx, me!.toBase58());
@@ -230,7 +231,7 @@ function SwapCard({ c, idx }: { c: ChainCtx; idx: number }) {
   const gap = a >= 0 ? model.alive[idx] - model.alive[a] : 0;
   return (
     <div className="card swap-card">
-      <div className="card-title">⇄ Квантовый SWAP</div>
+      <div className="card-title"><Glyph name="swap" size={18} className="mint" />Квантовый SWAP</div>
       <p className="muted small">Обмен содержимым двух клеток с вероятностью p. Премия уходит принявшему при любом исходе — это цена риска. После принятия сделка обязательна для клеток, даже при смене владельца.</p>
       {canOffer && (
         <>
@@ -276,7 +277,7 @@ function RebellionCard({ c, idx }: { c: ChainCtx; idx: number }) {
   const voted = !!t && t.votedRebellion === w.rebellionId;
   return (
     <div className="card danger-card">
-      <div className="card-title">✊ Восстание против архитектора</div>
+      <div className="card-title"><Glyph name="rebel" size={18} className="rose" />Восстание против архитектора</div>
       <p className="small">Архитектор берёт {w.architectFeeBps / 100}% с тиков. Если ≥⅔ владельцев клеток (минимум {REBELLION_MIN_VOTES}) проголосуют — мир станет свободным навсегда, а накопления архитектора распределятся.</p>
       {active
         ? <div className="small">Идёт восстание #{w.rebellionId}: голосов {w.rebellionVotes} · до слота {w.rebellionDeadline.toString()}</div>
@@ -284,7 +285,7 @@ function RebellionCard({ c, idx }: { c: ChainCtx; idx: number }) {
       <div className="row-wrap">
         {!active && <button className="btn danger" disabled={!!blocked(c)} onClick={() => c.run({ title: "Начать восстание", lines: [`Мир «${w.name}»`, "Ваш голос засчитывается сразу", "Нужна клетка, купленная до начала голосования"], ixs: [c.rx.startRebellion(c.me!, c.cur!.key, idx)] })}>Начать восстание</button>}
         {active && !voted && <button className="btn danger" disabled={!!blocked(c)} onClick={() => c.run({ title: "Голос за восстание", lines: [`Клетка #${idx} голосует за свободу мира «${w.name}»`], ixs: [c.rx.voteRebellion(c.me!, c.cur!.key, idx)] })}>Голосовать</button>}
-        {active && voted && <span className="small">Вы проголосовали ✓</span>}
+        {active && voted && <span className="small ok-text"><Glyph name="check" size={14} /> Вы проголосовали</span>}
       </div>
     </div>
   );

@@ -26,7 +26,7 @@ export function Modal({ title, onClose, children, locked = false, wide = false, 
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const first = ref.current?.querySelector<HTMLElement>("[data-autofocus]") ?? ref.current?.querySelector<HTMLElement>(FOCUSABLE);
-    (first ?? ref.current)?.focus();
+    (first ?? ref.current)?.focus({ preventScroll: true }); // open at the top (key art, title), focus still on the primary action
     const onKey = (e: KeyboardEvent) => {
       if (stack[stack.length - 1] !== me) return;
       if (e.key === "Escape" && !lockedRef.current) { e.stopPropagation(); closeRef.current(); return; }

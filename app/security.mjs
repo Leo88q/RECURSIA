@@ -34,7 +34,7 @@ export function buildCsp(env = {}, opts = {}) {
     "script-src 'self'",
     // wallet-adapter-react-ui injects inline style attributes
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: https:",
+    "img-src 'self' data: blob:", // all art is self-hosted; wallet icons are data: URIs (Wallet Standard)
     "font-src 'self' data:",
     `connect-src ${connect.join(" ")}`,
     "manifest-src 'self'",

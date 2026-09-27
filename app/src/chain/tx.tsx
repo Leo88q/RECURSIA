@@ -17,6 +17,7 @@ import { MAX_CU, PHASE_LABEL, PRIORITY_LABEL, computeUnitLimit, estimateFeeLampo
 import { Modal } from "../ui/Modal";
 import { Spinner } from "../ui/fields";
 import { useToast } from "../ui/Toast";
+import { Glyph } from "../ui/Icon";
 
 export interface TxRequest {
   title: string;
@@ -189,7 +190,7 @@ export function TxProvider({ children, onConfirmed }: { children: ReactNode; onC
           )}
           <p className="muted small">Сверьте адрес программы: <code>{CONFIG.programId}</code>. RECURSIA никогда не просит seed-фразу и не подписывает за вас.</p>
           {st.error && <div className="sim bad" role="alert">{st.error}</div>}
-          {st.signature && <a className="small" href={explorerUrl("tx", st.signature)} target="_blank" rel="noopener noreferrer">Транзакция {shortAddr(st.signature, 8)} ↗</a>}
+          {st.signature && <a className="small" href={explorerUrl("tx", st.signature)} target="_blank" rel="noopener noreferrer">Транзакция {shortAddr(st.signature, 8)} <Glyph name="external" size={12} /></a>}
           <div className="row-wrap modal-actions">
             {st.phase === "failed" || st.phase === "confirmed"
               ? <button className="btn" onClick={() => setSt(null)}>Закрыть</button>

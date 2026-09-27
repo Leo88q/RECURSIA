@@ -6,6 +6,7 @@ import {
   bigbang, encodeName, lawError, lawString, mutateLaw, parseLaw, population, probeLaw, stepNQ, MAX_ROYALTY_BPS, Rng,
   type Law, type Quantum,
 } from "@recursia/sdk";
+import { Art, Glyph } from "./ui/Icon";
 
 export interface LabModule {
   id: number; name: string; author: string; law: Law; worldsUsing: number; earned: bigint; accrued: bigint; vitality: number; mine: boolean;
@@ -66,7 +67,7 @@ export function PhysicsLab({ modules, fee, feeBurnBps, fmt, onPublish, onClaim, 
   return (
     <div className="lab">
       <section className="lab-col">
-        <div className="panel-title">⚗ Редактор законов</div>
+        <div className="panel-title"><Art name="lab" size={20} />Редактор законов</div>
         <p className="muted small">Классика Конвея — <b>B3/S23</b>. Квантовые правила срабатывают не всегда, а с вероятностью p, и определяются энтропией блокчейна — будущее такого мира нельзя просчитать заранее.</p>
         <table className="rule-grid">
           <thead><tr><th />{[...Array(9).keys()].map((n) => <th key={n}>{n}</th>)}</tr></thead>
@@ -90,14 +91,14 @@ export function PhysicsLab({ modules, fee, feeBurnBps, fmt, onPublish, onClaim, 
         <div className="row-wrap">
           <input className="mono" placeholder="B36/S23/qB7/a2" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && applyText()} />
           <button className="btn" onClick={applyText}>Применить</button>
-          <button className="btn" onClick={() => setLaw(mutateLaw(law, rng.current))} title="Случайная допустимая мутация">🧬 Мутировать</button>
+          <button className="btn" onClick={() => setLaw(mutateLaw(law, rng.current))} title="Случайная допустимая мутация"><Glyph name="dna" size={15} /> Мутировать</button>
         </div>
         <div className="law-string">{lawString(law)}</div>
-        {err && <div className="danger-text small">✗ {err}</div>}
+        {err && <div className="danger-text small"><Glyph name="cross" size={13} /> {err}</div>}
       </section>
 
       <section className="lab-col">
-        <div className="panel-title">🔭 Предпросмотр вселенной</div>
+        <div className="panel-title"><Glyph name="scan" size={17} />Предпросмотр вселенной</div>
         {probe ? <>
           <LawPreview law={law} />
           <PopulationCurve curve={probe.curve} />
@@ -111,7 +112,7 @@ export function PhysicsLab({ modules, fee, feeBurnBps, fmt, onPublish, onClaim, 
         </> : <div className="muted small">Исправьте закон, чтобы увидеть предпросмотр.</div>}
 
         <div className="card">
-          <div className="card-title">Опубликовать ончейн</div>
+          <div className="card-title"><Art name="coin" size={20} />Опубликовать ончейн</div>
           <label className="field">Название<input value={name} maxLength={28} onChange={(e) => setName(e.target.value)} /></label>
           <label className="field">Роялти автора: {(law.royaltyBps / 100).toFixed(1)}% каждого тика (неизменяемо)
             <input type="range" min={0} max={MAX_ROYALTY_BPS} step={25} value={law.royaltyBps} onChange={(e) => setLaw({ ...law, royaltyBps: Number(e.target.value) })} />
@@ -120,13 +121,13 @@ export function PhysicsLab({ modules, fee, feeBurnBps, fmt, onPublish, onClaim, 
           {duplicate && <div className="small danger-text">Такой закон уже есть: «{duplicate.name}». Публикация разрешена, но конкурировать придётся ценой роялти.</div>}
           {nameErr && <div className="small danger-text">{nameErr}</div>}
           {note && <div className="muted small">{note}</div>}
-          <button className="btn portal" disabled={!!err || !!nameErr || busy} onClick={publish}>⚗ Опубликовать закон · {fmt(fee)}</button>
+          <button className="btn portal" disabled={!!err || !!nameErr || busy} onClick={publish}><Art name="lab" size={20} /> Опубликовать закон · {fmt(fee)}</button>
           {msg && <div className={msg.bad ? "small danger-text" : "small ok-text"}>{msg.t}</div>}
         </div>
       </section>
 
       <section className="lab-col wide">
-        <div className="panel-title">📜 Рынок законов физики</div>
+        <div className="panel-title"><Glyph name="scroll" size={17} />Рынок законов физики</div>
         <table className="market">
           <thead><tr><th>Закон</th><th>Автор</th><th>Миров</th><th>Жизнь</th><th>Роялти</th><th>Заработано</th><th /></tr></thead>
           <tbody>
@@ -139,8 +140,8 @@ export function PhysicsLab({ modules, fee, feeBurnBps, fmt, onPublish, onClaim, 
                 <td>{(m.law.royaltyBps / 100).toFixed(1)}%</td>
                 <td className="small">{fmt(m.earned + m.accrued)}</td>
                 <td className="actions">
-                  <button className="chip" title="Скопировать в редактор" onClick={() => { setLaw({ ...m.law }); setName(`${m.name.slice(0, 20)}′`); }}>✎</button>
-                  {onUse && <button className="chip" title="Выбрать для новой вселенной" onClick={() => onUse(m.id)}>⧉</button>}
+                  <button className="chip" title="Скопировать в редактор" onClick={() => { setLaw({ ...m.law }); setName(`${m.name.slice(0, 20)}′`); }}><Glyph name="edit" size={14} /></button>
+                  {onUse && <button className="chip" title="Выбрать для новой вселенной" onClick={() => onUse(m.id)}><Art name="nested" size={16} /></button>}
                   {m.mine && m.accrued > 0n && onClaim && <button className="chip on" onClick={() => onClaim(m.id)}>Забрать {fmt(m.accrued)}</button>}
                 </td>
               </tr>

@@ -4,10 +4,15 @@ import { rcr } from "../lib/format";
 import { Modal } from "../ui/Modal";
 import { AmountField, amountOf } from "../ui/fields";
 import { blocked, type ChainCtx } from "./ctx";
+import { Art } from "../ui/Icon";
 
 type Kind = "root" | "child" | "neutral";
 const TITLE: Record<Kind, string> = { root: "Новая корневая вселенная", child: "Вселенная внутри клетки", neutral: "Нейтральный квантовый мир" };
-const BTN: Record<Kind, string> = { root: "◈ Создать вселенную", child: "⧉ Запустить вселенную в клетке", neutral: "⚖ Открыть нейтральный мир" };
+const BTN: Record<Kind, React.ReactNode> = {
+  root: <><Art name="world" size={20} /> Создать вселенную</>,
+  child: <><Art name="nested" size={20} /> Запустить вселенную в клетке</>,
+  neutral: <><Art name="neutral" size={20} /> Открыть нейтральный мир</>,
+};
 
 export function CreateWorldButton({ c, kind, hostIndex }: { c: ChainCtx; kind: Kind; hostIndex?: number }) {
   const [open, setOpen] = useState(false);

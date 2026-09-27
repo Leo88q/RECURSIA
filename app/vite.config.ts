@@ -11,6 +11,21 @@ const security = (env: Record<string, string>): Plugin => ({
   transformIndexHtml(html) {
     return html.replace("<head>", `<head>\n    <meta http-equiv="Content-Security-Policy" content="${buildCsp(env, { meta: true })}" />`);
   },
+});
+
+// Social previews need absolute URLs: VITE_SITE_URL=https://recursia.example → og:image / og:url.
+// Without it the tags stay relative (fine for the app, weaker for link unfurling).
+const siteUrl = (env: Record<string, string>): Plugin => ({
+  name: "recursia-site-url",
+  transformIndexHtml(html) {
+    const base = (env.VITE_SITE_URL ?? "").replace(/\/+$/, "");
+    if (base && !/^https:\/\/[^\s"'<>]+$/.test(base)) throw new Error("VITE_SITE_URL must be an https:// origin");
+    return html.replaceAll("__SITE_URL__", base);
+  },
+});
+const headersAsset = (env: Record<string, string>): Plugin => ({
+  name: "recursia-headers",
+  apply: "build",
   generateBundle() {
     this.emitFile({ type: "asset", fileName: "_headers", source: headersFile(env) });
   },
@@ -19,7 +34,7 @@ const security = (env: Record<string, string>): Plugin => ({
 export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, process.cwd(), "VITE_"), ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("VITE_"))) } as Record<string, string>;
   return {
-    plugins: [react(), security(env)],
+    plugins: [react(), security(env), siteUrl(env), headersAsset(env)],
     define: { "process.env": {}, global: "globalThis" },
     resolve: { alias: { buffer: "buffer/" } },
     server: { host: "0.0.0.0", port: 5173, allowedHosts: true, strictPort: true },

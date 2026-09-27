@@ -31,7 +31,7 @@ describe("smoke", () => {
     expect(location.hash).toMatch(/#\/sandbox\/root-0\/28/);
     expect(text()).toContain("Клетка #28");
     // run some sim steps via the "шаг" button
-    const step = [...document.querySelectorAll("button")].find((b) => b.textContent === "шаг")!;
+    const step = [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "один шаг")!;
     for (let i = 0; i < 30; i++) await act(async () => { step.click(); });
     // wallet tab
     const walletTab = [...document.querySelectorAll('[role="tab"]')].find((b) => b.textContent?.includes("Кошелёк")) as HTMLButtonElement;

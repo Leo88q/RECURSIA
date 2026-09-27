@@ -79,6 +79,7 @@ Keeper permissionless — запускать может кто угодно, н�
 | `VITE_WS_URL` | из RPC | отдельный websocket, если провайдер его требует |
 | `VITE_PROGRAM_ID` | `PROGRAM_ID_STR` из SDK | адрес вашей программы |
 | `VITE_MAX_PRIORITY_FEE` | `500000` | жёсткий потолок priority fee, µ-lamports/CU |
+| `VITE_SITE_URL` | — | публичный https-origin сайта: абсолютные `og:image`/`og:url` для превью ссылок |
 
 Конфигурация валидируется при старте (`app/src/lib/config.ts`): http-RPC вне localnet, логин/пароль в URL,
 неверный base58 — клиент покажет экран ошибки вместо тихой поломки. RPC-ключ в URL виден всем:
@@ -91,6 +92,13 @@ npm -w app run check:bundle     # бюджет бандла, CSP-meta, _headers,
 ```
 Результат — статический `app/dist` (hash-роутинг `#/…`, поэтому серверные rewrite не нужны; работает и с IPFS/Arweave-зеркал).
 Первый экран (песочница) ≈ 115 KB gzip; кошелёк + web3 (≈ 150 KB gzip) грузятся лениво только в ончейн-режиме.
+
+### Графика
+Иконки, фон и ключевой арт — собственные ассеты в `app/src/assets/art` (WebP, хеш в имени → immutable-кеш), PWA-иконки и
+Open Graph-картинка — в `app/public/icons`, `app/public/og.jpg`. Исходники (PNG ~17 МБ) в git не хранятся; оптимизированные
+файлы собираются воспроизводимо: `app/scripts/build-art.sh <папка с PNG>` (ImageMagick с WebP). Чёрный фон неоновых иконок
+превращается в настоящую прозрачность (альфа из яркости + un-premultiply). Бюджет: все картинки ≤ 400 KB, каждая ≤ 160 KB
+(`check:bundle`). Мелкие UI-глифы — inline-SVG (`app/src/ui/Icon.tsx`), без emoji: они превращаются в «тофу» на системах без шрифта.
 
 ### Заголовки безопасности
 Единый источник — `app/security.mjs` (CSP, HSTS, X-Frame-Options, Referrer-Policy, Permissions-Policy, COOP/CORP).
