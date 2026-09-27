@@ -55,7 +55,7 @@ scripts/             CI-гигиена: скрытый unicode, supply-chain, а
 ```bash
 npm ci --ignore-scripts
 npm test                  # SDK (58) + keeper (9) + клиент (60) тестов
-npm run econ -- --quick   # экономическая стресс-симуляция: 10 сценариев, 13 инвариантов, PnL по ролям
+npm run econ -- --quick   # экономическая стресс-симуляция: 10 сценариев, 14 инвариантов, PnL по ролям, доля игроков в плюсе
 npm run dev               # клиент на http://localhost:5173 (режим «Песочница» работает без блокчейна)
 ```
 
