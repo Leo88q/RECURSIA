@@ -38,5 +38,9 @@ describe("season UI", () => {
     expect(t).toMatch(/Топ-10 делит фонд: 30% \/ 20% \/ 15%/);
     expect(t).toMatch(/не может быть больше 25% ваших очков/);
     expect(t).toContain("fund_sponsor_pool");
+    expect(t).toMatch(/Доля за эффективность\s*\(30%\)/);
+    expect(t).toMatch(/не больше 200% его вклада/);
+    expect(t).toMatch(/Турниры\. В первую эпоху сезона/);
+    expect(t).toMatch(/лучшие 30% участников/);
   });
 });
