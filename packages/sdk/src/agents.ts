@@ -1,7 +1,7 @@
 // AI inhabitants. Deterministic, heuristic + evolutionary — no LLM, no
 // external text input, so there is no prompt-injection surface (#71–#74).
 // On-chain they act only through bounded AgentPermits (#75).
-import { ONE, TERRITORIES } from "./constants.js";
+import { ONE, TERRITORIES, TOURNAMENT_TIERS } from "./constants.js";
 
 /** Price unit the agents reason in: plant_cost / 5 (= 70 SKR at default prices).
  *  Keeps AI valuations proportional to the live price list. */
@@ -75,8 +75,18 @@ export class AIAgent {
    *   `owner`: it spends only the permit vault, territories go to the owner.
    */
   readonly skill: Skill;
-  constructor(readonly id: string, readonly personality: Personality, seed: number, readonly owner?: string, opts: { skill?: Skill } = {}) {
+  /**
+   * `guided`: the player uses the client's safety hints (models a novice in the
+   * real app): plantings the preview says will die are skipped, and the
+   * "deposit runs out" warning is heeded.
+   */
+  readonly guided: boolean;
+  /** Tournament tier this agent enters each season (undefined = never). */
+  readonly tournamentTier?: number;
+  constructor(readonly id: string, readonly personality: Personality, seed: number, readonly owner?: string, opts: { skill?: Skill; guided?: boolean; tournamentTier?: number } = {}) {
     this.skill = opts.skill ?? "skilled";
+    this.guided = opts.guided ?? false;
+    this.tournamentTier = opts.tournamentTier;
     this.rng = new Rng(seed);
     this.genome = {
       aggression: 0.3 + this.rng.next() * 0.6,
@@ -113,11 +123,22 @@ export class AIAgent {
     if (me) for (const [w, i] of mine) {
       const t = w.territories[i];
       const need = epochTax(t.price, m.params.harbergerBps) * 2n;
-      const forgets = this.skill === "novice" && this.rng.next() < 0.3;
+      const forgets = this.skill === "novice" && !this.guided && this.rng.next() < 0.3;
       if (!forgets && t.deposit < need && me.wallet > need) { this.try(() => m.topUp(this.id, w.id, i, need - t.deposit), log); }
       if (w.pending[i] > 0n) this.try(() => { const a = m.collect(this.id, w.id, i); this.genome.fitness += Number(a / unitOf(m)); }, log);
     }
     if (me && this.skill === "pro" && m.seasonPointsOf(this.id) > 0n) this.try(() => m.seasonSubmit(this.id), log);
+    // tournaments: enter once per season (only if the fee is ≤ 10% of the wallet), keep the score posted
+    if (me && this.tournamentTier !== undefined) {
+      const tier = this.tournamentTier;
+      const t = m.tournament(m.seasonId, tier);
+      if (t?.players.includes(this.id)) {
+        if (m.seasonPointsOf(this.id) > 0n) this.try(() => m.tournamentSubmit(this.id, tier), log);
+      } else if (m.canJoinTournament(this.id, tier) === null) {
+        const fee = t ? t.entryFee : m.params.plantCost * TOURNAMENT_TIERS[tier];
+        if (fee * 10n <= me.wallet) this.try(() => m.joinTournament(this.id, tier), log);
+      }
+    }
     if (me && me.claimable > 0n) this.try(() => m.withdraw(this.id, me.claimable), log);
 
     // 2) acquire: pick best value/price opportunity
@@ -158,7 +179,13 @@ export class AIAgent {
       if (wallet() < m.params.plantCost * 4n) break;
       if (this.skill === "novice") {
         // plants a favourite shape without simulating the neighbourhood
-        if (this.rng.next() < 0.5) { const p = this.rng.pick(this.genome.library); this.try(() => m.plant(this.id, w.id, i, p, opts), log); planted++; }
+        if (this.rng.next() < 0.5) {
+          const p = this.rng.pick(this.genome.library);
+          // guided: the client previews the planting (same deterministic sim as the
+          // program) and warns "эта посадка вымрет / не улучшит участок"
+          if (this.guided && (w.alive[i] > 12 || evaluatePattern(w, i, p, 8, this.rng, 1) <= w.alive[i])) continue;
+          this.try(() => m.plant(this.id, w.id, i, p, opts), log); planted++;
+        }
         continue;
       }
       const candidates = [...this.genome.library];
