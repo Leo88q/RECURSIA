@@ -383,6 +383,9 @@ pub fn top_up(mut ctx: Context<HolderOp>, amount: u64) -> Result<()> {
 
 pub fn withdraw_deposit(mut ctx: Context<HolderOp>, amount: u64) -> Result<()> {
     require_top_level()?;
+    // Zero is rejected like every other money path (checklist #111): a 0-amount
+    // call must never be a silent no-op that skips the guards below.
+    require!(amount > 0, RecursiaError::DepositTooSmall);
     accrue_or_fail(&mut ctx)?;
     let p = ctx.accounts.config.params;
     let t = &mut ctx.accounts.territory;

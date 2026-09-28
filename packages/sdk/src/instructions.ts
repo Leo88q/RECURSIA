@@ -10,6 +10,26 @@ const W = (pubkey: PublicKey): AccountMeta => ({ pubkey, isSigner: false, isWrit
 const R = (pubkey: PublicKey): AccountMeta => ({ pubkey, isSigner: false, isWritable: false });
 const S = (pubkey: PublicKey, writable = false): AccountMeta => ({ pubkey, isSigner: true, isWritable: writable });
 
+/**
+ * Every instruction name the program accepts — the client-side composition
+ * allow-list (checklist #104/#105): the wallet UI refuses any RECURSIA
+ * instruction whose Anchor discriminator is not in this list, so an injected
+ * transaction can't hide an unknown instruction behind the right program id.
+ * Completeness (this list ↔ SDK builders ↔ Anchor IDL) is enforced both ways
+ * by `scripts/check-idl.ts` in CI.
+ */
+export const RECURSIA_IX_NAMES = [
+  "acquire", "advance_epoch", "agent_acquire", "agent_plant", "breach", "cancel", "claim_architect",
+  "claim_module_royalties", "claim_season_prize", "claim_tournament_prize", "claim_world_epoch",
+  "close_tournament", "close_tournament_entry", "collect", "create_child_world", "create_neutral_world",
+  "create_permit", "create_root_world", "execute", "execute_rebellion", "fund_permit", "fund_reward_pool",
+  "fund_sponsor_pool", "fund_world", "initialize", "plant", "propose", "quantum_collapse", "quantum_commit",
+  "quantum_decohere", "quantum_observe", "register_module", "revoke_permit", "season_submit", "set_pause",
+  "set_price", "settle", "start_rebellion", "swap_accept", "swap_cancel", "swap_offer", "swap_resolve",
+  "tick", "top_up", "tournament_join", "tournament_settle", "tournament_submit", "vote_rebellion",
+  "withdraw", "withdraw_deposit", "withdraw_permit",
+] as const;
+
 export class RecursiaIx {
   readonly pda: Pdas;
   /**

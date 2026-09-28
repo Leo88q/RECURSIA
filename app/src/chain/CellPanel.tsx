@@ -104,8 +104,8 @@ function HolderCards({ c, idx }: { c: ChainCtx; idx: number }) {
         })}>Собрать {rcr(c.model!.pending[idx], 2)}</button>
         <AmountField label="Сумма" value={amt} onChange={setAmt} />
         <div className="row-wrap">
-          <button className="btn" disabled={a === null || !!blocked(c, { spend: a ?? 0n })} onClick={() => c.run({ title: "Пополнение депозита", lines: [`+${rcr(a!)} к депозиту клетки #${idx}`], ixs: [c.rx.topUp(c.me!, k, idx, a!)] })}>Пополнить</button>
-          <button className="btn" disabled={a === null || a > t.deposit || !!blocked(c, { paused: false })} onClick={() => c.run({ title: "Вывод депозита", lines: [`−${rcr(a!)} из депозита клетки #${idx}`, "Если депозит кончится — клетку изымут за долги"], ixs: c.withAta([c.rx.withdrawDeposit(c.me!, k, idx, a!)]) })}>Вывести</button>
+          <button className="btn" disabled={a === null || a === 0n || !!blocked(c, { spend: a ?? 0n })} onClick={() => c.run({ title: "Пополнение депозита", lines: [`+${rcr(a!)} к депозиту клетки #${idx}`], ixs: [c.rx.topUp(c.me!, k, idx, a!)] })}>Пополнить</button>
+          <button className="btn" disabled={a === null || a === 0n || a > t.deposit || !!blocked(c, { paused: false })} onClick={() => c.run({ title: "Вывод депозита", lines: [`−${rcr(a!)} из депозита клетки #${idx}`, "Если депозит кончится — клетку изымут за долги"], ixs: c.withAta([c.rx.withdrawDeposit(c.me!, k, idx, a!)]) })}>Вывести</button>
         </div>
       </div>
       <div className="card">

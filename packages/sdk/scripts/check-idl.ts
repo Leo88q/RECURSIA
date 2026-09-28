@@ -2,7 +2,7 @@
 // (checklist #26): same discriminators, account counts and signer/writable flags.
 import { readFileSync } from "node:fs";
 import { Keypair, PublicKey, type TransactionInstruction } from "@solana/web3.js";
-import { DEFAULT_PARAMS, RecursiaIx } from "../src/index.js";
+import { DEFAULT_PARAMS, RECURSIA_IX_NAMES, RecursiaIx } from "../src/index.js";
 
 const idl = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const x = new RecursiaIx(new PublicKey(idl.address));
@@ -92,5 +92,11 @@ for (const ix of idl.instructions) {
   });
 }
 for (const name of Object.keys(built)) if (!idl.instructions.find((i: { name: string }) => i.name === name)) fail(`IDL missing ${name}`);
+// The client-side composition allow-list must be complete (checklist #104):
+// every instruction the SDK can build has to be listed for the wallet UI, and
+// the list must not contain names that no longer exist.
+const names = new Set<string>(RECURSIA_IX_NAMES);
+for (const name of Object.keys(built)) if (!names.has(name)) fail(`RECURSIA_IX_NAMES missing ${name} (client would refuse it)`);
+for (const name of names) if (!(name in built)) fail(`RECURSIA_IX_NAMES has unknown ${name}`);
 if (errors) process.exit(1);
 console.log(`IDL check OK: ${idl.instructions.length} instructions match the SDK`);

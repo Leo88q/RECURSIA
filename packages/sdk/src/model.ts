@@ -5,7 +5,7 @@
 // Invariants are asserted after every operation (checklist #49, #53).
 import {
   BREACH_POPULATION, BREACH_RESONANCE, DEFAULT_PARAMS, MAX_ARCHITECT_FEE_BPS, MAX_DEPTH, MAX_PRICE, ONE,
-  PLANT_COOLDOWN_TICKS, PRICE_CHANGE_COOLDOWN_SLOTS, REBELLION_COOLDOWN_SLOTS, REBELLION_MIN_VOTES,
+  PLANT_COOLDOWN_TICKS, PRICE_CHANGE_COOLDOWN_SLOTS, REBELLION_COOLDOWN_SLOTS, REBELLION_HOLD_DIV, REBELLION_MIN_VOTES,
   REBELLION_THRESHOLD_BPS, SEASON_EPOCHS, SEASON_RANK_BPS, SEASON_SHARE_BPS, SEASON_TOP, SKR_SUPPLY_APPROX,
   SPONSOR_CAP_BPS, SPONSOR_RATE_BPS, TERRITORIES, EFFICIENCY_CAP_BPS, EFFICIENCY_SHARE_BPS, TOURNAMENT_JOIN_EPOCHS,
   TOURNAMENT_MAX_PLAYERS, TOURNAMENT_RAKE_BPS, TOURNAMENT_TIERS, TOURNAMENT_TOP, type Params,
@@ -679,7 +679,10 @@ export class GameModel {
 
   canExecuteRebellion(w: MWorld) {
     const owned = w.territories.filter((t) => t.holder).length;
-    return this.rebellionActive(w) && w.rebellionVotes >= REBELLION_MIN_VOTES && w.rebellionVotes * 10_000 >= owned * REBELLION_THRESHOLD_BPS;
+    // hold-up (checklist #94): no atomic create-vote-execute, mirrors `execute_rebellion`
+    const hold = Math.floor(Number(this.params.epochSlots) / REBELLION_HOLD_DIV);
+    return this.rebellionActive(w) && this.slot >= w.lastRebellionSlot + hold
+      && w.rebellionVotes >= REBELLION_MIN_VOTES && w.rebellionVotes * 10_000 >= owned * REBELLION_THRESHOLD_BPS;
   }
 
   executeRebellion(id: string) {

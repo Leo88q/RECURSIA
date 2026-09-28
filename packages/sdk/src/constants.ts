@@ -51,6 +51,8 @@ export const PRICE_CHANGE_COOLDOWN_SLOTS = 150;
 export const REBELLION_THRESHOLD_BPS = 6_667;
 export const REBELLION_MIN_VOTES = 8;
 export const REBELLION_COOLDOWN_SLOTS = 216_000;
+/** Hold-up: execution only after epochSlots / DIV slots (checklist #94), mirrors `P/constants.rs`. */
+export const REBELLION_HOLD_DIV = 8;
 export const BREACH_POPULATION = 400;
 export const BREACH_RESONANCE = 64;
 export const PERMIT_PLANT = 1;

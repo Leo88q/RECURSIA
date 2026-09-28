@@ -8,9 +8,9 @@
 //           → decoded Russian error or explorer link.
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { ComputeBudgetProgram, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
+import { ComputeBudgetProgram, PublicKey, TransactionMessage, VersionedTransaction, type TransactionInstruction } from "@solana/web3.js";
 import bs58 from "bs58";
-import { ASSOCIATED_TOKEN_PROGRAM_ID, ata, explainTxError, ORAO_VRF_ID } from "@recursia/sdk";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, ata, explainTxError, ixDiscriminator, ORAO_VRF_ID, RECURSIA_IX_NAMES, REQUEST_V2_IX } from "@recursia/sdk";
 import { CONFIG, explorerUrl } from "../lib/config";
 import { MINT } from "./mint";
 import { formatAmount, lamportsToSol, shortAddr } from "../lib/format";
@@ -35,13 +35,42 @@ interface Sim { units?: number; logs: string[]; error?: string; rcrBefore: bigin
 interface State { req: TxRequest; phase: TxPhase; sim?: Sim; signature?: string; error?: string }
 
 const PROGRAM_ID = new PublicKey(CONFIG.programId);
+/**
+ * Program allow-list (checklist #51, «анти-дрейнер»). SystemProgram is
+ * deliberately absent: the app never builds a top-level System instruction
+ * (transfer/assign/create/durable-nonce), and a compromised page must not be
+ * able to smuggle one in — ATA creation references System only as an account.
+ * The Token program is absent too, so Approve/SetAuthority are impossible.
+ */
 const ALLOWED_PROGRAMS = new Map<string, string>([
   [PROGRAM_ID.toBase58(), "RECURSIA"],
   [ComputeBudgetProgram.programId.toBase58(), "Compute Budget"],
   [ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(), "Associated Token"],
-  [SystemProgram.programId.toBase58(), "System"],
   [ORAO_VRF_ID.toBase58(), "ORAO VRF (оракул случайности)"],
 ]);
+
+/** 8-byte Anchor discriminators of every instruction this app may sign (fail-closed). */
+const KNOWN_IX = new Set(RECURSIA_IX_NAMES.map((n) => Array.from(ixDiscriminator(n), (b) => b.toString(16).padStart(2, "0")).join("")));
+
+/**
+ * Composition guard (checklist #104/#105): program allow-list + per-program
+ * opcode checks, so nothing unexpected hides behind an allowed program id —
+ * only RECURSIA instructions from the known list, ATA create/create_idempotent,
+ * ORAO request_v2, and any ComputeBudget hint (self-scoped, harmless).
+ */
+export function refuseIx(ix: TransactionInstruction): string | null {
+  const pid = ix.programId.toBase58();
+  if (!ALLOWED_PROGRAMS.has(pid)) return `Посторонняя программа ${pid} — отказ`;
+  if (pid === PROGRAM_ID.toBase58()) {
+    const hex = Array.from(ix.data.subarray(0, 8), (b) => b.toString(16).padStart(2, "0")).join("");
+    if (ix.data.length < 8 || !KNOWN_IX.has(hex)) return `Неизвестная инструкция RECURSIA ${hex || "(пустые данные)"} — отказ`;
+  } else if (pid === ASSOCIATED_TOKEN_PROGRAM_ID.toBase58()) {
+    if (ix.data.length < 1 || (ix.data[0] !== 0 && ix.data[0] !== 1)) return "Associated Token: разрешены только create/create_idempotent — отказ";
+  } else if (pid === ORAO_VRF_ID.toBase58()) {
+    if (ix.data.length < REQUEST_V2_IX.length || !REQUEST_V2_IX.every((b, i) => ix.data[i] === b)) return "ORAO VRF: разрешён только request_v2 — отказ";
+  }
+  return null;
+}
 
 const TxCtx = createContext<((r: TxRequest) => Promise<TxResult>) | null>(null);
 export function useTx() {
@@ -86,8 +115,8 @@ export function TxProvider({ children, onConfirmed }: { children: ReactNode; onC
 
   const run = useCallback((req: TxRequest): Promise<TxResult> => {
     if (!wallet.publicKey) { toast.push({ kind: "bad", title: "Подключите кошелёк" }); return Promise.resolve({ ok: false, error: "no wallet", cancelled: true }); }
-    const foreign = req.ixs.find((ix) => !ALLOWED_PROGRAMS.has(ix.programId.toBase58()));
-    if (foreign) return Promise.resolve({ ok: false, error: `Посторонняя программа ${foreign.programId.toBase58()} — отказ` });
+    const refused = req.ixs.map(refuseIx).find(Boolean);
+    if (refused) return Promise.resolve({ ok: false, error: refused });
     resolver.current?.({ ok: false, error: "заменено новой транзакцией", cancelled: true });
     const payer = wallet.publicKey;
     setSt({ req, phase: "simulating" });

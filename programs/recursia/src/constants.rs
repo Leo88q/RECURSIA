@@ -96,6 +96,13 @@ pub const TOURNAMENT_JOIN_EPOCHS: u64 = 1;
 pub const REBELLION_THRESHOLD_BPS: u64 = 6_667;
 pub const REBELLION_MIN_VOTES: u8 = 8;
 pub const REBELLION_COOLDOWN_SLOTS: u64 = 216_000;
+/// Hold-up time between opening the vote window and executing a rebellion
+/// (checklist #94, низкая явка + скупка голосов): execution is allowed only
+/// after `epoch_slots / REBELLION_HOLD_DIV` slots. This makes an atomic
+/// "start + vote + execute in one transaction/slot" capture impossible and
+/// gives the watcher (60 s interval) a slice of the window to alert and the
+/// admin multisig time to `set_pause` before the rebellion lands.
+pub const REBELLION_HOLD_DIV: u64 = 8;
 pub const BREACH_POPULATION: u32 = 400;
 pub const BREACH_RESONANCE: u16 = 64;
 

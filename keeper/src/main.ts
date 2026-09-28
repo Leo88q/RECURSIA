@@ -7,6 +7,9 @@
  *
  * Env:
  *   RPC_URL                 https RPC endpoint (required)
+ *   RPC_URL_SECONDARY       optional second independent endpoint: every round the
+ *                           config is fetched from both and any byte difference
+ *                           skips the round (checklist #103, cross-RPC check)
  *   KEEPER_KEYPAIR          path to a JSON keypair file (required, chmod 600)
  *   PROGRAM_ID              optional override of the program id
  *   MINT                    game currency mint (default: official SKR; devnet test mint otherwise)
@@ -20,6 +23,8 @@
  *  - every transaction is simulated before signing; failures are skipped;
  *  - the keeper only ever signs instructions it built itself from the SDK and
  *    only for PROGRAM_ID + ComputeBudget + ATA program (allow-list below);
+ *  - with RPC_URL_SECONDARY the signing decision is taken only on a state both
+ *    independent endpoints agree on (checklist #103);
  *  - hard caps: txs per round, priority fee, SOL floor.
  */
 import { readFileSync, statSync, openSync, closeSync, unlinkSync, existsSync } from "node:fs";
@@ -33,6 +38,7 @@ import {
   decodeConfig, decodeSeason, decodeTournament, decodeSuperposition, decodeSwap, decodeTerritory, decodeWorld,
 } from "@recursia/sdk";
 import { DEFAULT_LIMITS, crankIncome, plan, seedHex, type Snapshot } from "./plan.js";
+import { divergence } from "./audit.js";
 import { toInstruction } from "./ix.js";
 
 const args = new Set(process.argv.slice(2));
@@ -47,6 +53,10 @@ const env = (k: string, d?: string) => {
 const RPC_URL = env("RPC_URL");
 if (!/^https:\/\//.test(RPC_URL) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?/.test(RPC_URL)) {
   console.error("RPC_URL must be https (or localhost)"); process.exit(2);
+}
+const RPC2 = process.env.RPC_URL_SECONDARY;
+if (RPC2 && !/^https:\/\//.test(RPC2) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?/.test(RPC2)) {
+  console.error("RPC_URL_SECONDARY must be https (or localhost)"); process.exit(2);
 }
 const programId = new PublicKey(env("PROGRAM_ID", PROGRAM_ID.toBase58()));
 /** Game currency. Mainnet: the official SKR mint; devnet/localnet: the deployment's test mint. */
@@ -146,6 +156,7 @@ async function send(conn: Connection, payer: Keypair, ixs: TransactionInstructio
 async function main() {
   const payer = loadKeypair(env("KEEPER_KEYPAIR"));
   const conn = new Connection(RPC_URL, "confirmed");
+  const conn2 = RPC2 ? new Connection(RPC2, "confirmed") : null;
   const rx = new RecursiaIx(programId, MINT);
   const prog = await conn.getAccountInfo(programId);
   if (!prog?.executable) throw new Error(`program ${programId.toBase58()} not deployed on this cluster`);
@@ -170,6 +181,16 @@ async function main() {
       const bal = await conn.getBalance(payer.publicKey);
       if (bal < MIN_LAMPORTS) { console.error(`balance ${bal / 1e9} SOL below floor — stopping`); break; }
       const snap = await snapshot(conn, rx);
+      if (conn2) {
+        // cross-RPC check (checklist #103): sign only on a state both independent
+        // endpoints agree on; config bytes are the whole decision-relevant view
+        const [a, b] = await Promise.all([conn.getAccountInfo(rx.pda.config()), conn2.getAccountInfo(rx.pda.config())]);
+        const d = divergence(
+          { config: a ? new Uint8Array(a.data) : null, upgradeAuthority: null },
+          { config: b ? new Uint8Array(b.data) : null, upgradeAuthority: null },
+        );
+        if (d.length) throw new Error(`cross-RPC check failed — round skipped: ${d.join("; ")}`);
+      }
       const actions = plan(snap, DEFAULT_LIMITS);
       if (actions.length) {
         console.log(`slot ${snap.slot}: ${actions.length} action(s), expected crank income ${crankIncome(actions, snap.config)}`);

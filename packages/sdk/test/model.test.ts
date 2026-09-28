@@ -91,6 +91,10 @@ describe("game model", () => {
     m.advanceSlots(5);
     m.startRebellion("r0", w.id, 20);
     ids.slice(1).forEach((id, i) => m.voteRebellion(id, w.id, 21 + i));
+    // hold-up (checklist #94): quorum alone never executes in the same slot —
+    // the window must be open for epochSlots / REBELLION_HOLD_DIV first
+    expect(m.canExecuteRebellion(w)).toBe(false);
+    m.advanceSlots(Math.floor(Number(m.params.epochSlots) / 8));
     expect(m.canExecuteRebellion(w)).toBe(true);
     m.executeRebellion(w.id);
     expect(w.architect).toBeNull();

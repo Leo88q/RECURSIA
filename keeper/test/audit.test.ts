@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import type { ConfigAccount, PlayerAccount, TournamentAccount, WorldAccount } from "@recursia/sdk";
-import { audit, type AuditInput } from "../src/audit.js";
+import { audit, divergence, type AuditInput } from "../src/audit.js";
 
 const key = () => Keypair.generate().publicKey;
 const admin = key(), upgrader = key();
@@ -11,7 +11,11 @@ function healthy(): AuditInput {
     admin, paused: false, pending: { kind: "None" }, pendingEta: 0n, pendingNonce: 0n,
     totalSunk: 500n, totalEmitted: 200n, totalSponsored: 10n, totalSeasonFunded: 90n, totalSeasonPaid: 40n, treasurySeen: 70n,
   } as unknown as ConfigAccount;
-  const world = { energy: 100n, rewardsReserved: 30n, deposits: 20n, architectAccrued: 5n, quantumEscrow: 15n, territoryPending: [10n, 20n, ...new Array(62).fill(0n)] } as unknown as WorldAccount;
+  const world = {
+    energy: 100n, rewardsReserved: 30n, deposits: 20n, architectAccrued: 5n, quantumEscrow: 15n,
+    territoryPending: [10n, 20n, ...new Array(62).fill(0n)],
+    rebellionId: 0, rebellionVotes: 0, rebellionDeadline: 0n, lastRebellionSlot: 0n, liberated: false, ownedMask: 0n,
+  } as unknown as WorldAccount;
   return {
     config,
     bal: { rewardPool: 1_300n, sponsorPool: 90n, seasonPool: 50n, tournamentPool: 25n, claims: 60n, treasury: 80n }, // funded implied: 1000 / 100
@@ -70,5 +74,42 @@ describe("live invariant audit", () => {
     const n = audit(x, s0).notices.join("\n");
     expect(n).toMatch(/ADMIN CHANGED/); expect(n).toMatch(/PROGRAM PAUSED/); expect(n).toMatch(/UPGRADE AUTHORITY CHANGED: .* none \(immutable\)/);
     expect(PublicKey.isOnCurve(admin.toBytes())).toBe(true);
+  });
+
+  it("rebellion lifecycle is announced once each: start, quorum, liberation (checklist #94)", () => {
+    // one world key across the steps: the monitor tracks per-world state
+    const base = healthy();
+    const s0 = audit(base).state;
+    const step = (over: Partial<WorldAccount>) => {
+      const x = healthy();
+      x.worlds[0] = {
+        ...base.worlds[0],
+        acc: {
+          ...base.worlds[0].acc, rebellionId: 1, rebellionVotes: 1, rebellionDeadline: 100_000n,
+          lastRebellionSlot: 1n, liberated: false, ownedMask: (1n << 12n) - 1n, ...over,
+        },
+      };
+      return x;
+    };
+    const r1 = audit(step({}), s0);
+    expect(r1.notices.join("\n")).toMatch(/REBELLION #1 started in world/);
+    expect(r1.notices.join("\n")).not.toMatch(/QUORUM/); // 1 vote of 12 — nowhere near 2/3
+    const r2 = audit(step({ rebellionVotes: 9 }), r1.state);
+    expect(r2.notices.join("\n")).toMatch(/QUORUM MET \(9\/12 territories\)/);
+    expect(audit(step({ rebellionVotes: 9 }), r2.state).notices).toEqual([]); // announced once
+    const r4 = audit(step({ rebellionVotes: 9, liberated: true }), r2.state);
+    expect(r4.notices.join("\n")).toMatch(/world .* LIBERATED \(rebellion #1 executed\)/);
+  });
+
+  it("cross-RPC divergence of config or upgrade authority is a violation (checklist #103)", () => {
+    const a = { config: new Uint8Array([9, 1, 2, 3]), upgradeAuthority: upgrader };
+    expect(divergence(a, { config: new Uint8Array([9, 1, 2, 3]), upgradeAuthority: upgrader })).toEqual([]);
+    const bad = divergence(a, { config: new Uint8Array([9, 1, 2, 4]), upgradeAuthority: upgrader });
+    expect(bad).toHaveLength(1);
+    expect(bad[0]).toMatch(/config bytes differ between endpoints/);
+    const auth = divergence(a, { config: a.config, upgradeAuthority: null });
+    expect(auth).toHaveLength(1);
+    expect(auth[0]).toMatch(/upgrade authority/);
+    expect(divergence({ config: null, upgradeAuthority: null }, { config: null, upgradeAuthority: null })[0]).toMatch(/missing on one endpoint/);
   });
 });
