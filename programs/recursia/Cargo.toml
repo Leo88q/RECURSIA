@@ -23,7 +23,7 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 [dependencies]
 # checklist #30/#66: exact pins
 anchor-lang = { version = "=0.31.1", features = ["init-if-needed"] }
-anchor-spl = { version = "=0.31.1" }
+anchor-spl = { version = "=1.2.0" }
 
 [dev-dependencies]
 serde_json = "1"
