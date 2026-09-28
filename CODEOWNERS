@@ -1,0 +1,6 @@
+# Обязательное ревью через PR (вместе с branch protection на main — checklist 2.10).
+# Состав команды расширяется добавлением имён: * @owner @teammate1 @teammate2
+*           @Leo88q
+docs/       @Leo88q
+scripts/    @Leo88q
+.github/    @Leo88q

@@ -49,6 +49,17 @@ describe("smoke", () => {
     await act(async () => { location.hash = "#/faq"; window.dispatchEvent(new HashChangeEvent("hashchange")); });
     expect(text()).toContain("Частые вопросы");
     expect(document.querySelector(".me-pill")).toBeNull(); // sandbox header strip is gone with the game
+    // legal pages: footer link on every page → privacy / terms / cookies / risk (checklist 7.1 / 4.3)
+    for (const [hash, marker] of [
+      ["#/privacy", "Оператор и контакты"],
+      ["#/terms", "Запрещённые действия"],
+      ["#/cookies", "Cookies — не используются"],
+      ["#/risk", "Не финансовый совет"],
+    ] as const) {
+      await act(async () => { location.hash = hash; window.dispatchEvent(new HashChangeEvent("hashchange")); });
+      expect(text()).toContain(marker);
+      expect(document.querySelector(".app-footer-links")).not.toBeNull();
+    }
     const crashes = errors.filter((e) => /crashed|Uncaught|is not a function|Cannot read/.test(e));
     console.error = origErr;
     expect(crashes).toEqual([]);

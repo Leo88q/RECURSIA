@@ -1,3 +1,6 @@
+# Контекст сборки образа сайта (checklist 2.7): в образ не попадают git, секреты,
+# тесты, документация и Rust-исходники программы. Проверено: npm ci корректно
+# пропускает отсутствующую workspace-директорию tests/chain (npm 10.9.8).
 **/node_modules
 **/dist
 target
@@ -12,3 +15,33 @@ keys
 **/*-keypair.json
 id.json
 keeper.json
+
+# --- секреты и credential'ы (checklist 1.3.1 / 2.7) ---
+*.pem
+*.p12
+*.pfx
+*.keystore
+*.jks
+*.key
+*.sqlite
+*.sqlite3
+*.sql
+*.bak
+*.dump
+serviceAccount*.json
+credentials*.json
+secrets*.json
+firebase*.json
+
+# --- не нужен для сборки клиента ---
+docs
+tests
+programs
+scripts
+.cargo
+Cargo.toml
+Cargo.lock
+rust-toolchain.toml
+Anchor.toml
+README.md
+.gitleaks.toml

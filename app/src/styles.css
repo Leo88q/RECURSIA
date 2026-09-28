@@ -614,3 +614,20 @@ details.tech code { word-break: break-all; }
 .mentor .tip.warn svg { color: #ffc861; }
 .mentor .tip.tip svg { color: var(--mint); }
 .mentor .tip.ok svg { color: #8fd18f; }
+
+/* legal pages (checklist 4.5 / 5.2 / 7.1) + global footer */
+.policy { flex: 1; overflow-y: auto; min-height: 0; outline: none; }
+.policy-doc { max-width: 860px; margin: 22px auto 30px; padding: 26px 30px; gap: 14px; }
+.policy-title { margin: 0; font-size: 22px; letter-spacing: 0.02em; }
+.policy-doc h2 { margin: 18px 0 6px; font-size: 16px; }
+.policy-doc p, .policy-doc li { line-height: 1.55; font-size: 14px; }
+.policy-doc ul.l-list { font-size: 14px; }
+.policy-note { border: 1px dashed rgba(255, 214, 107, 0.5); background: rgba(255, 214, 107, 0.07); border-radius: 10px; padding: 10px 14px; font-size: 13px; line-height: 1.5; }
+.policy-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.policy-table th, .policy-table td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+.policy-table th { color: var(--muted); font-weight: 600; }
+.policy-table code { white-space: normal; }
+
+.app-footer { border-top: 1px solid var(--line); padding: 12px 18px 14px; display: grid; gap: 6px; background: rgba(7, 6, 15, 0.7); flex: none; }
+.app-footer-links { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.app-footer-note { margin: 0; }

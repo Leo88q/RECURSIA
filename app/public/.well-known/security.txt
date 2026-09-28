@@ -1,0 +1,4 @@
+Contact: https://github.com/Leo88q/RECURSIA/security/advisories/new
+Policy: https://github.com/Leo88q/RECURSIA/blob/main/.github/SECURITY.md
+Preferred-Languages: ru, en
+Expires: 2026-09-28T00:00:00.000Z
