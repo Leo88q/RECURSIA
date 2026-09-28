@@ -31,7 +31,16 @@
 | [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md) | механики, новые ончейн-механизмы, игроки и ИИ |
 | [docs/TOKENOMICS.md](docs/TOKENOMICS.md) | SKR, потоки трат, пул наград, спонсорский пул, сезоны, доход студии, результаты econ-sim |
 | [docs/SECURITY.md](docs/SECURITY.md) | модель безопасности и сверка с чек-листом (части 0–3, A–W) |
-| [docs/DEPLOY.md](docs/DEPLOY.md) | деплой devnet → mainnet, multisig, keeper, клиент |
+| [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md) | аудит сайта: секреты, OWASP, cookies/GDPR, статус каждого пункта чек-листа |
+| [docs/DEPLOY.md](docs/DEPLOY.md) | деплой devnet → mainnet, multisig, keeper, клиент, post-deploy проверки |
+| [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | лицензии зависимостей и графика |
+
+## Интеллектуальная собственность
+
+Лицензионного файла в репозитории **нет**: по умолчанию «All rights reserved» — копирование,
+изменение и использование кода разрешены только по явному письменному согласию. Решение открыть код
+(под какой лицензией) принимает команда до mainnet-запуска; до этого время публичность репозитория
+обеспечивает проверяемость (verified build), но не даёт прав.
 
 ## Структура
 ```

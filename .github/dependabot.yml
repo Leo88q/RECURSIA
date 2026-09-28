@@ -1,0 +1,34 @@
+# Зависимости (checklist 3.8.5). Файл применяется сразу, как только владелец
+# включит Dependabot в настройках репозитория (Settings → Code security →
+# Dependabot): npm-пакеты + Rust-контракт. Обновления — еженедельно, PR'ы на
+# основную ветку; merge только с зелёным CI (включая job secrets).
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+    groups:
+      typescript-toolchain:
+        patterns:
+          - "typescript"
+          - "@types/*"
+
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "program"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+    # Actions уже зафиксированы по SHA (checklist 3.8.6): Dependabot для
+    # github-actions умеет обновлять SHA-фиксацию — он поддерживает такую форму.

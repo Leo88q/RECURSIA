@@ -37,8 +37,12 @@ server {
     charset utf-8;
 
     gzip on;
+    gzip_vary on;
     gzip_types text/css application/javascript application/json image/svg+xml application/manifest+json;
     gzip_min_length 1024;
+
+    # Static site: no meaningful POST bodies — reject big ones (DoS budget).
+    client_max_body_size 2k;
 
 ${add}
 
@@ -59,8 +63,9 @@ ${add.replace(/^ {4}/gm, "        ")}
     # hash router: every unknown path serves the app shell
     location / { try_files $uri $uri/ /index.html; }
 
-    # never serve dotfiles / source maps
-    location ~ /\\. { deny all; }
+    # never serve dotfiles / source maps — except .well-known/ (security.txt,
+    # checklist 7.2): the dotfile regex below is a PCRE with a negative lookahead
+    location ~ /\\.(?!well-known/) { deny all; }
     location ~ \\.map$ { deny all; }
 }
 `;

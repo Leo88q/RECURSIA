@@ -1,0 +1,48 @@
+# RECURSIA — доп. правила gitleaks (Solana-специфика), запускаются С ВЕРХА
+# от стандартного ruleset'а (см. job "secrets" в .github/workflows/ci.yml):
+#   gitleaks detect --source . --no-git --config .gitleaks.toml --exit-code 1
+#   gitleaks detect --source . --log-opts="--all" --config .gitleaks.toml --exit-code 1
+#
+# gitleaks использует Go-regex (RE2): lookahead/lookbehind не поддерживаются —
+# поэтому для границ строки применяются word boundaries (\b).
+#
+# Публичные адреса (программа, mint SKR) — base58 43–44 символа; правило
+# приватного ключа требует 87–88 символов, конфликтов нет. Если добавите
+# новые «публичные» long-base58 строки в код — занесите путь в allowlist.
+
+title = "RECURSIA — Solana-specific secret rules"
+
+[allowlist]
+description = "Кросс-реализационные тестовые векторы и шаблоны .example (секретов по построению нет)"
+paths = [
+	'''tests/vectors/.*''',
+	'''(^|/)\.env\.example$''',
+	'''(^|/).*\.example\.(json|ya?ml)$''',
+]
+
+# JSON-массив из 64 целых — приватный ключ Solana (solana-keygen, keypair-файлы).
+[[rules]]
+id = "solana-keypair-array"
+description = "Solana keypair: JSON-массив из 64 чисел"
+regex = '''\[\s*\d{1,3}(?:\s*,\s*\d{1,3}){63}\s*\]'''
+tags = ["key", "solana"]
+
+# Base58 строка 87–88 символов с высокой энтропией — приватный ключ.
+[[rules]]
+id = "solana-base58-secret-key"
+description = "Base58 private key (87–88 chars, high entropy)"
+regex = '''\b[1-9A-HJ-NP-Za-km-z]{87,88}\b'''
+entropy = 4.5
+tags = ["key", "solana"]
+
+# Файлы, которые не должны попадать в репозиторий НИКОГДА (даже пустые).
+# Это «страховка от опечатки»: гиту можно добавить .env через --force,
+# а имя keypair легко перепутать. Одно правило = один path-regex (RE2),
+# перечисляющий все запрещённые имена (см. синтаксис в config/gitleaks.toml
+# дефолта gitleaks: у правила поле `path`, у allowlist — `paths`).
+[[rules]]
+id = "keypair-file-by-name"
+description = "Keypair/credential file committed (must be git-ignored)"
+# .env.example разблокирован глобальным allowlist'ом выше.
+path = '''(?i)(?:^|/)(?:id\.json|[^/]*-keypair\.json|keeper\.json|[^/]*\.(?:pem|p12|pfx|keystore|jks|key|sql|bak|dump|sqlite3?|sqlite-wal|sqlite-shm)$|serviceAccount[^/]*\.json|[^/]*credentials[^/]*\.json|[^/]*secrets[^/]*\.json|firebase[^/]*\.json|\.env[^/]*)$'''
+tags = ["filename", "secret-store"]

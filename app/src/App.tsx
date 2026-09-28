@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { CONFIG, CLUSTER_LABEL } from "./lib/config";
 import { useRoute, type Route } from "./lib/route";
+import { PolicyPage } from "./pages/Policy";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { Skeleton, Spinner } from "./ui/fields";
 import { Art, Glyph } from "./ui/Icon";
@@ -18,6 +19,7 @@ const TITLES: Record<Route["page"], string> = {
   lab: "Лаборатория физики",
   chain: CLUSTER_LABEL[CONFIG.cluster],
   "chain-lab": `Лаборатория · ${CLUSTER_LABEL[CONFIG.cluster]}`,
+  policy: "Документы",
 };
 
 function Loading({ label }: { label: string }) {
@@ -72,6 +74,7 @@ export function App() {
       {/* sandbox ↔ lab share one boundary so switching between them keeps the game mounted */}
       <ErrorBoundary label={route.page} key={game ? "game" : route.page}>
         {route.page === "landing" && <Landing section={route.section} go={go} />}
+        {route.page === "policy" && <PolicyPage doc={route.doc} />}
         {(route.page === "sandbox" || route.page === "lab") && (
           <Suspense fallback={<Loading label="Загрузка мультивселенной…" />}>
             <Game route={route} go={go} headerSlot={headerSlot} />
@@ -83,6 +86,22 @@ export function App() {
           </Suspense>
         )}
       </ErrorBoundary>
+
+      {/* Правовые страницы доступны с каждой страницы (чек-лист 4.3 / 5.2.4 / 7.1):
+          «отозвать согласие» = ссылка на Cookie Policy здесь же, на уровне первого клика. */}
+      <footer className="app-footer">
+        <nav className="app-footer-links small" aria-label="Документы">
+          <a href="#/privacy">Политика конфиденциальности</a>
+          <a href="#/terms">Условия использования</a>
+          <a href="#/cookies">Политика файлов cookie</a>
+          <a href="#/risk">Дисклеймер о рисках</a>
+          <a href="https://github.com/Leo88q/RECURSIA/security/advisories/new" target="_blank" rel="noopener">Сообщить об уязвимости</a>
+        </nav>
+        <p className="app-footer-note small muted">
+          Сайт не использует cookies, аналитику и сторонние скрипты — <a href="#/cookies">подробнее</a>.
+          RECURSIA — экспериментальная игра на блокчейне, не является инвестиционной рекомендацией.
+        </p>
+      </footer>
     </div>
   );
 }

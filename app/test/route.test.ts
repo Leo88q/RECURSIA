@@ -17,6 +17,11 @@ describe("hash router", () => {
     expect(parseRoute("#/chain/lab")).toEqual({ page: "chain-lab" });
     expect(parseRoute(`#/chain/${W}/17`)).toEqual({ page: "chain", world: W, cell: 17 });
     expect(parseRoute("#/sandbox/root-0/5")).toEqual({ page: "sandbox", world: "root-0", cell: 5 });
+    expect(parseRoute("#/privacy")).toEqual({ page: "policy", doc: "privacy" });
+    expect(parseRoute("#/terms")).toEqual({ page: "policy", doc: "terms" });
+    expect(parseRoute("#/cookies")).toEqual({ page: "policy", doc: "cookies" });
+    expect(parseRoute("#/risk")).toEqual({ page: "policy", doc: "risk" });
+    expect(parseRoute("#/policies")).toEqual({ page: "landing" }); // no such doc → landing
   });
   it("degrades malformed / hostile input safely", () => {
     expect(parseRoute("#/chain/not-a-key")).toEqual({ page: "chain" });
@@ -28,7 +33,7 @@ describe("hash router", () => {
     expect(parseRoute("#/constructor")).toEqual({ page: "landing" });
   });
   it("format ∘ parse is identity for valid routes", () => {
-    const rs: Route[] = [{ page: "landing" }, { page: "landing", section: "faq" }, { page: "sandbox" }, { page: "lab" }, { page: "chain" }, { page: "chain-lab" }, { page: "chain", world: W, cell: 0 }, { page: "sandbox", world: "child-3", cell: 63 }];
+    const rs: Route[] = [{ page: "landing" }, { page: "landing", section: "faq" }, { page: "sandbox" }, { page: "lab" }, { page: "chain" }, { page: "chain-lab" }, { page: "chain", world: W, cell: 0 }, { page: "sandbox", world: "child-3", cell: 63 }, { page: "policy", doc: "privacy" }, { page: "policy", doc: "cookies" }];
     for (const r of rs) expect(parseRoute(formatRoute(r))).toEqual({ ...r, ...(r.page === "chain" || r.page === "sandbox" ? { cell: (r as { cell?: number }).cell } : {}) });
   });
 });

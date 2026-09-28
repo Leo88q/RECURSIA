@@ -148,6 +148,28 @@ Open Graph-картинка — в `app/public/icons`, `app/public/og.jpg`. Ис
 DNSSEC, registry lock, CAA-записи, HSTS preload (`hstspreload.org`), отдельный домен без сторонних скриптов/аналитики.
 PROGRAM_ID публикуется в README и на сайте; кошелёк показывает вызываемую программу, превью транзакции — тоже.
 
+### Post-deploy проверки (после КАЖДОГО деплоя, чек-лист 2.2 / 9)
+```bash
+scripts/post-deploy-check.sh https://ВАШ_ДОМЕН
+```
+Скрипт сравнивает содержимое (не только HTTP-код — SPA возвращает index.html на любом пути),
+заголовки безопасности, HTTP→HTTPS-редирект, отсутствие source maps в бандле и базовых секретов,
+а также отдачу `/.well-known/security.txt`. Дальше — внешние сервисы: SSL Labs, securityheaders.com
+(оценка ≥ A), Lighthouse, проверка DNS (DNSSEC, CAA).
+
+### Локальный pre-commit от секретов (чек-лист 1.3.6)
+В CI уже есть job `secrets` (gitleaks: рабочее дерево + полная история, default ruleset + `.gitleaks.toml`).
+Локально (один раз):
+```bash
+gitleaks git --pre-commit   # ставит git pre-commit hook на этот репозиторий
+```
+или вручную перед пушем:
+```bash
+gitleaks detect --source . --no-git --exit-code 1
+gitleaks detect --source . --no-git --config .gitleaks.toml --exit-code 1
+```
+`prepare`-скрипт npm не используется: в `.npmrc` стоит `ignore-scripts=true`, поэтому hook ставится командой выше.
+
 ### Что делает клиент ради безопасности игрока
 - каждая транзакция: симуляция → превью (изменение SKR/SOL из post-state симуляции, CU, комиссия, список программ, логи) → подпись;
 - allow-list программ (RECURSIA, Compute Budget, ATA, System) — инструкции чужих программ отвергаются до симуляции;
@@ -167,3 +189,12 @@ PROGRAM_ID публикуется в README и на сайте; кошелёк �
 - [ ] Мониторинг: ≥ 2 экземпляра watcher (`npm run watch -w @recursia/keeper`) с `ALERT_WEBHOOK`; учебная пауза проведена.
 - [ ] Devnet-плейтест пройден по критериям `docs/PLAYTEST.md` §7.
 - [ ] Фронтенд: свой RPC с allow-list домена, заголовки проверены (securityheaders.com), DNSSEC/registry lock/CAA, HSTS preload, базовые образы Docker закреплены по digest.
+
+### Базовые образы Docker по digest (checklist 2.7, 3.8)
+Теги `node:22-alpine` и `nginxinc/nginx-unprivileged:1.27-alpine` — плавающие; для продакшена закрепить
+по digest (иначе — риск цепочки поставок через пере-тегирование образа):
+```bash
+docker manifest inspect node:22-alpine                | jq -r .digest   # ← @sha256:… в app/Dockerfile FROM
+docker manifest inspect nginxinc/nginx-unprivileged:1.27-alpine | jq -r .digest
+```
+После замены: `docker build …` должен собираться без изменений бандла (только новый base hash).
