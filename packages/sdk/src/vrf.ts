@@ -10,8 +10,8 @@ export const ORAO_RANDOMNESS_SEED = new TextEncoder().encode("orao-vrf-randomnes
 export const ORAO_CONFIG_SEED = new TextEncoder().encode("orao-vrf-network-configuration");
 /** sha256("account:RandomnessV2")[..8] */
 export const ORAO_RANDOMNESS_V2_DISC = Uint8Array.from([139, 239, 184, 215, 227, 86, 191, 226]);
-/** sha256("global:request_v2")[..8] */
-const REQUEST_V2_IX = Uint8Array.from([38, 151, 209, 6, 195, 102, 28, 217]);
+/** sha256("global:request_v2")[..8] — exported for the client composition guard (checklist #104). */
+export const REQUEST_V2_IX = Uint8Array.from([38, 151, 209, 6, 195, 102, 28, 217]);
 
 const enc = new TextEncoder();
 const cat = (...parts: Uint8Array[]) => { const out = new Uint8Array(parts.reduce((a, p) => a + p.length, 0)); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; } return out; };

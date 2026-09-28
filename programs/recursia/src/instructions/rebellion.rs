@@ -93,6 +93,15 @@ pub fn execute_rebellion(ctx: Context<ExecuteRebellion>) -> Result<()> {
     let slot = Clock::get()?.slot;
     let w = &mut ctx.accounts.world;
     require!(w.rebellion_active(slot), RecursiaError::RebellionUnavailable);
+    // Hold-up (checklist #94): the vote window must be open for at least
+    // epoch_slots / REBELLION_HOLD_DIV slots before execution — "create + vote
+    // + execute in one transaction/slot" can never land, and the watcher gets
+    // time to alert (and the admin to pause) before the world is liberated.
+    let hold = ctx.accounts.config.params.epoch_slots / REBELLION_HOLD_DIV;
+    require!(
+        slot >= w.last_rebellion_slot.saturating_add(hold),
+        RecursiaError::RebellionUnavailable
+    );
     let owned = w.owned_mask.count_ones() as u64;
     let votes = w.rebellion_votes as u64;
     require!(

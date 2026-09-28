@@ -5,8 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { Keypair, PublicKey, TransactionInstruction } from "@solana/web3.js";
-import { ata, PROGRAM_ID, RecursiaIx, SKR_MINT } from "@recursia/sdk";
+import { ComputeBudgetProgram, Keypair, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, ata, ORAO_VRF_ID, PROGRAM_ID, RecursiaIx, SKR_MINT, TOKEN_PROGRAM_ID } from "@recursia/sdk";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -40,7 +40,7 @@ vi.mock("@solana/wallet-adapter-react", () => ({
   useWallet: () => ({ publicKey: me, signTransaction, sendTransaction: vi.fn() }),
 }));
 
-const { TxProvider, useTx } = await import("../src/chain/tx");
+const { TxProvider, useTx, refuseIx } = await import("../src/chain/tx");
 const { ToastProvider } = await import("../src/ui/Toast");
 type Result = Awaited<ReturnType<ReturnType<typeof useTx>>>;
 
@@ -94,6 +94,35 @@ describe("tx pipeline", () => {
     expect(r.ok).toBe(false);
     expect(connection.simulateTransaction).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ evil: true }));
     expect(text()).not.toContain("Подписать");
+  });
+
+  it("refuses dangerous shapes behind allowed programs (composition guard, checklist #104)", async () => {
+    const mk = (programId: PublicKey, bytes: number[]) => new TransactionInstruction({ programId, keys: [], data: new Uint8Array(bytes) as unknown as Buffer });
+    const cases: [TransactionInstruction, RegExp][] = [
+      // System (transfer/assign/create/durable-nonce) is not on the allow-list at all
+      [mk(SystemProgram.programId, [2, 0, 0, 0]), /Посторонняя программа/],
+      // Token program (approve/setAuthority/transfer) — same
+      [mk(TOKEN_PROGRAM_ID, [9]), /Посторонняя программа/],
+      // ATA: only create (0) / create_idempotent (1), never recover_nested or anything else
+      [mk(ASSOCIATED_TOKEN_PROGRAM_ID, [2]), /разрешены только create/],
+      [mk(ASSOCIATED_TOKEN_PROGRAM_ID, []), /разрешены только create/],
+      // ORAO: only request_v2 with its exact 8-byte discriminator
+      [mk(ORAO_VRF_ID, new Array(32).fill(0)), /только request_v2/],
+      // RECURSIA: only discriminators of the known instruction list
+      [mk(PROGRAM_ID, [0, 0, 0, 0, 0, 0, 0, 0]), /Неизвестная инструкция RECURSIA/],
+      [mk(PROGRAM_ID, [1]), /Неизвестная инструкция RECURSIA/],
+    ];
+    for (const [ix, re] of cases) {
+      expect(refuseIx(ix), re.source).toMatch(re);
+      const r = await runRef({ title: "x", lines: [], ixs: [ix] });
+      expect(r.ok, re.source).toBe(false);
+    }
+    expect(connection.simulateTransaction).not.toHaveBeenCalled(); // refused before any RPC work
+    expect(signTransaction).not.toHaveBeenCalled();
+    // what the app actually builds still passes
+    expect(refuseIx(rx.withdraw(me, 1n))).toBeNull();
+    expect(refuseIx(mk(ASSOCIATED_TOKEN_PROGRAM_ID, [1]))).toBeNull(); // createAtaIdempotent
+    expect(refuseIx(mk(ComputeBudgetProgram.programId, [0, 0, 0, 0]))).toBeNull();
   });
 
   it("cancel resolves as cancelled, never signs", async () => {

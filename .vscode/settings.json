@@ -1,0 +1,7 @@
+{
+  "security.workspace.trust.enabled": true,
+  "security.workspace.trust.untrustedFiles": "prompt",
+  "task.allowAutomaticTasks": "off",
+  "extensions.autoUpdate": "onlyEnabledExtensions",
+  "git.confirmPush": true
+}
