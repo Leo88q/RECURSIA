@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { explorerUrl, readConfig } from "../src/lib/config";
+import { explorerUrl, readConfig, rpcFallback } from "../src/lib/config";
 
 describe("deploy config validation", () => {
   it("defaults to devnet public RPC", () => {
@@ -20,5 +20,10 @@ describe("deploy config validation", () => {
     expect(explorerUrl("tx", "sig", { cluster: "mainnet-beta", rpcUrl: "" })).toBe("https://explorer.solana.com/tx/sig");
     expect(explorerUrl("address", "a", { cluster: "devnet", rpcUrl: "" })).toBe("https://explorer.solana.com/address/a?cluster=devnet");
     expect(explorerUrl("tx", "s", { cluster: "localnet", rpcUrl: "http://127.0.0.1:8899" })).toContain("customUrl=http%3A%2F%2F127.0.0.1%3A8899");
+  });
+  it("backup RPC: custom endpoint → public one, same → none, localnet → none (checklist 8.4)", () => {
+    expect(rpcFallback("https://rpc.helius.example", "devnet")).toBe("https://api.devnet.solana.com");
+    expect(rpcFallback("https://api.mainnet-beta.solana.com", "mainnet-beta")).toBeUndefined();
+    expect(rpcFallback("https://my-local.example", "localnet")).toBeUndefined();
   });
 });

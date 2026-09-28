@@ -5,12 +5,25 @@ import { PROGRAM_ID_STR, SKR_MINT_STR } from "@recursia/sdk";
 export type Cluster = "devnet" | "testnet" | "mainnet-beta" | "localnet";
 const CLUSTERS: Cluster[] = ["devnet", "testnet", "mainnet-beta", "localnet"];
 
-const DEFAULT_RPC: Record<Cluster, string> = {
+export const DEFAULT_RPC: Record<Cluster, string> = {
   devnet: "https://api.devnet.solana.com",
   testnet: "https://api.testnet.solana.com",
   "mainnet-beta": "https://api.mainnet-beta.solana.com",
   localnet: "http://127.0.0.1:8899",
 };
+
+/**
+ * Запасной RPC (чек-лист 8.4 «недоступный RPC»): публичный эндпоинт кластера.
+ * Клиент переключается на него, только если настроенный RPC недоступен
+ * (ChainApp). Публичные эндпоинты всегда в CSP-белом списке (security.mjs),
+ * поэтому политика не ломается. localnet — без фолбэка (публичного нет,
+ * http://127.0.0.1 в connect-src не входит).
+ */
+export function rpcFallback(rpcUrl: string, cluster: Cluster): string | undefined {
+  if (cluster === "localnet") return undefined;
+  const pub = DEFAULT_RPC[cluster];
+  return pub && pub !== rpcUrl ? pub : undefined;
+}
 
 export interface AppConfig {
   cluster: Cluster;

@@ -1,7 +1,8 @@
 # RECURSIA — аудит сайта и приложения перед продакт-деплоем
 
 **Дата:** 2026-09-28 · **Аудитор:** Arena agent (машинный проход по чек-листу «Подготовка сайта и приложения») ·
-**Коммит:** ветка `arena/01a0e5db-recursia`
+**Коммит:** ветка `arena/01a0e5db-recursia` · **Раундов: 2** (2-й раунд: keeper-аудит, nginx-баг с `.well-known`,
+бэкап-RPC, Dependabot-конфиг, CI-поверхность, принудительные compliance-файлы — см. правки ниже в таблице)
 
 Статусы: **PASS** — закрыто (с доказательством) · **FAIL** — не закрыто · **N/A** — неприменимо (обосновано) ·
 **HUMAN** — нужно действие человека (настройки GitHub/DNS/хостинга, юрист, внешние сервисы) ·
@@ -29,8 +30,9 @@ keeper не держит ключей с деньгами (≤ 1 SOL на ком
 |---|---|---|
 | Critical | 0 | — |
 | High | 3 | H1: внешний аудит контракта (блок mainnet) · H2: branch protection + Secret Scanning выключены · H3: реквизиты оператора в правовых документах не заполнены (блокирует легальность публикации) |
-| Medium | 5 | M1: домен/DNS (DNSSEC, registry lock, CAA, HSTS preload) · M2: Dependabot выключен · M3: бэкап- RPC-фолбэк в клиенте · M4: браузерный e2e-тест «подключение кошелька → клейм» · M5: Trivy/скан образа и мониторинг uptime |
+| Medium | 4 | M1: домен/DNS (DNSSEC, registry lock, CAA, HSTS preload) · M2: Dependabot не включён (конфиг `.github/dependabot.yml` готов) · M4: браузерный e2e-тест «подключение кошелька → клейм» · M5: Trivy/скан образа и мониторинг uptime |
 | Low | 3 | L1: Lighthouse/WCAG после деплоя · L2: Sentry/ошибки-маяк (self-host, без PII) · L3: DPA с RPC-провайдером (документально) |
+| ~~Medium~~ | — | ~~M3: бэкап-RPC-фолбэк~~ → **FIXED во 2-м раунде** (ChainApp: авто-переключение на публичный эндпоинт кластера после ~90 с недоступности, возврат на первичный с алертом) |
 
 **Самые срочные 5 пунктов** (в порядке очереди):
 1. **Внешний аудит контракта** (High) — уже стоит в `docs/DEPLOY.md` §10; без закрытых Critical/High mainnet не запускается. На лендинге честно предупреждение есть.
@@ -85,11 +87,11 @@ keeper не держит ключей с деньгами (≤ 1 SOL на ком
 | 2.3 | High | `vite.config.ts`: `build.sourcemap: false`; `scripts/check-bundle.mjs` падает при `.map`/`sourceMappingURL` (в CI); nginx `location ~ \.map$ { deny all; }`; в `dist/` 0 map-файлов | **PASS** |
 | 2.4 | High | `docs/SECURITY.md` Часть 0: симуляция считается в контракте (`programs/recursia/src/sim.rs`), клиент не «сообщает» счёт; keeper permissionless; все лимиты (агенты, slippage, параметры) — в контракте | **PASS (архитектура)** |
 | 2.5 | Low | `app/public/`: favicon.svg, icons/, manifest.webmanifest, og.jpg, robots.txt, .well-known/security.txt — только публичные ассеты; исходники PNG в git не хранятся (DEPLOY §9 «Графика») | **PASS** |
-| 2.6 | Med | nginx: `try_files` + `location ~ /\.` deny; Vercel/Netlify — статика без листинга | **PASS** |
+| 2.6 | Med | nginx: `try_files`, без листинга. **2-й раунд: найден и исправлен баг** — до этого `location ~ /\.` (неякорный) блокировал и `/.well-known/security.txt` (403); теперь `location ~ /\.(?!well-known/)` (PCRE lookahead), `/.well-known/` обслуживается. Добавлено: `client_max_body_size 2k` (нет POST-содержимого — бюджет DoS), `gzip_vary on` (правильный `Vary` для кэшей) | **PASS (FIXED во 2-м раунде)** |
 | 2.7 | Med | `.dockerignore` расширен (секреты, docs, tests, programs, Rust, git); образ: `nginxinc/nginx-unprivileged`, `USER 101`, в build только публичные VITE_*-args; секреты в образе не попадают (проверено: в `dist/` нет, build-args публичные). **Trivy/`docker history` — HUMAN** (в песочнице docker нет) | **PASS (конфиг) + HUMAN (Trivy)** |
 | 2.8 | Med | monorepo публичный: принято как осознанное решение (проверяемость контракта, verified build, в keeper'е нет секретов). При появлении привилегированных сервисов — вынести в приватный репозиторий/модуль | **N/A / принято (задокументировано)** |
 | 2.9 | Low | обфускация не используется и не требуется (клиент публичен по построению) | **N/A** |
-| 2.10 | High | `gh api …/branches/main` → `protection.enabled: false`. `CODEOWNERS` добавлен. Остальное — HUMAN: protect main (require PR + CI статусы (включая `secrets`), запрет force-push/push на main), 2FA у всех коллабораторов, минимальные права | **FAIL → HUMAN** |
+| 2.10 | High | `gh api …/branches/main` → `protection.enabled: false`. `CODEOWNERS` добавлен; **2-й раунд:** `.github/pull_request_template.md` — обязательный security-чеклист в каждом PR. Остальное — HUMAN: protect main (require PR + CI статусы (включая `secrets`), запрет force-push/push на main), 2FA у всех коллабораторов, минимальные права | **FAIL → HUMAN** |
 | 2.11 | Low | LICENSE-файла нет → «All rights reserved» (как и нужно для закрытого кода); README теперь это явно декларирует; решение об открытии — за командой/юристом | **PASS (заявлено)** |
 
 ## 3. Безопасность веб-приложения (раздел 3)
@@ -97,7 +99,7 @@ keeper не держит ключей с деньгами (≤ 1 SOL на ком
 | Пункт | Приоритет | Доказательство | Статус |
 |---|---|---|---|
 | 3.1.1–3.1.3 | High | HTTPS: у Vercel/Netlify/CF — по умолчанию + редирект; nginx в Docker слушает 8080 (TLS терминируется на провайдере). HSTS: `max-age=63072000; includeSubDomains; preload` в `app/security.mjs` → все заголовки. TLS 1.2+ — на стороне хостинга. Домена нет → SSL Labs/testssl — после завёдения | **HUMAN (после домена)** |
-| 3.2.1 | High | CSP: `default-src 'self'; script-src 'self'; … frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests`; `connect-src` — белый список (публичные RPC + настроенный). `style-src 'unsafe-inline'` — оправдано комментарием в `security.mjs` (wallet-adapter-react-ui инъектирует style-атрибуты; inline-`<script>` нет, `unsafe-eval` нет) | **PASS** |
+| 3.2.1 | High | CSP: `default-src 'self'; script-src 'self'; … frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests`; `connect-src` — белый список (публичные RPC + настроенный). `style-src 'unsafe-inline'` — неубираемо без per-request nonce'а, а он невозможен на чистой статике (Vercel/Netlify/nginx без edge-функций): приложение само использует inline style-атрибуты в 11 местах (`style={{…}}` в JSX, см. `Landing.tsx`), wallet-adapter-react-ui — CSS-in-JS. Inline-`<script>` нет, `unsafe-eval` нет — JS-вектор закрыт `script-src 'self'` | **PASS (оправдано)** |
 | 3.2.2 | Med | `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` (строже требуемого), `Permissions-Policy` (камера/микро/гео/payment/usb/serial/hid/bluetooth/interest-cohort отключены), COOP/CORP same-origin | **PASS** |
 | 3.2.3 | Low | nginx `server_tokens off`; на Vercel/CF версия не раскрывается | **PASS** |
 | 3.2.4 | Med | securityheaders.com / Observatory — после деплоя (HUMAN); ожидаемо A (все директивы на месте) | **HUMAN** |
@@ -114,8 +116,8 @@ keeper не держит ключей с деньгами (≤ 1 SOL на ком
 | 3.8.2 | High | `package-lock.json` закоммичен; `npm ci --ignore-scripts` везде (CI, Docker, DEPLOY) | **PASS** |
 | 3.8.3 | High | `scripts/check-supply-chain.mjs` (скомпрометированные/typosquat/не-registry) + `scripts/check-unicode.mjs` в CI; `@solana/web3.js` 1.99.0 (постинцидентная ветка 1.x, актуальная); ignore-scripts отключает postinstall; `overrides: uuid` | **PASS** |
 | 3.8.4 | High | внешних скриптов нет вообще (аналитика/виджеты/CDN-скрипты — 0; иконки inline-SVG; шрифты системные) | **PASS** |
-| 3.8.5 | Med | Dependabot — **не включён** (HUMAN: Settings → Code security → Dependabot для npm + Cargo). 2FA на npm-аккаунтах — HUMAN | **FAIL → HUMAN** |
-| 3.8.6 | High | **FIXED**: все Actions зафиксированы по SHA (checkout/setup-node/upload/download-artifact, rust-cache, rust-toolchain@1.86.0); глобально `permissions: contents: read`; write — только у двух джоб (lockfile — push-once, so-blob — debug) с обоснованием в комментах; `pull_request_target` не используется | **PASS (FIXED)** |
+| 3.8.5 | Med | **FIXED во 2-м раунде:** `.github/dependabot.yml` (npm еженедельно + cargo для контракта + github-actions — он умеет обновлять SHA-фиксацию) добавлен; включение функции — HUMAN (Settings → Code security → Dependabot). 2FA на npm-аккаунтах — HUMAN | **PASS (конфиг) + HUMAN (включить)** |
+| 3.8.6 | High | **FIXED**: все Actions зафиксированы по SHA (checkout/setup-node/upload/download-artifact, rust-cache, rust-toolchain@1.86.0); глобально `permissions: contents: read`; write — только у двух джоб (lockfile — push-once, so-blob — debug) с обоснованием в комментах; `pull_request_target` не используется. **2-й раунд:** `fetch-depth: 1` во всех джобах, кроме `secrets` (меньше истории в раннерах, быстрее сборка) | **PASS (FIXED)** |
 | 3.9.1 | High | «RECURSIA никогда не просит seed-фразу» — `tx.tsx:193`, `Landing.tsx:226-227`, FAQ, Terms §5, Risk §3; в UI поля ввода seed'а нет (grep) | **PASS** |
 | 3.9.2 | High | `tx.tsx`: simulate → превью (ΔSKR/ΔSOL из post-state, CU, комиссия, программы, логи) → подпись со свежим blockhash; allow-list программ (чужие инструкции отклоняются до симуляции); slippage-лимиты в инструкциях | **PASS** |
 | 3.9.3 | Med | `/.well-known/security.txt` + `.github/SECURITY.md` (приватные advisory, 90 дней); OPERATIONS §7: DNSSEC/registry lock/CAA/HSTS preload/2FA на регистраторе — **HUMAN (домен)**; висящих поддоменов нет (домен ещё не заведён) | **HUMAN (домен)** |
@@ -128,6 +130,7 @@ keeper не держит ключей с деньгами (≤ 1 SOL на ком
 | 3.11.4 | Med | серверных логов нет; keeper пишет в stdout локально (секретов в логах нет: RPC_URL публичный, keypair в файле, а не в логах) | **PASS (что существует)** |
 | 3.11.5 | High | watcher: `keeper/src/watch.ts` (денежные инварианты каждую минуту, алерты `ALERT_WEBHOOK`, ≥ 2 экземпляра, heartbeat); учебная пауза — регламент. Запуск — HUMAN при деплое | **PASS (код) + HUMAN (запуск)** |
 | 3.11.6 | High | OPERATIONS §6 (уровни, SEV-1 пошагово, шаблон сообщения, разбор ≤ 7 дней, `docs/incidents/`) | **PASS** |
+| Keeper-аудит (2-й раунд) | High | `keeper/src/main.ts`: ключ — только из файла (проверка `chmod 600`, 64-байтовый JSON, **никогда не в лог/argv/env**); `RPC_URL` — только https; **allow-list программ** (`RECURSIA + ComputeBudget + ATA + ORAO VRF`, чужие инструкции отклоняются до подписи: «refusing to sign foreign program»); simulate-перед-подписью; жёсткие пределы (CU, priority fee, SOL-флор, backoff), single-instance lock; `watch.ts`: read-only, `ALERT_WEBHOOK` только https, в вебхук уходит только публичное on-chain состояние `{level, text}` (ключей/персоналки нет), URL фиксируется при старте (не пользовательский ввод → SSRF не применим). Находок нет | **PASS** |
 
 ## 4. Cookies и локальное хранилище (раздел 4)
 
@@ -188,7 +191,7 @@ keeper не держит ключей с деньгами (≤ 1 SOL на ком
 | 8.1 | **PASS**: `npm -w app run build` (tsc + vite) — зелёно; тесты: SDK 58 + keeper 9 + app 70 — зелёно (прогнан в этом проходе); clippy/fmt/LiteSVM-интеграция — в CI; e2e-браузерного «подключи кошелёк → клейм» нет (M4 — рекомендация) |
 | 8.2 | **PASS (конфиг) / HUMAN (цифры)**: initial 112.7 KB gzip (бюджет 150, гейт в CI), lazy-чанки (wallet/web3 грузятся только в live-режиме), gzip в nginx, immutable-кеш для ассетов, PWA; Lighthouse/CWV — после деплоя |
 | 8.3 | **PASS (с оговоркой)**: hash-роутер не может дать «404 страницу» (неизвестный маршрут → лендинг — осознано, т.к. статика без server-rewrite); реальных битых ссылок/картинок нет (все ассеты в бандле с хешами); `noscript`-блок есть; ErrorBoundary с человеком-сообщением |
-| 8.4 | **PASS (частично)**: Wallet Standard (Phantom/Solflare/Backpack); отказ от подписи — обработан (`cancelled`); WS-падение — покрывается поллингом (45с, «сохраняет последнее рабочее состояние»); недоступный RPC — понятный экран «Сеть сейчас недоступна» + авто-ретрай; **запасного RPC нет (M3 — рекомендация: failover на публичный эндпоинт кластера)** |
+| 8.4 | **PASS**: Wallet Standard (Phantom/Solflare/Backpack); отказ от подписи — обработан (`cancelled`); WS-падение — покрывается поллингом (45с, «сохраняет последнее рабочее состояние»); недоступный RPC — понятный экран «Сеть сейчас недоступна» + авто-ретрай; **запасной RPC: FIXED во 2-м раунде** — `ChainApp` каждые 30 с зондирует endpoint, после ~90 с недоступности первичного переключается на публичный эндпоинт того же кластера (всегда в CSP-белом списке, `rpcFallback()` + тесты), каждые 30 с пробует вернуться, тосты о смене; localnet без фолбэка (осознанно, http не в CSP) |
 | 8.5 | **PASS**: адаптив (мобильный: документ скроллится, `viewport-fit=cover`), `lang="ru"`, OG/Twitter-картинки (абсолютные через `VITE_SITE_URL`), favicon+PWA-иконки+maskable |
 | 8.6 | **PARTIAL → HUMAN**: `/healthz` (Docker/nginx), откат = перепубликация предыдущего бандла (статика), staging = devnet-деплой; uptime-мониторинг/ошибка-алерты — HUMAN (UptimeRobot/CF) |
 | 8.7 | **PASS**: README (запуск без секретов) + DEPLOY.md (все env-переменные, хостинги, Docker, домен) + SECURITY.md/SECURITY_AUDIT.md/OPERATIONS.md |

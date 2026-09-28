@@ -189,3 +189,12 @@ gitleaks detect --source . --no-git --config .gitleaks.toml --exit-code 1
 - [ ] Мониторинг: ≥ 2 экземпляра watcher (`npm run watch -w @recursia/keeper`) с `ALERT_WEBHOOK`; учебная пауза проведена.
 - [ ] Devnet-плейтест пройден по критериям `docs/PLAYTEST.md` §7.
 - [ ] Фронтенд: свой RPC с allow-list домена, заголовки проверены (securityheaders.com), DNSSEC/registry lock/CAA, HSTS preload, базовые образы Docker закреплены по digest.
+
+### Базовые образы Docker по digest (checklist 2.7, 3.8)
+Теги `node:22-alpine` и `nginxinc/nginx-unprivileged:1.27-alpine` — плавающие; для продакшена закрепить
+по digest (иначе — риск цепочки поставок через пере-тегирование образа):
+```bash
+docker manifest inspect node:22-alpine                | jq -r .digest   # ← @sha256:… в app/Dockerfile FROM
+docker manifest inspect nginxinc/nginx-unprivileged:1.27-alpine | jq -r .digest
+```
+После замены: `docker build …` должен собираться без изменений бандла (только новый base hash).

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Bundle budget (CI). The first paint (sandbox) must stay light; the live-mode
 // chunk (wallet adapter + web3) is lazy and has its own budget.
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 
@@ -48,4 +48,8 @@ if (total > BUDGET.totalRaw) { console.error("✗ total over budget"); fail++; }
 if (assets.some((f) => f.endsWith(".map"))) { console.error("✗ source maps must not ship"); fail++; }
 if (!readdirSync(dist).includes("_headers")) { console.error("✗ dist/_headers missing"); fail++; }
 if (!/Content-Security-Policy/.test(html)) { console.error("✗ CSP meta missing"); fail++; }
+// public compliance files must ship with the bundle (checklist 7.2 / 7.3)
+for (const p of [".well-known/security.txt", "robots.txt", "manifest.webmanifest", "_headers"]) {
+  if (!existsSync(dist + p)) { console.error(`✗ dist/${p} missing`); fail++; }
+}
 process.exit(fail ? 1 : 0);
