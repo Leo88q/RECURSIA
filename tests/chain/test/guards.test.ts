@@ -58,6 +58,7 @@ run("adversarial guards on the real program (LiteSVM)", () => {
     module = c.pda.module(id);
     const rootIndex = c.config().rootWorlds;
     const created = c.rx.createRootWorld(alice.publicKey, rootIndex, module, 1_000, "Holdfast", 200_000n * ONE);
+    c.send([created.ix], [alice]);
     world = created.world; worlds.push(world);
     c.tokenAccounts.add(c.pda.worldVault(world).toBase58());
     expect(c.world(world).architect.equals(alice.publicKey)).toBe(true);
@@ -123,7 +124,9 @@ run("adversarial guards on the real program (LiteSVM)", () => {
     c.expectFail("ActionAlreadyPending", [c.rx.propose(studio.publicKey, { kind: "SetAdmin", admin: studio.publicKey })], [studio]);
     // the signature is bound to THIS proposal — a wrong nonce fails even before the timelock
     c.expectFail("Mismatch", [c.rx.execute(studio.publicKey, nonce + 1n, dest)], [studio]);
-    c.expectFail(/Unauthorized|ConstraintHasOne/, [c.rx.execute(studio.publicKey, nonce, dest)], [mallory]);
+    // an attacker without the admin key cannot even serialize this transaction:
+    // the admin is a required signer of the message
+    expect(() => c.send([c.rx.execute(studio.publicKey, nonce, dest)], [mallory])).toThrow(/Missing signature/);
     c.expectFail("TimelockActive", [c.rx.execute(studio.publicKey, nonce, dest)], [studio]);
     c.warp(1_000n, P.timelockSecs + 10n);
     if (seen > 0n) {
