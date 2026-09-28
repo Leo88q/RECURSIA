@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@types/node": "22.20.4",
-    "litesvm": "0.8.0",
+    "litesvm": "1.4.1",
     "typescript": "5.8.3",
     "vitest": "5.0.2"
   },
