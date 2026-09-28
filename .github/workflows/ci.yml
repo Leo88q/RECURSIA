@@ -143,7 +143,7 @@ jobs:
       - name: Resolve the same lockfile the program builds from
         run: scripts/ci-run.sh sbf-lock scripts/sbf-lock.sh
       - name: cargo audit (cargo-audit pinned, advisory-db fresh)
-        run: scripts/ci-run.sh cargo-audit bash -c 'set -e; cargo install cargo-audit --locked --version 0.22.2; cargo audit'
+        run: scripts/ci-run.sh cargo-audit bash -c 'set -e; cargo install cargo-audit --locked --version 0.22.1; cargo audit'
 
   anchor:
     name: Anchor build (SBF) + IDL
