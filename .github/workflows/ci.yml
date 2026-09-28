@@ -126,7 +126,7 @@ jobs:
         # binary ships with; debug-profile tests alone can mask release-only bugs
         # (старый код, integer overflow: урок Truebit — тесты гоняются и на релизе).
         run: scripts/ci-run.sh cargo-test-release cargo test -p recursia --release
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with: { name: cargo-lock, path: /tmp/Cargo.lock }
 
   cargo-audit:
@@ -184,7 +184,7 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npx -w packages/sdk tsx scripts/check-idl.ts ../../target/idl/recursia.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         # before the tests: the binary is needed to debug a failing run locally
         with:
           name: recursia-build
