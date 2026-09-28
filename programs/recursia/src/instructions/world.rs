@@ -1,0 +1,708 @@
+use anchor_lang::prelude::*;
+use anchor_lang::solana_program::hash::hashv;
+use anchor_spl::token::{Mint, Token, TokenAccount};
+
+use crate::constants::*;
+use crate::errors::RecursiaError;
+use crate::events::*;
+use crate::instructions::common::*;
+use crate::math;
+use crate::quantum;
+use crate::sim;
+use crate::state::*;
+
+/// Deterministic initial universe derived from the world address.
+pub fn bigbang(world: &Pubkey) -> sim::Grid {
+    let seed = hashv(&[b"recursia:bigbang", world.as_ref()]).to_bytes();
+    let mut digests = [[0u8; 32]; 32];
+    for (i, d) in digests.iter_mut().enumerate() {
+        *d = hashv(&[&seed, &[i as u8]]).to_bytes();
+    }
+    sim::bigbang_from_digests(&digests)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn init_world(
+    w: &mut World,
+    key: Pubkey,
+    bump: u8,
+    vault_bump: u8,
+    parent: Pubkey,
+    parent_territory: u8,
+    depth: u8,
+    index: u64,
+    architect: Pubkey,
+    architect_fee_bps: u16,
+    module: &PhysicsModule,
+    module_key: Pubkey,
+    name: [u8; 32],
+    slot: u64,
+    epoch: u64,
+) {
+    w.version = ACCOUNT_VERSION;
+    w.bump = bump;
+    w.vault_bump = vault_bump;
+    w.depth = depth;
+    w.parent = parent;
+    w.parent_territory = parent_territory;
+    w.index = index;
+    w.architect = architect;
+    w.architect_fee_bps = architect_fee_bps;
+    w.module = module_key;
+    w.birth = module.birth;
+    w.survive = module.survive;
+    w.q_birth = module.q_birth;
+    w.q_survive = module.q_survive;
+    w.q_amp = module.q_amp;
+    w.name = name;
+    w.grid = bigbang(&key);
+    w.territory_alive = sim::territory_counts(&w.grid);
+    w.last_tick_slot = slot;
+    w.created_slot = slot;
+    w.epoch_id = epoch;
+    w.prev_epoch_id = epoch.saturating_sub(1);
+    w.prev_claimed = true;
+}
+
+// ---------------------------------------------------------------- create root
+
+#[derive(Accounts)]
+pub struct CreateRootWorld<'info> {
+    #[account(mut)]
+    pub architect: Signer<'info>,
+    #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
+    pub config: Box<Account<'info, Config>>,
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub module: Box<Account<'info, PhysicsModule>>,
+    #[account(
+        init, payer = architect, space = 8 + World::INIT_SPACE,
+        seeds = [SEED_WORLD, Pubkey::default().as_ref(), &config.root_worlds.to_le_bytes()], bump
+    )]
+    pub world: Box<Account<'info, World>>,
+    #[account(
+        init, payer = architect, seeds = [SEED_WORLD_VAULT, world.key().as_ref()], bump,
+        token::mint = mint, token::authority = config
+    )]
+    pub world_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut, token::mint = mint, token::authority = architect)]
+    pub architect_token: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [SEED_TREASURY], bump = config.treasury_bump)]
+    pub treasury: Box<Account<'info, TokenAccount>>,
+    /// Player reward pool (SKR). Receives the non-studio part of every spend.
+    #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
+    pub reward_pool: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+pub fn create_root_world(
+    ctx: Context<CreateRootWorld>,
+    architect_fee_bps: u16,
+    name: [u8; 32],
+    initial_energy: u64,
+) -> Result<()> {
+    create_root_inner(ctx, architect_fee_bps, name, initial_energy, false)
+}
+
+/// Neutral quantum world: nobody rules it. The creator pays the creation fee
+/// and seeds the energy but gets no architect rights or fees; rebellion is
+/// meaningless (it starts liberated); only quantum laws are accepted.
+pub fn create_neutral_world(ctx: Context<CreateRootWorld>, name: [u8; 32], initial_energy: u64) -> Result<()> {
+    let m = &ctx.accounts.module;
+    require!(m.q_amp > 0 && (m.q_birth | m.q_survive) != 0, RecursiaError::NotNeutral);
+    create_root_inner(ctx, 0, name, initial_energy, true)
+}
+
+fn create_root_inner(
+    ctx: Context<CreateRootWorld>,
+    architect_fee_bps: u16,
+    name: [u8; 32],
+    initial_energy: u64,
+    neutral: bool,
+) -> Result<()> {
+    require_top_level()?;
+    require_active(&ctx.accounts.config)?;
+    validate_name(&name)?;
+    require!(architect_fee_bps <= MAX_ARCHITECT_FEE_BPS, RecursiaError::InvalidParams);
+    let slot = Clock::get()?.slot;
+    let p = ctx.accounts.config.params;
+    pay_creation_fee(
+        &ctx.accounts.token_program.to_account_info(),
+        &ctx.accounts.mint.to_account_info(),
+        &ctx.accounts.architect_token.to_account_info(),
+        &ctx.accounts.architect.to_account_info(),
+        &ctx.accounts.treasury.to_account_info(),
+        &ctx.accounts.reward_pool.to_account_info(),
+        &mut ctx.accounts.config,
+        p.world_create_fee,
+    )?;
+    user_transfer(
+        &ctx.accounts.token_program.to_account_info(),
+        &ctx.accounts.mint.to_account_info(),
+        &ctx.accounts.architect_token.to_account_info(),
+        &ctx.accounts.world_vault.to_account_info(),
+        &ctx.accounts.architect.to_account_info(),
+        initial_energy,
+    )?;
+    let key = ctx.accounts.world.key();
+    let c = &mut ctx.accounts.config;
+    let index = c.root_worlds;
+    let epoch = c.cur_epoch;
+    c.root_worlds = c.root_worlds.checked_add(1).ok_or(RecursiaError::MathOverflow)?;
+    c.total_worlds = c.total_worlds.checked_add(1).ok_or(RecursiaError::MathOverflow)?;
+    let module_key = ctx.accounts.module.key();
+    ctx.accounts.module.worlds_using = ctx.accounts.module.worlds_using.saturating_add(1);
+    let w = &mut ctx.accounts.world;
+    init_world(
+        w,
+        key,
+        ctx.bumps.world,
+        ctx.bumps.world_vault,
+        Pubkey::default(),
+        0,
+        0,
+        index,
+        if neutral { Pubkey::default() } else { ctx.accounts.architect.key() },
+        architect_fee_bps,
+        &ctx.accounts.module,
+        module_key,
+        name,
+        slot,
+        epoch,
+    );
+    w.energy = initial_energy;
+    if neutral {
+        w.neutral = true;
+        w.liberated = true;
+    }
+    emit!(WorldCreated {
+        world: key,
+        parent: Pubkey::default(),
+        parent_territory: 0,
+        depth: 0,
+        architect: w.architect,
+        module: module_key,
+    });
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pay_creation_fee<'info>(
+    tp: &AccountInfo<'info>,
+    mint: &AccountInfo<'info>,
+    from: &AccountInfo<'info>,
+    auth: &AccountInfo<'info>,
+    treasury: &AccountInfo<'info>,
+    reward_pool: &AccountInfo<'info>,
+    config: &mut Config,
+    fee: u64,
+) -> Result<()> {
+    let (studio, to_pool) = math::split_spend(fee, config.params.protocol_bps)?;
+    record_pool_inflow(config, to_pool)?;
+    user_spend(tp, mint, from, auth, treasury, reward_pool, studio, to_pool)
+}
+
+// ---------------------------------------------------------------- create child
+
+/// "Simulation inside a simulation": a territory holder spawns a universe
+/// that lives *inside* their 8x8 block. It can only tick while that block has
+/// living cells, and pays a host tax that flows up to the block's holder.
+#[derive(Accounts)]
+#[instruction(host_index: u8)]
+pub struct CreateChildWorld<'info> {
+    #[account(mut)]
+    pub architect: Signer<'info>,
+    #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
+    pub config: Box<Account<'info, Config>>,
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub module: Box<Account<'info, PhysicsModule>>,
+    #[account(mut)]
+    pub host_world: Box<Account<'info, World>>,
+    #[account(
+        mut,
+        seeds = [SEED_TERRITORY, host_world.key().as_ref(), &[host_index]], bump = host_territory.bump,
+        constraint = host_territory.holder == architect.key() @ RecursiaError::NotHolder,
+        constraint = host_territory.child_world == Pubkey::default() @ RecursiaError::AlreadyHeld,
+    )]
+    pub host_territory: Box<Account<'info, Territory>>,
+    #[account(
+        init, payer = architect, space = 8 + World::INIT_SPACE,
+        // 1-byte territory index: plain arg path so Anchor's IDL seed resolver can
+        // express it; cannot collide with root worlds (zero host key, 8-byte index).
+        seeds = [SEED_WORLD, host_world.key().as_ref(), &[host_index]], bump
+    )]
+    pub world: Box<Account<'info, World>>,
+    #[account(
+        init, payer = architect, seeds = [SEED_WORLD_VAULT, world.key().as_ref()], bump,
+        token::mint = mint, token::authority = config
+    )]
+    pub world_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut, token::mint = mint, token::authority = architect)]
+    pub architect_token: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [SEED_TREASURY], bump = config.treasury_bump)]
+    pub treasury: Box<Account<'info, TokenAccount>>,
+    /// Player reward pool (SKR). Receives the non-studio part of every spend.
+    #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
+    pub reward_pool: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+pub fn create_child_world(
+    ctx: Context<CreateChildWorld>,
+    host_index: u8,
+    architect_fee_bps: u16,
+    name: [u8; 32],
+    initial_energy: u64,
+) -> Result<()> {
+    require_top_level()?;
+    require_active(&ctx.accounts.config)?;
+    validate_name(&name)?;
+    require!(architect_fee_bps <= MAX_ARCHITECT_FEE_BPS, RecursiaError::InvalidParams);
+    let depth = ctx.accounts.host_world.depth.checked_add(1).ok_or(RecursiaError::MathOverflow)?;
+    require!(depth <= MAX_DEPTH, RecursiaError::MaxDepth);
+    let slot = Clock::get()?.slot;
+    let p = ctx.accounts.config.params;
+
+    // host must not be in tax default
+    {
+        let hw = &mut ctx.accounts.host_world;
+        let ht = &mut ctx.accounts.host_territory;
+        require_keys_eq!(ht.world, hw.key(), RecursiaError::Mismatch);
+        require!(ht.index == host_index, RecursiaError::Mismatch);
+        if let TaxOutcome::Foreclose = accrue_tax(hw, ht, &p, slot)? {
+            return err!(RecursiaError::DepositTooSmall);
+        }
+    }
+    pay_creation_fee(
+        &ctx.accounts.token_program.to_account_info(),
+        &ctx.accounts.mint.to_account_info(),
+        &ctx.accounts.architect_token.to_account_info(),
+        &ctx.accounts.architect.to_account_info(),
+        &ctx.accounts.treasury.to_account_info(),
+        &ctx.accounts.reward_pool.to_account_info(),
+        &mut ctx.accounts.config,
+        p.world_create_fee,
+    )?;
+    user_transfer(
+        &ctx.accounts.token_program.to_account_info(),
+        &ctx.accounts.mint.to_account_info(),
+        &ctx.accounts.architect_token.to_account_info(),
+        &ctx.accounts.world_vault.to_account_info(),
+        &ctx.accounts.architect.to_account_info(),
+        initial_energy,
+    )?;
+    let key = ctx.accounts.world.key();
+    let host_key = ctx.accounts.host_world.key();
+    let idx = ctx.accounts.host_territory.index;
+    ctx.accounts.host_territory.child_world = key;
+    ctx.accounts.host_world.child_count = ctx.accounts.host_world.child_count.saturating_add(1);
+    let c = &mut ctx.accounts.config;
+    let epoch = c.cur_epoch;
+    c.total_worlds = c.total_worlds.checked_add(1).ok_or(RecursiaError::MathOverflow)?;
+    let module_key = ctx.accounts.module.key();
+    ctx.accounts.module.worlds_using = ctx.accounts.module.worlds_using.saturating_add(1);
+    let w = &mut ctx.accounts.world;
+    init_world(
+        w,
+        key,
+        ctx.bumps.world,
+        ctx.bumps.world_vault,
+        host_key,
+        idx,
+        depth,
+        idx as u64,
+        ctx.accounts.architect.key(),
+        architect_fee_bps,
+        &ctx.accounts.module,
+        module_key,
+        name,
+        slot,
+        epoch,
+    );
+    w.energy = initial_energy;
+    emit!(WorldCreated {
+        world: key,
+        parent: host_key,
+        parent_territory: idx,
+        depth,
+        architect: w.architect,
+        module: module_key,
+    });
+    Ok(())
+}
+
+// ---------------------------------------------------------------- fund
+
+#[derive(Accounts)]
+pub struct FundWorld<'info> {
+    pub funder: Signer<'info>,
+    #[account(seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
+    pub config: Box<Account<'info, Config>>,
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub world: Box<Account<'info, World>>,
+    #[account(mut, seeds = [SEED_WORLD_VAULT, world.key().as_ref()], bump = world.vault_bump)]
+    pub world_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut, token::mint = mint, token::authority = funder)]
+    pub funder_token: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+}
+
+pub fn fund_world(ctx: Context<FundWorld>, amount: u64) -> Result<()> {
+    require_top_level()?;
+    require_active(&ctx.accounts.config)?;
+    require!(amount > 0, RecursiaError::NothingToClaim);
+    user_transfer(
+        &ctx.accounts.token_program.to_account_info(),
+        &ctx.accounts.mint.to_account_info(),
+        &ctx.accounts.funder_token.to_account_info(),
+        &ctx.accounts.world_vault.to_account_info(),
+        &ctx.accounts.funder.to_account_info(),
+        amount,
+    )?;
+    let w = &mut ctx.accounts.world;
+    w.energy = math::add(w.energy, amount)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------- tick
+
+#[derive(Accounts)]
+pub struct Tick<'info> {
+    pub cranker: Signer<'info>,
+    #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
+    pub config: Box<Account<'info, Config>>,
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub world: Box<Account<'info, World>>,
+    #[account(mut, seeds = [SEED_WORLD_VAULT, world.key().as_ref()], bump = world.vault_bump)]
+    pub world_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut, address = world.module @ RecursiaError::Mismatch)]
+    pub module: Box<Account<'info, PhysicsModule>>,
+    #[account(mut, seeds = [SEED_TREASURY], bump = config.treasury_bump)]
+    pub treasury: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [SEED_CLAIMS], bump = config.claims_bump)]
+    pub claims_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut, token::mint = mint, token::authority = cranker)]
+    pub cranker_token: Box<Account<'info, TokenAccount>>,
+    /// Required iff `world` is a child universe.
+    #[account(mut)]
+    pub host_world: Option<Box<Account<'info, World>>>,
+    #[account(mut)]
+    pub host_vault: Option<Box<Account<'info, TokenAccount>>>,
+    /// Player reward pool (SKR). Receives the non-studio part of every spend.
+    #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
+    pub reward_pool: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+    /// CHECK: address-pinned to the SlotHashes sysvar; parsed read-only by
+    /// `quantum::slot_hash_lookup` (bounds-checked). Only used by quantum worlds.
+    #[account(address = anchor_lang::solana_program::sysvar::slot_hashes::ID @ RecursiaError::SlotHashes)]
+    pub slot_hashes: UncheckedAccount<'info>,
+}
+
+pub fn tick(ctx: Context<Tick>) -> Result<()> {
+    require_active(&ctx.accounts.config)?;
+    let slot = Clock::get()?.slot;
+    let p = ctx.accounts.config.params;
+    let config_bump = ctx.accounts.config.bump;
+    {
+        let w = &ctx.accounts.world;
+        let next = w.last_tick_slot.checked_add(p.tick_interval_slots).ok_or(RecursiaError::MathOverflow)?;
+        require!(slot >= next, RecursiaError::TickTooEarly);
+        require!(w.energy >= p.tick_cost, RecursiaError::OutOfEnergy);
+    }
+    let world_key = ctx.accounts.world.key();
+    let is_child = !ctx.accounts.world.is_root();
+
+    // --- host coupling checks
+    if is_child {
+        let hw = ctx.accounts.host_world.as_ref().ok_or(RecursiaError::Mismatch)?;
+        let hv = ctx.accounts.host_vault.as_ref().ok_or(RecursiaError::Mismatch)?;
+        require_keys_eq!(hw.key(), ctx.accounts.world.parent, RecursiaError::Mismatch);
+        require_keys_neq!(hw.key(), world_key, RecursiaError::DuplicateAccounts);
+        let expected_vault = Pubkey::create_program_address(
+            &[SEED_WORLD_VAULT, hw.key().as_ref(), &[hw.vault_bump]],
+            ctx.program_id,
+        )
+        .map_err(|_| RecursiaError::Mismatch)?;
+        require_keys_eq!(hv.key(), expected_vault, RecursiaError::Mismatch);
+        let host_idx = ctx.accounts.world.parent_territory as usize;
+        require!(hw.territory_alive[host_idx] > 0, RecursiaError::Dormant);
+    }
+
+    let split = math::split_tick(
+        p.tick_cost,
+        p.cranker_bps,
+        p.protocol_bps,
+        p.host_bps,
+        ctx.accounts.module.royalty_bps,
+        is_child,
+    )?;
+
+    // --- effects on state BEFORE external calls (checklist #7)
+    let (generation, pop, owned_score) = {
+        let config_ro = Config::clone(&ctx.accounts.config);
+        let w = &mut ctx.accounts.world;
+        roll_world_epoch(w, &config_ro);
+        w.energy = math::sub(w.energy, p.tick_cost)?;
+        let g = if w.is_quantum() {
+            // Entropy of the slot the schedule fixed in advance: last tick +
+            // interval − 1 (always ≤ current slot − 1, so it exists or is skipped).
+            let target = w.last_tick_slot.saturating_add(p.tick_interval_slots).saturating_sub(1);
+            let data = ctx.accounts.slot_hashes.try_borrow_data()?;
+            let hash = match quantum::slot_hash_lookup(&data, target).ok_or(RecursiaError::SlotHashes)? {
+                quantum::SlotHashLookup::Found { hash, .. } => hash,
+                // neglected world (>512 slots late) / skipped tail: best effort
+                quantum::SlotHashLookup::Expired { oldest } => oldest,
+                quantum::SlotHashLookup::NotYet { newest } => newest,
+            };
+            let seed = quantum::quantum_seed(&hash, &world_key.to_bytes(), w.generation);
+            w.entropy = hash;
+            let q = quantum::make_quantum(w.q_birth, w.q_survive, w.q_amp, seed);
+            sim::step_n_q(&w.grid, w.birth, w.survive, &q, w.generation, p.gens_per_tick)
+        } else {
+            sim::step_n(&w.grid, w.birth, w.survive, p.gens_per_tick)
+        };
+        w.grid = g;
+        let counts = sim::territory_counts(&g);
+        w.territory_alive = counts;
+        let mut owned_score = 0u64;
+        let owned_mask = w.owned_mask;
+        for (i, (score, c)) in w.scores_cur.iter_mut().zip(counts.iter()).enumerate() {
+            *score = score.saturating_add(*c as u32);
+            if (owned_mask >> i) & 1 == 1 {
+                owned_score += *c as u64;
+            }
+        }
+        w.score_owned_cur = w.score_owned_cur.saturating_add(owned_score);
+        w.generation = w.generation.saturating_add(p.gens_per_tick as u64);
+        w.tick_count = w.tick_count.saturating_add(1);
+        w.last_tick_slot = slot;
+        let pop = sim::population(&g);
+        if is_child && pop >= BREACH_POPULATION {
+            w.resonance = w.resonance.saturating_add(1).min(BREACH_RESONANCE);
+        }
+        (w.generation, pop, owned_score)
+    };
+    let cfg_mut = &mut ctx.accounts.config;
+    cfg_mut.cur_total_score = cfg_mut.cur_total_score.saturating_add(owned_score);
+    record_sink(&mut ctx.accounts.world, &mut ctx.accounts.config, split.pool)?;
+    let m = &mut ctx.accounts.module;
+    m.accrued = math::add(m.accrued, split.royalty)?;
+    if is_child {
+        let hw = ctx.accounts.host_world.as_mut().ok_or(RecursiaError::Mismatch)?;
+        let idx = ctx.accounts.world.parent_territory as usize;
+        if (hw.owned_mask >> idx) & 1 == 1 {
+            hw.territory_pending[idx] = math::add(hw.territory_pending[idx], split.host)?;
+            hw.rewards_reserved = math::add(hw.rewards_reserved, split.host)?;
+        } else {
+            hw.energy = math::add(hw.energy, split.host)?;
+        }
+    }
+
+    // --- interactions
+    let tp = ctx.accounts.token_program.to_account_info();
+    let mint = ctx.accounts.mint.to_account_info();
+    let vault = ctx.accounts.world_vault.to_account_info();
+    let cfg = ctx.accounts.config.to_account_info();
+    vault_transfer(&tp, &mint, &vault, &ctx.accounts.cranker_token.to_account_info(), &cfg, config_bump, split.cranker)?;
+    vault_transfer(&tp, &mint, &vault, &ctx.accounts.treasury.to_account_info(), &cfg, config_bump, split.protocol)?;
+    vault_transfer(&tp, &mint, &vault, &ctx.accounts.claims_vault.to_account_info(), &cfg, config_bump, split.royalty)?;
+    if is_child {
+        let hv = ctx.accounts.host_vault.as_ref().ok_or(RecursiaError::Mismatch)?;
+        vault_transfer(&tp, &mint, &vault, &hv.to_account_info(), &cfg, config_bump, split.host)?;
+    }
+    vault_transfer(&tp, &mint, &vault, &ctx.accounts.reward_pool.to_account_info(), &cfg, config_bump, split.pool)?;
+
+    ctx.accounts.world_vault.reload()?;
+    assert_world_solvent(&ctx.accounts.world, ctx.accounts.world_vault.amount)?;
+    if is_child {
+        let hv = ctx.accounts.host_vault.as_mut().ok_or(RecursiaError::Mismatch)?;
+        hv.reload()?;
+        let amt = hv.amount;
+        assert_world_solvent(ctx.accounts.host_world.as_ref().ok_or(RecursiaError::Mismatch)?, amt)?;
+    }
+    emit!(Ticked {
+        world: world_key,
+        generation,
+        population: pop,
+        to_pool: split.pool,
+        host_tax: split.host,
+        royalty: split.royalty,
+        cranker: ctx.accounts.cranker.key(),
+    });
+    Ok(())
+}
+
+// ---------------------------------------------------------------- emission
+
+#[derive(Accounts)]
+pub struct ClaimWorldEpoch<'info> {
+    #[account(mut, seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
+    pub config: Box<Account<'info, Config>>,
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub world: Box<Account<'info, World>>,
+    #[account(mut, seeds = [SEED_WORLD_VAULT, world.key().as_ref()], bump = world.vault_bump)]
+    pub world_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [SEED_REWARD_POOL], bump = config.reward_pool_bump)]
+    pub reward_pool: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [SEED_SPONSOR_POOL], bump = config.sponsor_pool_bump)]
+    pub sponsor_pool: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+}
+
+/// Permissionless crank: pulls the world's emission share for the previous
+/// epoch and splits it across territories by accumulated live-cell score.
+pub fn claim_world_epoch(ctx: Context<ClaimWorldEpoch>) -> Result<()> {
+    require_active(&ctx.accounts.config)?;
+    let config_ro = Config::clone(&ctx.accounts.config);
+    let w = &mut ctx.accounts.world;
+    roll_world_epoch(w, &config_ro);
+    require!(
+        !w.prev_claimed && w.prev_epoch_id.checked_add(1) == Some(config_ro.cur_epoch),
+        RecursiaError::ClaimWindow
+    );
+    // Emission = rebate part (by own contribution, ≤ rebate cap) +
+    // efficiency part (by live cells on owned land across all worlds,
+    // ≤ EFFICIENCY_CAP_BPS of own contribution): skill redistribution.
+    let eff_budget = math::bps_floor(config_ro.prev_emission, EFFICIENCY_SHARE_BPS)?;
+    let rebate_budget = math::sub(config_ro.prev_emission, eff_budget)?;
+    let rebate = math::world_emission(
+        rebate_budget,
+        config_ro.prev_total_sink,
+        w.sink_prev,
+        config_ro.params.rebate_cap_bps,
+        config_ro.prev_claimed,
+    )?;
+    let efficiency = math::world_sponsor(
+        eff_budget,
+        config_ro.prev_total_score,
+        w.score_owned_prev,
+        w.sink_prev,
+        EFFICIENCY_CAP_BPS,
+        config_ro.prev_eff_claimed,
+    )?;
+    let reward = math::add(rebate, efficiency)?;
+    let sponsor = math::world_sponsor(
+        config_ro.prev_sponsor_budget,
+        config_ro.prev_total_score,
+        w.score_owned_prev,
+        w.sink_prev,
+        SPONSOR_CAP_BPS,
+        config_ro.prev_sponsor_claimed,
+    )?;
+    w.prev_claimed = true;
+    let total = math::add(reward, sponsor)?;
+    require!(total > 0, RecursiaError::NothingToClaim);
+    let (shares, rest) = math::distribute(total, &w.scores_prev, &owned_array(w.owned_mask))?;
+    let mut credited = 0u64;
+    for (i, s) in shares.iter().enumerate() {
+        if *s > 0 {
+            w.territory_pending[i] = math::add(w.territory_pending[i], *s)?;
+            credited = math::add(credited, *s)?;
+        }
+    }
+    w.rewards_reserved = math::add(w.rewards_reserved, credited)?;
+    w.energy = math::add(w.energy, rest)?;
+    let epoch = w.prev_epoch_id;
+    let c = &mut ctx.accounts.config;
+    c.prev_claimed = math::add(c.prev_claimed, rebate)?;
+    c.prev_eff_claimed = math::add(c.prev_eff_claimed, efficiency)?;
+    c.total_emitted = math::add(c.total_emitted, reward)?;
+    c.prev_sponsor_claimed = math::add(c.prev_sponsor_claimed, sponsor)?;
+    c.total_sponsored = math::add(c.total_sponsored, sponsor)?;
+    let bump = c.bump;
+    let tp = ctx.accounts.token_program.to_account_info();
+    let mint = ctx.accounts.mint.to_account_info();
+    let cfg = ctx.accounts.config.to_account_info();
+    let vault = ctx.accounts.world_vault.to_account_info();
+    vault_transfer(&tp, &mint, &ctx.accounts.reward_pool.to_account_info(), &vault, &cfg, bump, reward)?;
+    vault_transfer(&tp, &mint, &ctx.accounts.sponsor_pool.to_account_info(), &vault, &cfg, bump, sponsor)?;
+    ctx.accounts.world_vault.reload()?;
+    assert_world_solvent(&ctx.accounts.world, ctx.accounts.world_vault.amount)?;
+    emit!(EmissionClaimed { world: ctx.accounts.world.key(), epoch, amount: total, sponsor });
+    Ok(())
+}
+
+// ---------------------------------------------------------------- breach
+
+#[derive(Accounts)]
+pub struct DoBreach<'info> {
+    #[account(seeds = [SEED_CONFIG], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, constraint = child.parent == host.key() @ RecursiaError::Mismatch)]
+    pub child: Box<Account<'info, World>>,
+    #[account(mut)]
+    pub host: Box<Account<'info, World>>,
+}
+
+/// Bottom-up causation: a thriving child universe accumulates resonance and
+/// eventually "leaks" a glider into its host block in the parent world.
+pub fn breach(ctx: Context<DoBreach>) -> Result<()> {
+    require_active(&ctx.accounts.config)?;
+    require_keys_neq!(ctx.accounts.child.key(), ctx.accounts.host.key(), RecursiaError::DuplicateAccounts);
+    let c = &mut ctx.accounts.child;
+    require!(c.resonance >= BREACH_RESONANCE, RecursiaError::NoResonance);
+    c.resonance = 0;
+    let idx = c.parent_territory;
+    let h = &mut ctx.accounts.host;
+    sim::or_block(&mut h.grid, idx, sim::GLIDER);
+    h.territory_alive[idx as usize] = block_count(&h.grid, idx as usize);
+    emit!(Breach { child: c.key(), host: h.key(), territory: idx });
+    Ok(())
+}
+
+// ---------------------------------------------------------------- architect
+
+#[derive(Accounts)]
+pub struct ClaimArchitect<'info> {
+    #[account(mut)]
+    pub architect: Signer<'info>,
+    #[account(seeds = [SEED_CONFIG], bump = config.bump, has_one = mint)]
+    pub config: Box<Account<'info, Config>>,
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(mut, has_one = architect)]
+    pub world: Box<Account<'info, World>>,
+    #[account(mut, seeds = [SEED_WORLD_VAULT, world.key().as_ref()], bump = world.vault_bump)]
+    pub world_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [SEED_CLAIMS], bump = config.claims_bump)]
+    pub claims_vault: Box<Account<'info, TokenAccount>>,
+    #[account(
+        init_if_needed, payer = architect, space = 8 + Player::INIT_SPACE,
+        seeds = [SEED_PLAYER, architect.key().as_ref()], bump
+    )]
+    pub player: Box<Account<'info, Player>>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+pub fn claim_architect(ctx: Context<ClaimArchitect>) -> Result<()> {
+    let amount = ctx.accounts.world.architect_accrued;
+    require!(amount > 0, RecursiaError::NothingToClaim);
+    ctx.accounts.world.architect_accrued = 0;
+    let pl = &mut ctx.accounts.player;
+    if pl.owner == Pubkey::default() {
+        pl.version = ACCOUNT_VERSION;
+        pl.bump = ctx.bumps.player;
+        pl.owner = ctx.accounts.architect.key();
+    }
+    pl.claimable = math::add(pl.claimable, amount)?;
+    pl.total_earned = math::add(pl.total_earned, amount)?;
+    let bump = ctx.accounts.config.bump;
+    vault_transfer(
+        &ctx.accounts.token_program.to_account_info(),
+        &ctx.accounts.mint.to_account_info(),
+        &ctx.accounts.world_vault.to_account_info(),
+        &ctx.accounts.claims_vault.to_account_info(),
+        &ctx.accounts.config.to_account_info(),
+        bump,
+        amount,
+    )?;
+    ctx.accounts.world_vault.reload()?;
+    assert_world_solvent(&ctx.accounts.world, ctx.accounts.world_vault.amount)?;
+    Ok(())
+}

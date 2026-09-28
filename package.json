@@ -1,0 +1,26 @@
+{
+  "name": "recursia",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "packages/sdk",
+    "app",
+    "keeper",
+    "tests/chain"
+  ],
+  "scripts": {
+    "test": "npm -w packages/sdk test && npm -w keeper test && npm -w app test",
+    "vectors": "npm -w packages/sdk run vectors",
+    "econ": "npm -w packages/sdk run econ --",
+    "build": "npm -w packages/sdk run build && npm -w app run build",
+    "dev": "npm -w app run dev",
+    "lint:unicode": "node scripts/check-unicode.mjs",
+    "audit:deps": "npm audit --audit-level=high"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  }
+}

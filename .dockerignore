@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+target
+.git
+.github
+.anchor
+test-ledger
+**/*.log
+.env
+.env.*
+keys
+**/*-keypair.json
+id.json
+keeper.json

@@ -1,0 +1,204 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 1 * * *" # nightly deep fuzz (runs on the default branch)
+  workflow_dispatch:
+    inputs:
+      fuzz_seeds: { description: "space-separated fuzz seeds (empty = derived from the date)", required: false, default: "" }
+      fuzz_steps: { description: "steps per fuzz walk", required: false, default: "1500" }
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+  FORCE_COLOR: 0
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hygiene:
+    name: Supply-chain & unicode hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Invisible unicode scan (checklist #76)
+        run: node scripts/check-unicode.mjs
+      - name: npm ci (lockfile, no install scripts — checklist #50/#66)
+        run: npm ci --ignore-scripts
+      - name: Known-compromised packages / non-registry sources
+        run: node scripts/check-supply-chain.mjs
+      - name: npm audit (high+ fails)
+        run: npm audit --audit-level=high
+
+  lockfile:
+    # One-shot: commit a platform-tools compatible Cargo.lock (reproducible /
+    # verified builds need it). Least privilege: only this job may write, only
+    # on push, and it is a no-op once Cargo.lock is tracked.
+    name: Commit Cargo.lock (once)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check
+        id: have
+        run: git ls-files --error-unmatch Cargo.lock >/dev/null 2>&1 && echo "have=1" >> "$GITHUB_OUTPUT" || echo "have=0" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        if: steps.have.outputs.have == '0'
+        with: { toolchain: 1.86.0 }
+      - name: Generate + commit
+        if: steps.have.outputs.have == '0'
+        run: |
+          scripts/ci-run.sh sbf-lock scripts/sbf-lock.sh
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git commit -m "chore: commit platform-tools compatible Cargo.lock [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+  rust:
+    name: Program unit tests + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Resolve lockfile buildable by platform-tools (rust 1.79)
+        run: |
+          scripts/ci-run.sh sbf-lock scripts/sbf-lock.sh
+          cp Cargo.lock /tmp/Cargo.lock
+      - name: fmt
+        run: cargo fmt --all -- --check
+        continue-on-error: true
+      - name: clippy
+        run: scripts/ci-run.sh clippy cargo clippy -p recursia --all-targets -- -D warnings -A clippy::result_large_err -A unexpected_cfgs
+      - name: clippy (mainnet feature — official SKR mint pin)
+        run: scripts/ci-run.sh clippy-mainnet cargo clippy -p recursia --features mainnet -- -D warnings -A clippy::result_large_err -A unexpected_cfgs
+      - name: unit tests (engine, math, cross-impl vectors)
+        run: scripts/ci-run.sh cargo-test cargo test -p recursia
+      - uses: actions/upload-artifact@v4
+        with: { name: cargo-lock, path: /tmp/Cargo.lock }
+
+  anchor:
+    name: Anchor build (SBF) + IDL
+    runs-on: ubuntu-latest
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: dtolnay/rust-toolchain@master
+        with: { toolchain: 1.86.0 }
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Solana (Agave) CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v2.1.21/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+      - name: Install Anchor CLI 0.31.1
+        run: |
+          scripts/ci-run.sh anchor-install cargo install --git https://github.com/coral-xyz/anchor --tag v0.31.1 anchor-cli --locked --force
+      - name: Resolve Cargo.lock with modern cargo (MSRV-aware fallback)
+        # platform-tools ship an older cargo that can't parse edition-2024 manifests
+        # nor honour `incompatible-rust-versions`; lock with 1.86 first, it reuses the lock.
+        run: |
+          scripts/ci-run.sh sbf-lock scripts/sbf-lock.sh
+          for c in block-buffer digest sha2 crypto-common blake3; do
+            v=$(awk -v n="$c" '$0=="name = \""n"\"" {getline; print $3}' Cargo.lock | tr -d '"' | tr '\n' ' ')
+            echo "::notice title=lock $c::$v"
+          done
+          T=$(cargo tree -i block-buffer@0.12.1 -e normal 2>/dev/null | head -30 | tr '\n' '|' || true)
+          [ -n "$T" ] && echo "::warning title=block-buffer 0.12 path::$T" || true
+      - name: anchor build
+        run: |
+          solana-keygen new --no-bip39-passphrase -s -o ~/.config/solana/id.json
+          $GITHUB_WORKSPACE/scripts/ci-run.sh anchor-build anchor build
+          ls -la target/deploy target/idl
+      - name: IDL ↔ SDK account-order check
+        run: |
+          npm ci --ignore-scripts
+          npx -w packages/sdk tsx scripts/check-idl.ts ../../target/idl/recursia.json
+      - uses: actions/upload-artifact@v4
+        # before the tests: the binary is needed to debug a failing run locally
+        with:
+          name: recursia-build
+          path: |
+            target/idl/recursia.json
+            target/types/recursia.ts
+            target/deploy/recursia.so
+      - name: Integration tests — compiled program in LiteSVM (checklist #54/#58)
+        # One process per file (forks). The VM engine is the litesvm 1.4.1 native
+        # addon (see tests/chain/test/harness.ts: the 0.8.0 addon corrupts the heap).
+        env: { REQUIRE_SO: "1", CHAIN_TRACE: "1", RUST_BACKTRACE: "1" }
+        working-directory: tests/chain
+        run: ../../scripts/ci-run.sh chain-test npx vitest run --pool=forks --no-file-parallelism
+      - name: Deep fuzz — fresh seeds, long walks (nightly / manual)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          FUZZ_SEEDS: ${{ github.event.inputs.fuzz_seeds }}
+          FUZZ_STEPS: ${{ github.event.inputs.fuzz_steps || '1500' }}
+        run: scripts/fuzz-nightly.sh
+
+  so-blob:
+    # Debug aid, only when the anchor job failed: publish the compiled program as an unreferenced git blob so a
+    # developer can fetch it through the API (`gh api repos/<repo>/git/blobs/<sha>`)
+    # when artifact storage is unreachable. No commit, no ref is created.
+    name: Publish recursia.so blob
+    runs-on: ubuntu-latest
+    needs: anchor
+    if: failure() && needs.anchor.result == 'failure' && github.event_name == 'push'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: recursia-build, path: build }
+      - name: Create blob
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          SO=$(find build -name recursia.so | head -1)
+          base64 -w0 "$SO" > /tmp/so.b64
+          jq -n --rawfile c /tmp/so.b64 '{content: $c, encoding: "base64"}' > /tmp/blob.json
+          SHA=$(gh api "repos/${{ github.repository }}/git/blobs" --input /tmp/blob.json --jq .sha)
+          echo "::notice title=recursia.so blob::$SHA sha256=$(sha256sum "$SO" | cut -d' ' -f1)"
+
+  typescript:
+    name: SDK, keeper, client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --ignore-scripts
+      - name: SDK typecheck + tests (incl. model invariants & AI agents)
+        run: scripts/ci-run.sh sdk-tsc npm -w packages/sdk run build && scripts/ci-run.sh sdk-test npm -w packages/sdk test
+      - name: Economic simulation (checklist #54/#58)
+        run: scripts/ci-run.sh econ npm run econ -- --quick
+      - name: Chain-test harness self-test + typecheck (program tests run in the Anchor job)
+        run: scripts/ci-run.sh chain-harness bash -c "npm -w tests/chain run typecheck && npm -w tests/chain test"
+      - name: Keeper tests
+        run: scripts/ci-run.sh keeper npm -w keeper test
+      - name: Client unit tests (money parsing, router, tx math, config, CSP)
+        run: scripts/ci-run.sh app-test npm -w app test
+      - name: Deploy configs in sync with app/security.mjs
+        run: scripts/ci-run.sh app-deploy npm -w app run check:deploy
+      - name: Client build (typecheck + production bundle)
+        run: scripts/ci-run.sh app-build npm -w app run build
+      - name: Bundle budget, CSP meta, _headers, no source maps
+        run: scripts/ci-run.sh app-bundle npm -w app run check:bundle
+      - name: Build with custom RPC (CSP whitelists it)
+        env: { VITE_CLUSTER: mainnet-beta, VITE_RPC_URL: "https://rpc.example.com" }
+        run: |
+          npm -w app run build >/dev/null
+          grep -q "https://rpc.example.com wss://rpc.example.com" app/dist/_headers
+          grep -q "https://rpc.example.com" app/dist/index.html

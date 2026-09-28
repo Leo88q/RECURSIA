@@ -1,0 +1,24 @@
+{
+  "name": "@recursia/chain-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Integration tests: the compiled SBF program executed in LiteSVM (checklist #54/#58)",
+  "scripts": {
+    "test": "vitest run --pool=forks",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@recursia/sdk": "1.0.0",
+    "@solana/web3.js": "1.99.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "litesvm": "0.8.0",
+    "typescript": "5.8.3",
+    "vitest": "5.0.2"
+  },
+  "optionalDependencies": {
+    "litesvm-native-linux-x64-gnu": "npm:litesvm-linux-x64-gnu@1.4.1"
+  }
+}
