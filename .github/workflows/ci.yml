@@ -106,7 +106,7 @@ jobs:
         with:
           toolchain: 1.86.0
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Resolve lockfile buildable by platform-tools (rust 1.79)
         run: |
           scripts/ci-run.sh sbf-lock scripts/sbf-lock.sh
@@ -156,7 +156,7 @@ jobs:
         with: { node-version: 22 }
       - uses: dtolnay/rust-toolchain@6fd631f049d0fac46e290d1f958f752859eedcde # 1.86.0
         with: { toolchain: 1.86.0 }
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Install Solana (Agave) CLI
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/v2.1.21/install)"
